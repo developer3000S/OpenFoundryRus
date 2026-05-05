@@ -38,6 +38,10 @@ export const router = createBrowserRouter([
         path: 'settings',
         lazy: async () => ({ Component: (await import('./routes/settings/SettingsPage')).SettingsPage }),
       },
+      {
+        path: 'charts-demo',
+        lazy: async () => ({ Component: (await import('./routes/charts-demo/ChartsDemoPage')).ChartsDemoPage }),
+      },
       // Migration pattern: add a route here as you port each SvelteKit folder under apps/web/src/routes/.
       { path: '*', element: <NotFound /> },
     ],
