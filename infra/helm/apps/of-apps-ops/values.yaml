@@ -555,18 +555,9 @@ services:
         cpu: "1"
         memory: 1Gi
 
-  sds-service:
-    replicas: 2
-    ports:
-      - name: http
-        containerPort: 8080
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: "500m"
-        memory: 512Mi
+  # S8 / ADR-0030 (B15) — `sds-service` merged →
+  # `audit-compliance-service` (lives in `of-platform`). No
+  # Deployment renders here.
 
   # S8 / ADR-0030 — `spreadsheet-computation-service` merged →
   # `notebook-runtime-service`. The source was a scaffold placeholder

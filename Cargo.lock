@@ -6403,27 +6403,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lineage-deletion-service"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "auth-middleware",
- "axum 0.8.9",
- "chrono",
- "config",
- "core-models",
- "reqwest",
- "serde",
- "serde_json",
- "sqlx",
- "storage-abstraction",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "lineage-service"
 version = "0.0.1"
 dependencies = [
@@ -9221,33 +9200,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "retention-policy-service"
-version = "0.0.1"
-dependencies = [
- "auth-middleware",
- "axum 0.8.9",
- "chrono",
- "config",
- "core-models",
- "http-body-util",
- "once_cell",
- "prometheus",
- "serde",
- "serde_json",
- "sqlx",
- "tempfile",
- "testcontainers",
- "testing",
- "thiserror 2.0.18",
- "tokio",
- "tower 0.5.3",
- "tower-http 0.6.8",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "retrieval-context-service"
 version = "0.0.1"
 dependencies = [
@@ -9834,24 +9786,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "sds-service"
-version = "0.0.1"
-dependencies = [
- "auth-middleware",
- "axum 0.8.9",
- "chrono",
- "config",
- "core-models",
- "regex",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tracing",
  "uuid",
 ]
 

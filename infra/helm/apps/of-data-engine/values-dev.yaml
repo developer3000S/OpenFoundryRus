@@ -99,24 +99,11 @@ services:
       DATABASE_READ_URL:
         secretName: ingestion-replication-db-dsn
         key: reader_url
-  lineage-deletion-service:
-    envSecrets:
-      DATABASE_URL:
-        secretName: lineage-deletion-db-dsn
-        key: writer_url
-      DATABASE_READ_URL:
-        secretName: lineage-deletion-db-dsn
-        key: reader_url
+  # S8 / ADR-0030 (B15): lineage-deletion-service and
+  # retention-policy-service merged → audit-compliance-service
+  # (of-platform).
   # S8 / ADR-0030: pipeline-authoring-service merged → pipeline-build-service.
   # The authoring schema reuses pipeline-build's DSN.
-  retention-policy-service:
-    envSecrets:
-      DATABASE_URL:
-        secretName: retention-policy-db-dsn
-        key: writer_url
-      DATABASE_READ_URL:
-        secretName: retention-policy-db-dsn
-        key: reader_url
   sql-warehousing-service:
     envSecrets:
       DATABASE_URL:

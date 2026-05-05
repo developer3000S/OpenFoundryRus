@@ -174,14 +174,8 @@ services:
       DATABASE_READ_URL:
         secretName: sdk-generation-db-dsn
         key: reader_url
-  sds-service:
-    envSecrets:
-      DATABASE_URL:
-        secretName: sds-db-dsn
-        key: writer_url
-      DATABASE_READ_URL:
-        secretName: sds-db-dsn
-        key: reader_url
+  # S8 / ADR-0030 (B15): sds-service merged → audit-compliance-service
+  # (of-platform).
   solution-design-service:
     envSecrets:
       DATABASE_URL:

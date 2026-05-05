@@ -9,9 +9,10 @@
 > Audit date: 2026-05-05 (S8 workflow-automation + retrieval-context +
 > code-repository-review + workflow-trace + event-streaming +
 > notebook-runtime + agent-runtime + model-deployment +
-> dataset-versioning + pipeline-build + authorization-policy
-> consolidation). The live repository has **64 directories** under
-> `services/` (`ls services/ | wc -l`). S8 is now measured as
+> dataset-versioning + pipeline-build + authorization-policy +
+> audit-compliance consolidation). The live repository has **61
+> directories** under `services/` (`ls services/ | wc -l`). S8 is
+> now measured as
 > ownership/deployment consolidation, not as physical reduction of the
 > source tree to 30 directories. The three retired stubs
 > `health-check-service`, `tool-registry-service` and
@@ -95,7 +96,7 @@
 | `identity-federation-service` | `identity-federation-service` | keep | absorbs `oauth-integration-service` (auth side), `session-governance-service` |
 | `ingestion-replication-service` | `ingestion-replication-service` | keep | |
 | `knowledge-index-service` | `retrieval-context-service` | merged → `retrieval-context-service` | S8: directory removed; the source crate was a stub re-exporting `libs/ai-kernel` modules, so no Rust code or migrations needed to move — `retrieval-context-service` already re-exports the same kernel modules. |
-| `lineage-deletion-service` | `audit-compliance-service` | merge → `audit-compliance-service` | |
+| `lineage-deletion-service` | `audit-compliance-service` | merged → `audit-compliance-service` | S8: directory removed; 11 source files (config, domain/deletion, handlers/deletion, models, retention runner) absorbed under `services/audit-compliance-service/src/lineage_deletion/`. Migration preserved on `pg-policy`. Edge gateway routing for `/api/v1/lineage-deletions` and `/api/v1/audit/gdpr/erase` retargeted at `audit-compliance-service`. |
 | `lineage-service` | `lineage-service` | keep | absorbs `workflow-trace-service` |
 | `llm-catalog-service` | `llm-catalog-service` | keep | |
 | `managed-workspace-service` | `application-composition-service` | merge → `application-composition-service` | |
@@ -136,11 +137,11 @@
 | `prompt-workflow-service` | `agent-runtime-service` | merged → `agent-runtime-service` | S8: directory removed; the source was a substrate-only crate (`fn main() {}` stub, `lib.rs`, `domain.rs`/`handlers.rs`/`models.rs` shims over `libs/ai-kernel`, plus a producer-specific `ai_events.rs` mirror that has been retired in favour of agent-runtime's own — both producers now share the `agent-runtime-` Kafka transactional-id prefix). Helm Deployment retired from `of-ml-aip`; Strimzi KafkaUser + transactional-id ACL for `prompt-workflow-` retired; `PROMPT_WORKFLOW_SERVICE_URL` callers retargeted at `agent-runtime-service:50127`. |
 | `reindex-coordinator-service` | `reindex-coordinator-service` | keep | Rust replacement (FASE 4 / Tarea 4.2) for the Go `workers-go/reindex` Temporal worker (ADR-0021). Owns the resume cursor in `pg-runtime-config.reindex_jobs`, drives Cassandra page-by-page scans via `cassandra-kernel`, and fans batches out to `services/ontology-indexer` over `ontology.reindex.v1`. Distinct ownership boundary (Postgres state + Temporal-replacement semantics) from the downstream `ontology-indexer` sink. |
 | `report-service` | (legacy) | delete | already covered by `document-reporting-service` |
-| `retention-policy-service` | `audit-compliance-service` | merge → `audit-compliance-service` | |
+| `retention-policy-service` | `audit-compliance-service` | merged → `audit-compliance-service` | S8: directory removed; 14 source files (config, domain/retention, handlers/retention, models, metrics, retention runner) absorbed under `services/audit-compliance-service/src/retention_policy/`. 2 source migrations + 3 tests preserved on `pg-policy`. Edge gateway routing for `/api/v1/retention/*` and `/applicable-policies` / `/retention-preview` retargeted at `audit-compliance-service`. |
 | `retrieval-context-service` | `retrieval-context-service` | keep | absorbs `knowledge-index-service`, `document-intelligence-service` |
 | `scenario-simulation-service` | `ontology-exploratory-analysis-service` | merge → `ontology-exploratory-analysis-service` | |
 | `sdk-generation-service` | `sdk-generation-service` | keep | |
-| `sds-service` | `audit-compliance-service` | merge → `audit-compliance-service` | |
+| `sds-service` | `audit-compliance-service` | merged → `audit-compliance-service` | S8: directory removed; 8 source files (config, domain/sds, handlers/sds, models) absorbed under `services/audit-compliance-service/src/sds/`. Migration preserved on `pg-policy`. Edge gateway routing for `/api/v1/audit/sds` retargeted at `audit-compliance-service`. |
 | `security-governance-service` | `authorization-policy-service` | merged → `authorization-policy-service` | S8: directory removed; 12 source files (config, domain, handlers/governance, models) absorbed under `services/authorization-policy-service/src/security_governance/`. Migration `20260427020100_security_governance_foundation.sql` preserved on `pg-policy`. The namespace's `AppState` carries `audit_db` and `policy_db` fields used by the governance reports + template handlers. `SECURITY_GOVERNANCE_SERVICE_URL` callers retargeted at `authorization-policy-service:50093`. |
 | `session-governance-service` | `identity-federation-service` | merge → `identity-federation-service` | |
 | `solution-design-service` | `solution-design-service` | keep | |
@@ -171,12 +172,12 @@ directories under `services/` and must not be rendered by Helm or compose:
 | Status | Count |
 | ------ | ----- |
 | keep / ownership boundary | 36 |
-| merge → X (pending) | 21 |
-| merged → X (completed) | 35 |
+| merge → X (pending) | 18 |
+| merged → X (completed) | 38 |
 | delete scheduled for active legacy dirs | 3 |
 | sink | 3 |
 | image (non-Rust runtime image) | 1 |
-| **Total current service directories** | **64** |
+| **Total current service directories** | **61** |
 | **Retired service directories tracked for references** | **3** |
 | **Current target metric** | **36 ownership boundaries + 3 sinks + 1 non-Rust runtime image across 5 Helm releases** |
 

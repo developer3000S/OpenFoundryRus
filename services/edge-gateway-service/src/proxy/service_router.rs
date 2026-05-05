@@ -98,9 +98,11 @@ pub async fn proxy_handler(
         || path.ends_with("/applicable-policies")
         || path.ends_with("/retention-preview")
     {
-        &config.retention_policy_service_url
+        // S8 / ADR-0030 (B15): retention-policy-service merged → audit-compliance-service.
+        &config.audit_compliance_service_url
     } else if path.starts_with("/api/v1/lineage-deletions") || path == "/api/v1/audit/gdpr/erase" {
-        &config.lineage_deletion_service_url
+        // S8 / ADR-0030 (B15): lineage-deletion-service merged → audit-compliance-service.
+        &config.audit_compliance_service_url
     } else if path == "/api/v1/audit/overview"
         || path == "/api/v1/audit/events"
         || path.starts_with("/api/v1/audit/events/")
@@ -320,7 +322,8 @@ pub async fn proxy_handler(
     } else if path.starts_with("/api/v1/marketplace") {
         &config.marketplace_catalog_service_url
     } else if path.starts_with("/api/v1/audit/sds") {
-        &config.sds_service_url
+        // S8 / ADR-0030 (B15): sds-service merged → audit-compliance-service.
+        &config.audit_compliance_service_url
     } else if path.starts_with("/api/v1/audit") {
         &config.audit_compliance_service_url
     } else if path.starts_with("/api/v1/widgets") {

@@ -269,14 +269,9 @@ schema = "ingestion_replication"
 residency = "pg-schemas"
 tables = ["ingest_jobs", "ingestion_checkpoints"]
 
-[[entries]]
-component = "services/lineage-deletion-service"
-service = "lineage-deletion-service"
-migration_dir = "services/lineage-deletion-service/migrations"
-schema = "lineage_deletion"
-residency = "pg-policy"
-allow_new_sqlx = { files = ["services/lineage-deletion-service/src/domain/deletion.rs", "services/lineage-deletion-service/src/handlers/deletion.rs"], tables = ["lineage_deletion_requests"] }
-tables = ["lineage_deletion_requests"]
+# S8 / ADR-0030 (B15): lineage-deletion-service merged →
+# audit-compliance-service. Schema absorbed; `pg-policy` residency
+# preserved.
 
 [[entries]]
 component = "services/lineage-service"
@@ -399,14 +394,9 @@ residency = "pg-runtime-config"
 allow_new_sqlx = { files = ["services/report-service/src/handlers/crud.rs", "services/report-service/src/handlers/generate.rs", "services/report-service/src/handlers/mod.rs"], tables = ["report_definitions", "report_executions"] }
 tables = ["report_definitions", "report_executions"]
 
-[[entries]]
-component = "services/retention-policy-service"
-service = "retention-policy-service"
-migration_dir = "services/retention-policy-service/migrations"
-schema = "retention_policy"
-residency = "pg-policy"
-allow_new_sqlx = { files = ["services/retention-policy-service/src/domain/retention.rs", "services/retention-policy-service/src/handlers/retention.rs"], tables = ["retention_jobs", "retention_policies"] }
-tables = ["retention_policies", "retention_jobs"]
+# S8 / ADR-0030 (B15): retention-policy-service merged →
+# audit-compliance-service. Schema absorbed; `pg-policy` residency
+# preserved.
 
 [[entries]]
 component = "services/scenario-simulation-service"
@@ -426,14 +416,8 @@ residency = "pg-schemas"
 allow_new_sqlx = { files = ["services/sdk-generation-service/src/handlers.rs"], tables = ["sdk_generation_jobs", "sdk_generation_publications"] }
 tables = ["sdk_generation_jobs", "sdk_generation_publications"]
 
-[[entries]]
-component = "services/sds-service"
-service = "sds-service"
-migration_dir = "services/sds-service/migrations"
-schema = "sds"
-residency = "pg-policy"
-allow_new_sqlx = { files = ["services/sds-service/src/domain/sds.rs", "services/sds-service/src/handlers/sds.rs"], tables = ["sds_issues", "sds_scan_jobs"] }
-tables = ["sds_scan_jobs", "sds_issues", "sds_remediation_rules"]
+# S8 / ADR-0030 (B15): sds-service merged → audit-compliance-service.
+# Schema absorbed; `pg-policy` residency preserved.
 
 # S8 / ADR-0030 (B14): security-governance-service merged →
 # authorization-policy-service. Schema absorbed; `pg-policy`

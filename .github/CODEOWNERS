@@ -184,7 +184,6 @@
 /services/dataset-versioning-service/                   @open-foundry/data-platform
 /services/global-branch-service/                        @open-foundry/data-platform
 /services/ingestion-replication-service/                @open-foundry/data-platform
-/services/lineage-deletion-service/                     @open-foundry/data-platform
 /services/lineage-service/                              @open-foundry/data-platform
 /services/pipeline-build-service/                       @open-foundry/data-platform
 /services/sql-bi-gateway-service/                       @open-foundry/data-platform @open-foundry/analytics-team
@@ -226,9 +225,7 @@
 /services/code-security-scanning-service/               @open-foundry/security-team
 /services/identity-federation-service/                  @open-foundry/security-team
 /services/oauth-integration-service/                    @open-foundry/security-team
-/services/retention-policy-service/                     @open-foundry/security-team @open-foundry/data-platform
 /services/session-governance-service/                   @open-foundry/security-team
-/services/sds-service/                                  @open-foundry/security-team
 /services/telemetry-governance-service/                 @open-foundry/security-team @open-foundry/observability-team
 
 # --- Platform runtime / observability / tenancy ---

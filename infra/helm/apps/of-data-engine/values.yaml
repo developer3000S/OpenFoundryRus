@@ -305,18 +305,9 @@ services:
   # dataset_quality}::*`); the consolidated binary is wired in a
   # follow-up.
 
-  lineage-deletion-service:
-    replicas: 1
-    ports:
-      - name: http
-        containerPort: 8080
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: "500m"
-        memory: 512Mi
+  # S8 / ADR-0030 (B15) — `lineage-deletion-service` merged →
+  # `audit-compliance-service` (lives in `of-platform`). No
+  # Deployment renders here.
 
   # S8 / ADR-0030 — `pipeline-authoring-service` and
   # `pipeline-schedule-service` merged → `pipeline-build-service`.
@@ -367,18 +358,9 @@ services:
 
   # S8 / ADR-0030 — `global-branch-service` merged →
   # `code-repository-review-service` (lives in `of-apps-ops`, not this release).
-  retention-policy-service:
-    replicas: 1
-    ports:
-      - name: http
-        containerPort: 8080
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: "500m"
-        memory: 512Mi
+  # S8 / ADR-0030 (B15) — `retention-policy-service` merged →
+  # `audit-compliance-service` (lives in `of-platform`). No
+  # Deployment renders here.
 
   # S8 / ADR-0030 (B14) — `checkpoints-purpose-service` merged →
   # `authorization-policy-service` (lives in `of-platform`, not this

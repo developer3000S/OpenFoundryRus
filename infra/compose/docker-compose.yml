@@ -1836,69 +1836,11 @@ services:
   # authorization-policy-service. CHECKPOINTS_PURPOSE_SERVICE_URL
   # callers route to authorization-policy-service:50093. ──
 
-  retention-policy-service:
-    <<: *app-common
-    profiles: *profiles-data
-    build:
-      context: ..
-      dockerfile: services/retention-policy-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50117
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_dataset_service
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_RETENTION_POLICY_HOST_PORT:-50117}:50117"
-
-  lineage-deletion-service:
-    <<: *app-common
-    profiles: *profiles-data
-    build:
-      context: ..
-      dockerfile: services/lineage-deletion-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50118
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_lineage_service
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-      LINEAGE_SERVICE_URL: http://lineage-service:50083
-      # S8 / ADR-0030: data-asset-catalog-service merged → dataset-versioning-service.
-      DATASET_SERVICE_URL: http://dataset-versioning-service:50078
-      AUDIT_COMPLIANCE_SERVICE_URL: http://audit-compliance-service:50115
-      STORAGE_BACKEND: ${OPENFOUNDRY_STORAGE_BACKEND:-local}
-      STORAGE_BUCKET: ${OPENFOUNDRY_STORAGE_BUCKET:-datasets}
-      LOCAL_STORAGE_ROOT: ${OPENFOUNDRY_LOCAL_STORAGE_ROOT:-/tmp/of-datasets}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      lineage-service:
-        condition: service_started
-      # S8 / ADR-0030: data-asset-catalog-service merged → dataset-versioning-service.
-      audit-compliance-service:
-        condition: service_started
-    ports:
-      - "${OPENFOUNDRY_LINEAGE_DELETION_HOST_PORT:-50118}:50118"
-
-  sds-service:
-    <<: *app-common
-    profiles: *profiles-foundation
-    build:
-      context: ..
-      dockerfile: services/sds-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50076
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_audit_service
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-      OPENFOUNDRY_ENV: development
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_SDS_HOST_PORT:-50076}:50076"
+  # ── S8 / ADR-0030 (B15) — retention-policy-service,
+  # lineage-deletion-service and sds-service merged →
+  # audit-compliance-service. RETENTION_POLICY_SERVICE_URL,
+  # LINEAGE_DELETION_SERVICE_URL and SDS_SERVICE_URL callers route
+  # to audit-compliance-service:50115. ──
 
   gateway:
     <<: *app-common
@@ -1964,8 +1906,10 @@ services:
       CHECKPOINTS_PURPOSE_SERVICE_URL: http://authorization-policy-service:50093
       # S8 / ADR-0030 (B14): network-boundary-service merged → authorization-policy-service.
       NETWORK_BOUNDARY_SERVICE_URL: http://authorization-policy-service:50093
-      RETENTION_POLICY_SERVICE_URL: http://retention-policy-service:50117
-      LINEAGE_DELETION_SERVICE_URL: http://lineage-deletion-service:50118
+      # S8 / ADR-0030 (B15): retention-policy-service merged → audit-compliance-service.
+      RETENTION_POLICY_SERVICE_URL: http://audit-compliance-service:50115
+      # S8 / ADR-0030 (B15): lineage-deletion-service merged → audit-compliance-service.
+      LINEAGE_DELETION_SERVICE_URL: http://audit-compliance-service:50115
       LLM_CATALOG_SERVICE_URL: http://llm-catalog-service:50095
       # S8 / ADR-0030: prompt-workflow-service merged → agent-runtime-service.
       PROMPT_WORKFLOW_SERVICE_URL: http://agent-runtime-service:50127
@@ -1995,7 +1939,8 @@ services:
       NOTIFICATION_SERVICE_URL: http://notification-alerting-service:50114
       AUDIT_COMPLIANCE_SERVICE_URL: http://audit-compliance-service:50115
       AUDIT_SERVICE_URL: http://audit-compliance-service:50115
-      SDS_SERVICE_URL: http://sds-service:50076
+      # S8 / ADR-0030 (B15): sds-service merged → audit-compliance-service.
+      SDS_SERVICE_URL: http://audit-compliance-service:50115
       AGENT_RUNTIME_SERVICE_URL: http://agent-runtime-service:50127
       # S8 / ADR-0030: DOCUMENT_INTELLIGENCE_SERVICE_URL retired —
       # document-intelligence-service merged into retrieval-context-service (50098).
@@ -2035,10 +1980,8 @@ services:
         condition: service_healthy
       # S8 / ADR-0030 (B14): checkpoints-purpose-service merged → authorization-policy-service.
       # S8 / ADR-0030 (B14): network-boundary-service merged → authorization-policy-service.
-      retention-policy-service:
-        condition: service_started
-      lineage-deletion-service:
-        condition: service_started
+      # S8 / ADR-0030 (B15): retention-policy-service merged → audit-compliance-service.
+      # S8 / ADR-0030 (B15): lineage-deletion-service merged → audit-compliance-service.
       identity-federation-service:
         condition: service_started
       # S8 / ADR-0030 (B14): cipher-service merged → authorization-policy-service.
@@ -2123,8 +2066,7 @@ services:
         condition: service_started
       audit-compliance-service:
         condition: service_started
-      sds-service:
-        condition: service_started
+      # S8 / ADR-0030 (B15): sds-service merged → audit-compliance-service.
       agent-runtime-service:
         condition: service_started
       ai-application-generation-service:

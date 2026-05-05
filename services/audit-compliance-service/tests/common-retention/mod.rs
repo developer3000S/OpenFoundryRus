@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::Router;
-use retention_policy_service::{AppState, build_router};
+use audit_compliance_service::retention_policy::{AppState, build_router};
 use sqlx::PgPool;
 use tempfile::TempDir;
 use testcontainers::{ContainerAsync, GenericImage};
