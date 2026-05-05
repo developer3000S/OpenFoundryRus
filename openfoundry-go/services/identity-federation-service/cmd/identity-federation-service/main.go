@@ -23,6 +23,7 @@ import (
 	"github.com/openfoundry/openfoundry-go/services/identity-federation-service/internal/repo"
 	"github.com/openfoundry/openfoundry-go/services/identity-federation-service/internal/server"
 	"github.com/openfoundry/openfoundry-go/services/identity-federation-service/internal/service"
+	oidcpkg "github.com/openfoundry/openfoundry-go/services/identity-federation-service/internal/oidc"
 	webauthnpkg "github.com/openfoundry/openfoundry-go/services/identity-federation-service/internal/webauthn"
 )
 
@@ -78,12 +79,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	// OIDC providers (slice 5a). BASE_URL is the externally-visible
+	// base URL — IdPs MUST register `<BASE_URL>/api/v1/auth/sso/<name>/callback`.
+	oidcConfigs, err := oidcpkg.LoadProvidersFromEnv(os.Getenv("BASE_URL"))
+	if err != nil {
+		log.Error("oidc config failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	oidcSvc, err := oidcpkg.NewService(ctx, oidcConfigs)
+	if err != nil {
+		log.Warn("oidc init failed — SSO endpoints will return 'unknown provider'",
+			slog.String("error", err.Error()))
+		oidcSvc, _ = oidcpkg.NewService(ctx, nil)
+	}
+
 	auth := &handlers.Auth{Repo: r, Issuer: issuer, WebAuthn: waService}
 	mfa := &handlers.MFA{JWT: jwt, Repo: r, Issuer: issuer}
 	wa := &handlers.WebAuthn{JWT: jwt, Repo: r, Service: waService, Issuer: issuer}
+	sso := &handlers.SSO{Repo: r, OIDC: oidcSvc, Issuer: issuer}
 	metrics := observability.NewMetrics()
 
-	srv := server.New(cfg, jwt, auth, mfa, wa, metrics)
+	srv := server.New(cfg, jwt, auth, mfa, wa, sso, metrics)
 	if err := server.Run(ctx, srv, log); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("server exited with error", slog.String("error", err.Error()))
 		os.Exit(1)

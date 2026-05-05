@@ -33,7 +33,7 @@ import (
 // Subsequent slices add: /auth/sessions/*, /auth/sso/*, /users/*,
 // /roles/*, /groups/*, /permissions/*, /policies/*, /control-panel/*,
 // /scim/v2/*, /jwks/rotate, /audit/metrics.
-func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *handlers.MFA, wa *handlers.WebAuthn, m *observability.Metrics) *http.Server {
+func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *handlers.MFA, wa *handlers.WebAuthn, sso *handlers.SSO, m *observability.Metrics) *http.Server {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, chimw.Compress(5))
 	r.Use(chimw.Timeout(30 * time.Second))
@@ -54,6 +54,9 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *ha
 		api.Post("/mfa/totp/complete-login", mfa.CompleteLogin)
 		api.Post("/mfa/webauthn/login/challenge", wa.LoginChallenge)
 		api.Post("/mfa/webauthn/login/finish", wa.LoginFinish)
+		api.Get("/sso/providers", sso.ListProviders)
+		api.Get("/sso/{provider}/start", sso.Start)
+		api.Get("/sso/{provider}/callback", sso.Callback)
 	})
 
 	// /api/v1/auth/mfa/* — bearer-protected MFA management.
