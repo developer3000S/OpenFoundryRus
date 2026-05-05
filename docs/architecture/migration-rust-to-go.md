@@ -19,7 +19,7 @@ until each service flips over.
 | 0 | Foundations: scaffolding, libs/core-models, observability, auth-middleware, service template, CI | ✅ done |
 | 1 | Core libs (db-pool, event-bus-control, event-bus-data, audit-trail, idempotency, outbox, testing) | ✅ done |
 | 1.5 | Tier-2 libs (cassandra-kernel, authz-cedar, saga, state-machine, scheduling, search/storage/vector abstractions, geospatial, media-scanner, ontology-kernel, pipeline-expression, plugin-sdk, analytical-logic) | deferred — migrate alongside first consuming service |
-| 2 | Stateless edge services: edge-gateway, notification-alerting, sdk-generation, telemetry-governance, audit-sink, ai-sink | 🟡 in progress — `edge-gateway-service` ✅, `audit-sink` ✅, `ai-sink` ✅, `notification-alerting-service` ✅ (Iceberg writer stub pending iceberg-go writes) |
+| 2 | Stateless edge services: edge-gateway, notification-alerting, sdk-generation, telemetry-governance, audit-sink, ai-sink | 🟡 in progress — `edge-gateway-service` ✅, `audit-sink` ✅, `ai-sink` ✅, `notification-alerting-service` ✅, `sdk-generation-service` ✅ (Iceberg writer stub pending iceberg-go writes) |
 | 3 | Identity & authz: identity-federation, authorization-policy, tenancy-organizations, audit-compliance | pending |
 | 4 | Data & ontology: dataset-versioning, media-sets, iceberg-catalog, ontology-{definition,query,actions,indexer}, connector-management, ingestion-replication | pending |
 | 5 | pyo3-bound services as Python sidecars: notebook-runtime, pipeline-build, lineage, agent-runtime | pending |
