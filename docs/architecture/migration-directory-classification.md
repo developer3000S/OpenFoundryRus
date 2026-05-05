@@ -23,8 +23,9 @@ chain for it.
 - `services/code-repository-review-service/migrations`
 - `services/data-asset-catalog-service/migrations`
 - `services/dataset-versioning-service/migrations`
-- `services/document-intelligence-service/migrations`
-- `services/document-reporting-service/migrations`
+- `services/retrieval-context-service/migrations`
+  Note: also hosts the `document_intelligence_*` migration absorbed
+  from the retired `document-intelligence-service` (S8 / ADR-0030).
 - `services/federation-product-exchange-service/migrations`
 - `services/lineage-service/migrations`
 - `services/marketplace-service/migrations`
@@ -45,7 +46,9 @@ chain for it.
 - `services/audit-compliance-service/migrations`
 - `services/checkpoints-purpose-service/migrations`
 - `services/cipher-service/migrations`
-- `services/code-security-scanning-service/migrations`
+<!-- S8 / ADR-0030 — `code-security-scanning-service/migrations` merged into
+     `services/code-repository-review-service/migrations`; the
+     `code_security_scanning` schema relocated `pg-policy` → `pg-schemas`. -->
 - `services/identity-federation-service/migrations`
   Note: `20260425193000_scoped_sessions_security.sql` moved to `legacy-archive`.
 - `services/lineage-deletion-service/migrations`
@@ -73,10 +76,13 @@ chain for it.
 - `services/managed-workspace-service/migrations`
 - `services/monitoring-rules-service/migrations`
 - `services/notebook-runtime-service/migrations`
+  Note: also hosts the `notepad_documents` / `notepad_presence` and
+  `spreadsheet_sheets` / `spreadsheet_recalcs` migrations absorbed from
+  the retired `document-reporting-service` and
+  `spreadsheet-computation-service` (S8 consolidation, ADR-0030).
 - `services/notification-alerting-service/migrations`
 - `services/pipeline-authoring-service/migrations`
 - `services/report-service/migrations`
-- `services/spreadsheet-computation-service/migrations`
 - `services/sql-bi-gateway-service/migrations`
   Note: also hosts the `warehouse_*`, `tabular_analysis_*` and
   `analytical_expression*` migrations absorbed from the retired
@@ -87,7 +93,6 @@ chain for it.
   it locally for tests.
 - `services/time-series-data-service/migrations`
 - `services/workflow-automation-service/migrations`
-- `services/workflow-trace-service/migrations`
 
 ## `cassandra`
 

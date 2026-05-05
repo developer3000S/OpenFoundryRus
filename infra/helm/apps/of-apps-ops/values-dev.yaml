@@ -61,30 +61,12 @@ services:
       DATABASE_READ_URL:
         secretName: code-repository-review-db-dsn
         key: reader_url
-  code-security-scanning-service:
-    envSecrets:
-      DATABASE_URL:
-        secretName: code-security-scanning-db-dsn
-        key: writer_url
-      DATABASE_READ_URL:
-        secretName: code-security-scanning-db-dsn
-        key: reader_url
-  compute-modules-control-plane-service:
-    envSecrets:
-      DATABASE_URL:
-        secretName: compute-modules-control-plane-db-dsn
-        key: writer_url
-      DATABASE_READ_URL:
-        secretName: compute-modules-control-plane-db-dsn
-        key: reader_url
-  compute-modules-runtime-service:
-    envSecrets:
-      DATABASE_URL:
-        secretName: compute-modules-runtime-db-dsn
-        key: writer_url
-      DATABASE_READ_URL:
-        secretName: compute-modules-runtime-db-dsn
-        key: reader_url
+  # S8 / ADR-0030 — `code-security-scanning-service` merged →
+  # `code-repository-review-service`; the merged service uses the single
+  # `code-repository-review-db-dsn` Secret (defined above).
+  # S8 / ADR-0030 — `compute-modules-{control-plane,runtime}-service` were
+  # never wired and are merged → `pipeline-build-service`; their dev DSN
+  # overrides are no longer needed.
   custom-endpoints-service:
     envSecrets:
       DATABASE_URL:
@@ -101,14 +83,11 @@ services:
       DATABASE_READ_URL:
         secretName: developer-console-db-dsn
         key: reader_url
-  document-intelligence-service:
-    envSecrets:
-      DATABASE_URL:
-        secretName: document-intelligence-db-dsn
-        key: writer_url
-      DATABASE_READ_URL:
-        secretName: document-intelligence-db-dsn
-        key: reader_url
+  # S8 / ADR-0030: document-intelligence-service merged into
+  # retrieval-context-service (of-ml-aip). The document-intelligence
+  # tables now ship under retrieval-context-service' migrations against
+  # `pg-schemas`; the retrieval-context DSN gets wired in of-ml-aip's
+  # values-dev.yaml when its runtime is implemented.
   document-reporting-service:
     envSecrets:
       DATABASE_URL:
@@ -252,12 +231,4 @@ services:
         key: writer_url
       DATABASE_READ_URL:
         secretName: workflow-automation-db-dsn
-        key: reader_url
-  workflow-trace-service:
-    envSecrets:
-      DATABASE_URL:
-        secretName: workflow-trace-db-dsn
-        key: writer_url
-      DATABASE_READ_URL:
-        secretName: workflow-trace-db-dsn
         key: reader_url

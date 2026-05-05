@@ -8,7 +8,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::models::{
+use crate::document_intelligence::models::{
     DocIntelExtraction, DocIntelJob, PublishExtractionRequest, SubmitJobRequest,
     UpdateStatusRequest,
 };

@@ -47,11 +47,27 @@ workspace = true
 [dependencies.tracing]
 workspace = true
 
+[dependencies.tracing-subscriber]
+workspace = true
+
 [dependencies.uuid]
 workspace = true
 
 [dependencies.vector-store]
 workspace = true
+
+[features]
+default = []
+# Placeholder reserved for the heavy parser pipelines absorbed from
+# document-intelligence-service (S8 / ADR-0030). When wired, modules
+# under `src/document_intelligence/` and any rdkafka / parser native
+# deps belong behind this feature so default CI compile stays fast.
+parsers = []
+# Placeholder reserved for the runtime profile (rdkafka / scylla /
+# cassandra-kernel). Empty today; declared so future bins that need
+# it can be added with `required-features=["runtime"]` per the same
+# pattern used in ontology-indexer / reindex-coordinator.
+runtime = []
 
 [[bin]]
 path = "src/main.rs"

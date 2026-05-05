@@ -115,23 +115,34 @@ residency = "pg-policy"
 allow_new_sqlx = { files = ["services/cipher-service/src/handlers/cipher.rs"], tables = ["cipher_channels", "cipher_licenses", "cipher_permissions"] }
 tables = ["cipher_permissions", "cipher_channels", "cipher_licenses"]
 
+# S8 / ADR-0030 — `global-branch-service` and `code-security-scanning-service`
+# merged → `code-repository-review-service`. The `code_security_scanning`
+# schema moved from `pg-policy` to `pg-schemas` so the merged service has
+# a single DSN; `global_branches` / `global_branch_resource_links` join the
+# same schema.
 [[entries]]
 component = "services/code-repository-review-service"
 service = "code-repository-review-service"
 migration_dir = "services/code-repository-review-service/migrations"
 schema = "code_repository_review"
 residency = "pg-schemas"
-allow_new_sqlx = { files = ["services/code-repository-review-service/src/handlers.rs"], tables = ["ci_runs", "commits", "merge_requests", "repositories", "review_comments"] }
-tables = ["repositories", "commits", "merge_requests", "review_comments", "ci_runs"]
-
-[[entries]]
-component = "services/code-security-scanning-service"
-service = "code-security-scanning-service"
-migration_dir = "services/code-security-scanning-service/migrations"
-schema = "code_security_scanning"
-residency = "pg-policy"
-allow_new_sqlx = { files = ["services/code-security-scanning-service/src/handlers.rs"], tables = ["code_security_findings", "code_security_scans"] }
-tables = ["code_security_scans", "code_security_findings"]
+allow_new_sqlx = { files = [
+    "services/code-repository-review-service/src/global_branch/store.rs",
+    "services/code-repository-review-service/src/global_branch/handlers.rs",
+    "services/code-repository-review-service/src/global_branch/subscriber.rs",
+    "services/code-repository-review-service/tests/promote_emits_request_event.rs",
+    "services/code-repository-review-service/tests/subscribes_and_links_branch_with_label.rs",
+], tables = [
+    "ci_runs", "commits", "merge_requests", "repositories", "review_comments",
+    "code_security_findings", "code_security_scans",
+    "global_branches", "global_branch_resource_links",
+    "outbox.events",
+] }
+tables = [
+    "repositories", "commits", "merge_requests", "review_comments", "ci_runs",
+    "code_security_scans", "code_security_findings",
+    "global_branches", "global_branch_resource_links",
+]
 
 [[entries]]
 component = "services/compute-modules-control-plane-service"
@@ -198,13 +209,16 @@ residency = "pg-runtime-config"
 allow_new_sqlx = { files = ["services/developer-console-service/src/handlers.rs"], tables = ["developer_applications", "developer_releases"] }
 tables = ["developer_applications", "developer_releases"]
 
+# S8 / ADR-0030: document-intelligence-service merged into
+# retrieval-context-service. Tables stay in `pg-schemas`; the
+# `document_intelligence` schema is now owned by retrieval-context-service.
 [[entries]]
-component = "services/document-intelligence-service"
-service = "document-intelligence-service"
-migration_dir = "services/document-intelligence-service/migrations"
+component = "services/retrieval-context-service"
+service = "retrieval-context-service"
+migration_dir = "services/retrieval-context-service/migrations"
 schema = "document_intelligence"
 residency = "pg-schemas"
-allow_new_sqlx = { files = ["services/document-intelligence-service/src/handlers.rs"], tables = ["document_intelligence_extractions", "document_intelligence_jobs", "document_intelligence_status_events"] }
+allow_new_sqlx = { files = ["services/retrieval-context-service/src/document_intelligence/handlers.rs"], tables = ["document_intelligence_extractions", "document_intelligence_jobs", "document_intelligence_status_events"] }
 tables = ["document_intelligence_jobs", "document_intelligence_status_events", "document_intelligence_extractions"]
 
 [[entries]]
@@ -518,13 +532,4 @@ schema = "workflow_automation"
 residency = "pg-runtime-config"
 allow_new_sqlx = { files = ["services/workflow-automation-service/src/handlers/approvals.rs", "services/workflow-automation-service/src/handlers/crud.rs", "services/workflow-automation-service/src/handlers/runs.rs"], tables = ["workflow_runs", "workflows"] }
 tables = ["workflows", "workflow_runs", "workflow_approvals"]
-
-[[entries]]
-component = "services/workflow-trace-service"
-service = "workflow-trace-service"
-migration_dir = "services/workflow-trace-service/migrations"
-schema = "workflow_trace"
-residency = "pg-runtime-config"
-allow_new_sqlx = { files = ["services/workflow-trace-service/src/handlers.rs"], tables = ["workflow_trace_events", "workflow_trace_runs"] }
-tables = ["workflow_trace_runs", "workflow_trace_events"]
 

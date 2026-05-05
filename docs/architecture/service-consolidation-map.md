@@ -70,7 +70,7 @@
 | `dataset-quality-service` | `dataset-versioning-service` | merge → `dataset-versioning-service` | |
 | `dataset-versioning-service` | `dataset-versioning-service` | keep | sole runtime owner of `dataset_versions`, `dataset_branches`, `dataset_transactions`; Iceberg owns snapshots/data state |
 | `developer-console-service` | `application-composition-service` | merge → `application-composition-service` | |
-| `document-intelligence-service` | `retrieval-context-service` | merge → `retrieval-context-service` | shares parser pipeline |
+| `document-intelligence-service` | `retrieval-context-service` | merged → `retrieval-context-service` | S8: directory removed; sketch handlers/models preserved under `services/retrieval-context-service/src/document_intelligence/` and gated behind a new `parsers` Cargo feature so parser pipelines stay out of the default CI compile path. The `document_intelligence_jobs` / `_status_events` / `_extractions` migration is folded into `services/retrieval-context-service/migrations/0001_document_intelligence_foundation.sql`; tables stay on `pg-schemas`. |
 | `document-reporting-service` | `notebook-runtime-service` | merge → `notebook-runtime-service` | |
 | `edge-gateway-service` | `edge-gateway-service` | keep | |
 | `entity-resolution-service` | `entity-resolution-service` | keep | specialised matching |
@@ -82,7 +82,7 @@
 | `iceberg-catalog-service` | `iceberg-catalog-service` | keep | Foundry-flavoured Iceberg REST Catalog (ADR-0041); supersedes Lakekeeper for the internal catalog surface, owns Foundry transaction/markings/schema-evolution semantics. |
 | `identity-federation-service` | `identity-federation-service` | keep | absorbs `oauth-integration-service` (auth side), `session-governance-service` |
 | `ingestion-replication-service` | `ingestion-replication-service` | keep | |
-| `knowledge-index-service` | `retrieval-context-service` | merge → `retrieval-context-service` | |
+| `knowledge-index-service` | `retrieval-context-service` | merged → `retrieval-context-service` | S8: directory removed; the source crate was a stub re-exporting `libs/ai-kernel` modules, so no Rust code or migrations needed to move — `retrieval-context-service` already re-exports the same kernel modules. |
 | `lineage-deletion-service` | `audit-compliance-service` | merge → `audit-compliance-service` | |
 | `lineage-service` | `lineage-service` | keep | absorbs `workflow-trace-service` |
 | `llm-catalog-service` | `llm-catalog-service` | keep | |
@@ -159,12 +159,12 @@ directories under `services/` and must not be rendered by Helm or compose:
 | Status | Count |
 | ------ | ----- |
 | keep / ownership boundary | 36 |
-| merge → X (pending) | 53 |
-| merged → X (completed) | 3 |
+| merge → X (pending) | 51 |
+| merged → X (completed) | 5 |
 | delete scheduled for active legacy dirs | 3 |
 | sink | 3 |
 | image (non-Rust runtime image) | 1 |
-| **Total current service directories** | **96** |
+| **Total current service directories** | **94** |
 | **Retired service directories tracked for references** | **6** |
 | **Current target metric** | **36 ownership boundaries + 3 sinks + 1 non-Rust runtime image across 5 Helm releases** |
 

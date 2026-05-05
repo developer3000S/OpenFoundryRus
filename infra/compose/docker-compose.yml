@@ -1026,24 +1026,10 @@ services:
     ports:
       - "${OPENFOUNDRY_AGENT_RUNTIME_HOST_PORT:-50127}:50127"
 
-  document-intelligence-service:
-    <<: *app-common
-    profiles: *profiles-intelligence
-    build:
-      context: ..
-      dockerfile: services/document-intelligence-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50128
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_document_intelligence_service
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-      DATA_STORAGE_SERVICE_URL: http://data-asset-catalog-service:50079
-      KNOWLEDGE_INDEX_SERVICE_URL: http://knowledge-index-service:50097
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_DOCUMENT_INTELLIGENCE_HOST_PORT:-50128}:50128"
+  # ── S8 / ADR-0030 — document-intelligence-service merged into
+  # retrieval-context-service. The document-intelligence tables live in
+  # retrieval-context-service' migrations; downstream callers route to
+  # http://retrieval-context-service:50098. ──
 
   ai-application-generation-service:
     <<: *app-common
@@ -1183,7 +1169,10 @@ services:
       PORT: 50137
       DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_workflow_service
       JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-      APPROVALS_SERVICE_URL: http://approvals-service:50071
+      # S8 / ADR-0030: APPROVALS_SERVICE_URL retired — approvals state
+      # machine moved into this same service (route still mounted at
+      # /api/v1/approvals; legacy /workflows/approvals/{id}/continue
+      # now applies the decision in-process).
       NOTIFICATION_SERVICE_URL: http://notification-alerting-service:50114
       ONTOLOGY_SERVICE_URL: http://ontology-actions-service:50106
       PIPELINE_SERVICE_URL: http://lineage-service:50083
@@ -1199,39 +1188,10 @@ services:
     ports:
       - "${OPENFOUNDRY_WORKFLOW_AUTOMATION_HOST_PORT:-50137}:50137"
 
-  automation-operations-service:
-    <<: *app-common
-    profiles: *profiles-experience
-    build:
-      context: ..
-      dockerfile: services/automation-operations-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50138
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_automation_operations
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_AUTOMATION_OPERATIONS_HOST_PORT:-50138}:50138"
-
-  workflow-trace-service:
-    <<: *app-common
-    profiles: *profiles-experience
-    build:
-      context: ..
-      dockerfile: services/workflow-trace-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50139
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_workflow_trace
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_WORKFLOW_TRACE_HOST_PORT:-50139}:50139"
+  # S8 / ADR-0030: automation-operations-service merged →
+  # workflow-automation-service (route at /api/v1/automations).
+  # S8 / ADR-0030: workflow-trace-service merged into lineage-service.
+  # Routes are now served at /workflow-trace/* by lineage-service.
 
   application-composition-service:
     <<: *app-common
@@ -1369,39 +1329,11 @@ services:
     ports:
       - "${OPENFOUNDRY_MCP_ORCHESTRATION_HOST_PORT:-50147}:50147"
 
-  compute-modules-control-plane-service:
-    <<: *app-common
-    profiles: *profiles-experience
-    build:
-      context: ..
-      dockerfile: services/compute-modules-control-plane-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50148
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_compute_modules_control_plane
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_COMPUTE_MODULES_CONTROL_PLANE_HOST_PORT:-50148}:50148"
-
-  compute-modules-runtime-service:
-    <<: *app-common
-    profiles: *profiles-experience
-    build:
-      context: ..
-      dockerfile: services/compute-modules-runtime-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50149
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_compute_modules_runtime
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_COMPUTE_MODULES_RUNTIME_HOST_PORT:-50149}:50149"
+  # S8 / ADR-0030 — `compute-modules-control-plane-service` and
+  # `compute-modules-runtime-service` were `fn main() {}` stubs that
+  # never bound their port; the consolidation map marks both as
+  # `merged → pipeline-build-service`. Their compose blocks were removed
+  # alongside the source directories.
 
   monitoring-rules-service:
     <<: *app-common
@@ -1453,23 +1385,6 @@ services:
         condition: service_healthy
     ports:
       - "${OPENFOUNDRY_TELEMETRY_GOVERNANCE_HOST_PORT:-50153}:50153"
-
-  code-security-scanning-service:
-    <<: *app-common
-    profiles: *profiles-experience
-    build:
-      context: ..
-      dockerfile: services/code-security-scanning-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50154
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_code_security_scanning
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_CODE_SECURITY_SCANNING_HOST_PORT:-50154}:50154"
 
   code-repository-review-service:
     <<: *app-common
@@ -1900,22 +1815,9 @@ services:
     ports:
       - "${OPENFOUNDRY_PROMPT_WORKFLOW_HOST_PORT:-50096}:50096"
 
-  knowledge-index-service:
-    <<: *app-common
-    profiles: *profiles-intelligence
-    build:
-      context: ..
-      dockerfile: services/knowledge-index-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50097
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_ai_service
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_KNOWLEDGE_INDEX_HOST_PORT:-50097}:50097"
+  # ── S8 / ADR-0030 — knowledge-index-service merged into
+  # retrieval-context-service. Downstream callers route to
+  # http://retrieval-context-service:50098. ──
 
   retrieval-context-service:
     <<: *app-common
@@ -2057,26 +1959,6 @@ services:
       - report_delivery_data:/var/lib/openfoundry/report-delivery
     ports:
       - "${OPENFOUNDRY_REPORT_HOST_PORT:-50064}:50064"
-
-  global-branch-service:
-    <<: *app-common
-    profiles: *profiles-experience
-    build:
-      context: ..
-      dockerfile: services/global-branch-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50110
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_code_repo_service
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-      REPO_STORAGE_ROOT: /var/lib/openfoundry/code-repos
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - code_repo_data:/var/lib/openfoundry/code-repos
-    ports:
-      - "${OPENFOUNDRY_GLOBAL_BRANCH_HOST_PORT:-50110}:50110"
 
   marketplace-service:
     <<: *app-common
@@ -2379,7 +2261,8 @@ services:
       LINEAGE_DELETION_SERVICE_URL: http://lineage-deletion-service:50118
       LLM_CATALOG_SERVICE_URL: http://llm-catalog-service:50095
       PROMPT_WORKFLOW_SERVICE_URL: http://prompt-workflow-service:50096
-      KNOWLEDGE_INDEX_SERVICE_URL: http://knowledge-index-service:50097
+      # S8 / ADR-0030: KNOWLEDGE_INDEX_SERVICE_URL retired —
+      # knowledge-index-service merged into retrieval-context-service (50098).
       RETRIEVAL_CONTEXT_SERVICE_URL: http://retrieval-context-service:50098
       CONVERSATION_STATE_SERVICE_URL: http://conversation-state-service:50099
       AI_EVALUATION_SERVICE_URL: http://ai-evaluation-service:50075
@@ -2390,7 +2273,8 @@ services:
       APP_BUILDER_SERVICE_URL: http://app-builder-service:50063
       APPLICATION_CURATION_SERVICE_URL: http://application-curation-service:50101
       REPORT_SERVICE_URL: http://report-service:50064
-      GLOBAL_BRANCH_SERVICE_URL: http://global-branch-service:50110
+      # S8 / ADR-0030 — global-branch-service merged → code-repository-review-service.
+      GLOBAL_BRANCH_SERVICE_URL: http://code-repository-review-service:50155
       MARKETPLACE_CATALOG_SERVICE_URL: http://marketplace-catalog-service:50066
       PRODUCT_DISTRIBUTION_SERVICE_URL: http://product-distribution-service:50111
       FEDERATION_PRODUCT_EXCHANGE_SERVICE_URL: http://federation-product-exchange-service:50120
@@ -2401,7 +2285,8 @@ services:
       AUDIT_SERVICE_URL: http://audit-compliance-service:50115
       SDS_SERVICE_URL: http://sds-service:50076
       AGENT_RUNTIME_SERVICE_URL: http://agent-runtime-service:50127
-      DOCUMENT_INTELLIGENCE_SERVICE_URL: http://document-intelligence-service:50128
+      # S8 / ADR-0030: DOCUMENT_INTELLIGENCE_SERVICE_URL retired —
+      # document-intelligence-service merged into retrieval-context-service (50098).
       AI_APPLICATION_GENERATION_SERVICE_URL: http://ai-application-generation-service:50129
       # S8 / ADR-0030: TABULAR_ANALYSIS_SERVICE_URL retired —
       # tabular-analysis CRUD is served by sql-bi-gateway-service (50133).
@@ -2415,7 +2300,6 @@ services:
       # expressions are now an internal library crate; no HTTP surface.
       WORKFLOW_AUTOMATION_SERVICE_URL: http://workflow-automation-service:50137
       AUTOMATION_OPERATIONS_SERVICE_URL: http://automation-operations-service:50138
-      WORKFLOW_TRACE_SERVICE_URL: http://workflow-trace-service:50139
       APPLICATION_COMPOSITION_SERVICE_URL: http://application-composition-service:50140
       SCENARIO_SIMULATION_SERVICE_URL: http://scenario-simulation-service:50141
       SOLUTION_DESIGN_SERVICE_URL: http://solution-design-service:50142
@@ -2424,12 +2308,11 @@ services:
       MANAGED_WORKSPACE_SERVICE_URL: http://managed-workspace-service:50145
       CUSTOM_ENDPOINTS_SERVICE_URL: http://custom-endpoints-service:50146
       MCP_ORCHESTRATION_SERVICE_URL: http://mcp-orchestration-service:50147
-      COMPUTE_MODULES_CONTROL_PLANE_SERVICE_URL: http://compute-modules-control-plane-service:50148
-      COMPUTE_MODULES_RUNTIME_SERVICE_URL: http://compute-modules-runtime-service:50149
+      # S8 / ADR-0030 — compute-modules-{control-plane,runtime}-service merged → pipeline-build-service.
       MONITORING_RULES_SERVICE_URL: http://monitoring-rules-service:50150
       EXECUTION_OBSERVABILITY_SERVICE_URL: http://execution-observability-service:50152
       TELEMETRY_GOVERNANCE_SERVICE_URL: http://telemetry-governance-service:50153
-      CODE_SECURITY_SCANNING_SERVICE_URL: http://code-security-scanning-service:50154
+      # S8 / ADR-0030 — code-security-scanning-service merged → code-repository-review-service.
       CODE_REPOSITORY_REVIEW_SERVICE_URL: http://code-repository-review-service:50155
     depends_on:
       valkey:
@@ -2508,8 +2391,6 @@ services:
         condition: service_started
       prompt-workflow-service:
         condition: service_started
-      knowledge-index-service:
-        condition: service_started
       retrieval-context-service:
         condition: service_started
       conversation-state-service:
@@ -2530,8 +2411,6 @@ services:
         condition: service_started
       report-service:
         condition: service_started
-      global-branch-service:
-        condition: service_started
       marketplace-catalog-service:
         condition: service_started
       product-distribution-service:
@@ -2550,8 +2429,6 @@ services:
         condition: service_started
       agent-runtime-service:
         condition: service_started
-      document-intelligence-service:
-        condition: service_started
       ai-application-generation-service:
         condition: service_started
       # S8 / ADR-0030: tabular-analysis-service merged into sql-bi-gateway-service.
@@ -2563,8 +2440,6 @@ services:
         condition: service_started
       # S8 / ADR-0030: analytical-logic-service retired (now an internal crate).
       automation-operations-service:
-        condition: service_started
-      workflow-trace-service:
         condition: service_started
       application-composition-service:
         condition: service_started
@@ -2582,17 +2457,11 @@ services:
         condition: service_started
       mcp-orchestration-service:
         condition: service_started
-      compute-modules-control-plane-service:
-        condition: service_started
-      compute-modules-runtime-service:
-        condition: service_started
       monitoring-rules-service:
         condition: service_started
       execution-observability-service:
         condition: service_started
       telemetry-governance-service:
-        condition: service_started
-      code-security-scanning-service:
         condition: service_started
       code-repository-review-service:
         condition: service_started
@@ -2644,4 +2513,3 @@ volumes:
   pipeline_data:
   notebook_data:
   report_delivery_data:
-  code_repo_data:
