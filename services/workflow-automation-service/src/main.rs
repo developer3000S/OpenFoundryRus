@@ -279,7 +279,12 @@ fn build_condition_consumer(
         db.clone(),
         CONDITION_PROCESSED_EVENTS_TABLE,
     ));
-    Ok(ConditionConsumer::new(db, idempotency, dispatcher, publisher))
+    Ok(ConditionConsumer::new(
+        db,
+        idempotency,
+        dispatcher,
+        publisher,
+    ))
 }
 
 fn build_saga_consumer(db: PgPool) -> Result<SagaConsumer, ConsumerBootError> {

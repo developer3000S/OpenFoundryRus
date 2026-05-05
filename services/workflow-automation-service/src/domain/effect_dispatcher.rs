@@ -65,8 +65,8 @@ impl RetryPolicy {
             return Duration::ZERO;
         }
         let exponent = attempt_number.saturating_sub(2);
-        let raw = self.initial_backoff.as_secs_f32()
-            * self.backoff_multiplier.powi(exponent as i32);
+        let raw =
+            self.initial_backoff.as_secs_f32() * self.backoff_multiplier.powi(exponent as i32);
         let secs = raw.min(self.max_backoff.as_secs_f32()).max(0.0);
         Duration::from_secs_f32(secs)
     }
@@ -201,7 +201,11 @@ pub struct EffectDispatcher {
 impl EffectDispatcher {
     /// Build a dispatcher from an in-memory `reqwest::Client` plus
     /// the upstream config. The base URL must include the scheme.
-    pub fn new(client: Client, base_url: impl Into<String>, bearer_token: impl Into<String>) -> Self {
+    pub fn new(
+        client: Client,
+        base_url: impl Into<String>,
+        bearer_token: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: normalize_base_url(base_url.into()),
@@ -240,7 +244,10 @@ impl EffectDispatcher {
             .post(&url)
             .header(reqwest::header::AUTHORIZATION, &self.bearer_token)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(HEADER_AUDIT_CORRELATION, request.audit_correlation_id.to_string())
+            .header(
+                HEADER_AUDIT_CORRELATION,
+                request.audit_correlation_id.to_string(),
+            )
             .json(&request.body())
             .send()
             .await
@@ -287,7 +294,10 @@ impl EffectDispatcher {
             attempt += 1;
             match self.dispatch_once(request).await {
                 Ok(response) => {
-                    return Ok(DispatchOutcome { response, attempts: attempt });
+                    return Ok(DispatchOutcome {
+                        response,
+                        attempts: attempt,
+                    });
                 }
                 Err(err) if err.is_terminal() => return Err(err),
                 Err(err) => {
@@ -345,9 +355,8 @@ fn decode_json(body: &[u8]) -> Value {
     if body.iter().all(u8::is_ascii_whitespace) {
         return json!({});
     }
-    serde_json::from_slice::<Value>(body).unwrap_or_else(|_| {
-        json!({ "raw": String::from_utf8_lossy(body).to_string() })
-    })
+    serde_json::from_slice::<Value>(body)
+        .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(body).to_string() }))
 }
 
 fn response_message(payload: &Value, body: &[u8]) -> String {
@@ -377,8 +386,7 @@ mod urlencoding {
     pub fn encode(value: &str) -> String {
         let mut out = String::with_capacity(value.len());
         for byte in value.bytes() {
-            let safe = byte.is_ascii_alphanumeric()
-                || matches!(byte, b'-' | b'.' | b'_' | b'~');
+            let safe = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~');
             if safe {
                 out.push(byte as char);
             } else {
@@ -449,11 +457,13 @@ mod tests {
             }
             .is_terminal()
         );
-        assert!(DispatchError::Exhausted {
-            attempts: 5,
-            message: "w".into(),
-        }
-        .is_terminal());
+        assert!(
+            DispatchError::Exhausted {
+                attempts: 5,
+                message: "w".into(),
+            }
+            .is_terminal()
+        );
         assert!(!DispatchError::Retryable("ok".into()).is_terminal());
     }
 
@@ -506,19 +516,16 @@ mod tests {
             "https://ontology-actions:50106/"
         );
         assert_eq!(normalize_bearer_token("xyz".into()), "Bearer xyz");
-        assert_eq!(
-            normalize_bearer_token("Bearer xyz".into()),
-            "Bearer xyz"
-        );
-        assert_eq!(
-            normalize_bearer_token("BEARER abc".into()),
-            "BEARER abc"
-        );
+        assert_eq!(normalize_bearer_token("Bearer xyz".into()), "Bearer xyz");
+        assert_eq!(normalize_bearer_token("BEARER abc".into()), "BEARER abc");
     }
 
     #[test]
     fn url_encoder_passes_through_safe_chars() {
-        assert_eq!(urlencoding::encode("promote-customer.v2"), "promote-customer.v2");
+        assert_eq!(
+            urlencoding::encode("promote-customer.v2"),
+            "promote-customer.v2"
+        );
     }
 
     #[test]

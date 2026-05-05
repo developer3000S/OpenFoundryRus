@@ -1,11 +1,17 @@
 {{- /*
 FASE 7 / Tarea 7.4 — `approvals-timeout-sweep` Kubernetes CronJob.
 
-Drives the `pending → expired` transition for every row in
-`audit_compliance.approval_requests` whose `expires_at` is past.
+Post-S8 the approvals state machine is owned by
+`workflow-automation-service` (ADR-0030 + service-consolidation-map.md).
+This CronJob is unchanged in behaviour — same binary
+(`/usr/local/bin/approvals-timeout-sweep`), same target table
+(`audit_compliance.approval_requests`), same `approval.expired.v1`
+outbox topic — but the image now ships from `workflow-automation-service`
+because that crate carries the second `[[bin]]` target.
+
 Each invocation:
 
-  1. Connects to the same Postgres cluster as `approvals-service`
+  1. Connects to the same Postgres cluster as `workflow-automation-service`
      (DSN injected from the same secret).
   2. Runs `state_machine::PgStore::<ApprovalRequest>::timeout_sweep`,
      applies the `Expire` event, and INSERTs the matching
@@ -26,7 +32,7 @@ metadata:
   labels:
     app.kubernetes.io/name: approvals-timeout-sweep
     app.kubernetes.io/component: cronjob
-    app.kubernetes.io/part-of: approvals-service
+    app.kubernetes.io/part-of: workflow-automation-service
 spec:
   schedule: {{ (.Values.approvalsTimeoutSweep.schedule | default "*/5 * * * *") | quote }}
   concurrencyPolicy: Forbid
@@ -41,7 +47,7 @@ spec:
           labels:
             app.kubernetes.io/name: approvals-timeout-sweep
             app.kubernetes.io/component: cronjob
-            app.kubernetes.io/part-of: approvals-service
+            app.kubernetes.io/part-of: workflow-automation-service
         spec:
           {{- with (.Values.global.imagePullSecrets | default (list)) }}
           imagePullSecrets:
@@ -56,13 +62,15 @@ spec:
           {{- end }}
           containers:
             - name: approvals-timeout-sweep
-              # Image ships from the same approvals-service build —
-              # the binary `approvals-timeout-sweep` is packaged
-              # alongside `approvals-service` inside the same
-              # container (per services/approvals-service/Cargo.toml's
-              # second `[[bin]]` target).
+              # Image ships from the merged `workflow-automation-service`
+              # build — the binary `approvals-timeout-sweep` is packaged
+              # alongside the main service binary inside the same
+              # container (per services/workflow-automation-service/Cargo.toml's
+              # second `[[bin]]` target; SERVICE_OVERRIDES in
+              # tools/regenerate_service_dockerfiles.py emits both
+              # binaries into the runtime image).
               {{- $registry := (.Values.global.imageRegistry | default "") }}
-              {{- $repository := (.Values.approvalsTimeoutSweep.image.repository | default "approvals-service") }}
+              {{- $repository := (.Values.approvalsTimeoutSweep.image.repository | default "workflow-automation-service") }}
               {{- $tag := (.Values.approvalsTimeoutSweep.image.tag | default (.Values.global.imageTag | default "latest")) }}
               {{- if $registry }}
               image: {{ printf "%s/%s:%s" $registry $repository $tag | quote }}

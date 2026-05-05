@@ -23,17 +23,17 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use workflow_automation_service::approvals::domain::approval_request::{
-    ApprovalRequest, ApprovalRequestEvent, ApprovalRequestState,
-};
-use workflow_automation_service::approvals::event::{ApprovalExpiredV1, derive_outbox_event_id};
-use workflow_automation_service::approvals::topics::APPROVAL_EXPIRED_V1;
 use chrono::Utc;
 use outbox::OutboxEvent;
 use sqlx::postgres::PgPoolOptions;
 use state_machine::{Loaded, PgStore, StateMachine};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
+use workflow_automation_service::approvals::domain::approval_request::{
+    ApprovalRequest, ApprovalRequestEvent, ApprovalRequestState,
+};
+use workflow_automation_service::approvals::event::{ApprovalExpiredV1, derive_outbox_event_id};
+use workflow_automation_service::approvals::topics::APPROVAL_EXPIRED_V1;
 
 const APPROVAL_REQUESTS_TABLE: &str = "audit_compliance.approval_requests";
 const SERVICE_NAME: &str = "approvals-timeout-sweep";

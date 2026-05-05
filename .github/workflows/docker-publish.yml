@@ -26,8 +26,8 @@ jobs:
           # `pipeline-service`, `ontology-service`) referenced
           # legacy service names that never had Dockerfiles in
           # services/ and silently failed every push.
-          - approvals-service
-          - automation-operations-service
+          # S8 / ADR-0030: approvals-service merged → workflow-automation-service.
+          # S8 / ADR-0030: automation-operations-service merged → workflow-automation-service.
           - audit-compliance-service
           - data-asset-catalog-service
           - edge-gateway-service

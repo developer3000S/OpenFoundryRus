@@ -120,10 +120,13 @@ SERVICE_OVERRIDES: dict[str, dict[str, str]] = {
         "rust_flags": "-C target-feature=-crt-static",
     },
     # FASE 7 / Tarea 7.4 — companion CronJob binary that drives the
-    # `pending → expired` transition on `approvals.events`. Same image,
-    # different entrypoint: `infra/helm/apps/of-platform/templates/`
-    # `approvals-timeout-sweep-cronjob.yaml` overrides `command`.
-    "approvals-service": {
+    # `pending → expired` transition on `audit_compliance.approval_requests`.
+    # Same image, different entrypoint:
+    # `infra/helm/apps/of-apps-ops/templates/approvals-timeout-sweep-cronjob.yaml`
+    # overrides `command`. Post-S8 the binary lives in
+    # `services/workflow-automation-service/src/bin/approvals_timeout_sweep.rs`
+    # alongside the merged approvals state machine.
+    "workflow-automation-service": {
         "extra_binaries": ["approvals-timeout-sweep"],
     },
 }

@@ -51,11 +51,11 @@
 | `app-builder-service` | (legacy) | delete | already retired in earlier R-prompts; verify Cargo workspace removal |
 | `application-composition-service` | `application-composition-service` | keep | absorbs `application-curation-service`, `widget-registry-service` (S8.1.b), `developer-console-service`, `custom-endpoints-service`, `managed-workspace-service` |
 | `application-curation-service` | `application-composition-service` | merge → `application-composition-service` | |
-| `approvals-service` | `workflow-automation-service` | merge → `workflow-automation-service` | both backed by Temporal |
+| `approvals-service` | `workflow-automation-service` | merged → `workflow-automation-service` | S8: directory removed; `audit_compliance.approval_requests` state machine + `approval.{requested,completed,expired,decided}.v1` outbox + `approvals-timeout-sweep` CronJob binary moved under `services/workflow-automation-service/src/approvals/` and `src/bin/approvals_timeout_sweep.rs`. Helm CronJob template moved from `of-platform` to `of-apps-ops`. |
 | `audit-compliance-service` | `audit-compliance-service` | keep | absorbs `sds-service`, `retention-policy-service`, `lineage-deletion-service` |
 | `audit-sink` | `audit-sink` | sink | Kafka → Iceberg |
 | `authorization-policy-service` | `authorization-policy-service` | keep | absorbs `cipher-service`, `network-boundary-service`, `checkpoints-purpose-service`, `security-governance-service` |
-| `automation-operations-service` | `workflow-automation-service` | merge → `workflow-automation-service` | |
+| `automation-operations-service` | `workflow-automation-service` | merged → `workflow-automation-service` | S8: directory removed; saga substrate (`automation_operations` schema, `saga.state` table, `saga.step.requested.v1` consumer with the legacy `automation-operations-service` Kafka group id preserved) moved under `services/workflow-automation-service/src/automation_operations/`. |
 | `cdc-metadata-service` | `ingestion-replication-service` | merged → `ingestion-replication-service` | S8-13A: code moved under `services/ingestion-replication-service/src/cdc_metadata/`; migrations kept in `migrations/cdc_metadata/` and still run against `cdc-metadata-pg` via `CDC_METADATA_DATABASE_URL`. |
 | `checkpoints-purpose-service` | `authorization-policy-service` | merge → `authorization-policy-service` | |
 | `cipher-service` | `authorization-policy-service` | merge → `authorization-policy-service` | shares same secret store |

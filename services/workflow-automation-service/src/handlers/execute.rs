@@ -256,10 +256,8 @@ async fn enqueue_condition_in_tx(
     condition: &AutomateConditionV1,
 ) -> Result<(), outbox::OutboxError> {
     let payload = serde_json::to_value(condition)?;
-    let event_id = crate::event::derive_condition_event_id(
-        condition.definition_id,
-        condition.correlation_id,
-    );
+    let event_id =
+        crate::event::derive_condition_event_id(condition.definition_id, condition.correlation_id);
     let event = OutboxEvent::new(
         event_id,
         "automation_run",
@@ -267,7 +265,10 @@ async fn enqueue_condition_in_tx(
         AUTOMATE_CONDITION_V1,
         payload,
     )
-    .with_header("x-audit-correlation-id", condition.correlation_id.to_string())
+    .with_header(
+        "x-audit-correlation-id",
+        condition.correlation_id.to_string(),
+    )
     .with_header("ol-job", format!("automation_run/{}", condition.tenant_id))
     .with_header("ol-run-id", run_id.to_string())
     .with_header("ol-producer", "workflow-automation-service");

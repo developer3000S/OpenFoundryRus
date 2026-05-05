@@ -27,8 +27,8 @@ on:
       - "libs/state-machine/**"
       - "libs/outbox/**"
       - "libs/idempotency/**"
-      - "services/approvals-service/**"
-      - "services/automation-operations-service/**"
+      # S8 / ADR-0030: approvals-service + automation-operations-service
+      # merged → workflow-automation-service.
       - "services/workflow-automation-service/**"
       - "services/audit-compliance-service/**"
       - "services/reindex-coordinator-service/**"
@@ -41,8 +41,8 @@ on:
       - "libs/state-machine/**"
       - "libs/outbox/**"
       - "libs/idempotency/**"
-      - "services/approvals-service/**"
-      - "services/automation-operations-service/**"
+      # S8 / ADR-0030: approvals-service + automation-operations-service
+      # merged → workflow-automation-service.
       - "services/workflow-automation-service/**"
       - "services/audit-compliance-service/**"
       - "services/reindex-coordinator-service/**"
@@ -79,9 +79,9 @@ jobs:
       # FASE 6 / Tarea 6.4 — chaos test: forces step 2 of a 3-step
       # saga to fail and verifies the LIFO compensation chain
       # plus the saga.state row landing in `compensated`.
-      - name: automation-operations saga chaos
+      - name: workflow-automation saga chaos (post-S8 merge)
         run: |
-          cargo test -p automation-operations-service \
+          cargo test -p workflow-automation-service \
             --features it-postgres \
             --test saga_chaos -- --test-threads=1
 

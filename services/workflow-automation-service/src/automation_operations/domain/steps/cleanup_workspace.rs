@@ -185,10 +185,7 @@ mod tests {
     #[test]
     fn step_names_are_pinned() {
         assert_eq!(MarkForDeletion::step_name(), "mark_for_deletion");
-        assert_eq!(
-            DropWorkspaceBlobs::step_name(),
-            "drop_workspace_blobs"
-        );
+        assert_eq!(DropWorkspaceBlobs::step_name(), "drop_workspace_blobs");
         assert_eq!(
             FinalizeWorkspaceDeletion::step_name(),
             "finalize_workspace_deletion"

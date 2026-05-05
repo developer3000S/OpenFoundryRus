@@ -202,19 +202,26 @@ impl ConditionConsumer {
         // downstream service's responsibility (per ADR-0021); we
         // accept the at-least-once semantics that any HTTP-based
         // effect implies.
-        let action = match extract_action_request(
-            &condition.trigger_payload,
-            condition.correlation_id,
-        ) {
-            Ok(action) => action,
-            Err(err) => {
-                self.land_terminal_failed(run_id, &condition, err.to_string(), claimed.machine.attempts)
+        let action =
+            match extract_action_request(&condition.trigger_payload, condition.correlation_id) {
+                Ok(action) => action,
+                Err(err) => {
+                    self.land_terminal_failed(
+                        run_id,
+                        &condition,
+                        err.to_string(),
+                        claimed.machine.attempts,
+                    )
                     .await?;
-                return Ok("invalid_payload");
-            }
-        };
+                    return Ok("invalid_payload");
+                }
+            };
 
-        match self.dispatcher.dispatch_with_retries(&action, self.retry_policy).await {
+        match self
+            .dispatcher
+            .dispatch_with_retries(&action, self.retry_policy)
+            .await
+        {
             Ok(outcome) => {
                 self.land_terminal_completed(
                     run_id,
@@ -273,10 +280,10 @@ impl ConditionConsumer {
         let mut next = loaded
             .machine
             .clone()
-            .transition(AutomationRunEvent::EffectCompleted { response: response.clone() })
-            .map_err(|err| {
-                ConsumerError::State(StoreError::Transition(err))
-            })?;
+            .transition(AutomationRunEvent::EffectCompleted {
+                response: response.clone(),
+            })
+            .map_err(|err| ConsumerError::State(StoreError::Transition(err)))?;
         next.attempts = attempts.max(next.attempts);
         self.write_in_tx(&mut tx, &loaded, &next).await?;
         let outcome = AutomateOutcomeV1 {
@@ -289,7 +296,8 @@ impl ConditionConsumer {
             error: None,
             attempts,
         };
-        self.enqueue_outcome(&mut tx, run_id, condition, &outcome).await?;
+        self.enqueue_outcome(&mut tx, run_id, condition, &outcome)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -307,13 +315,19 @@ impl ConditionConsumer {
         let mut tx = self.pool.begin().await?;
         let loaded = self.load_in_tx(&mut tx, run_id).await?;
         let event = if loaded.machine.state == AutomationRunState::Queued {
-            AutomationRunEvent::PreFlightFailed { error: error.clone() }
+            AutomationRunEvent::PreFlightFailed {
+                error: error.clone(),
+            }
         } else {
-            AutomationRunEvent::EffectFailed { error: error.clone() }
+            AutomationRunEvent::EffectFailed {
+                error: error.clone(),
+            }
         };
-        let mut next = loaded.machine.clone().transition(event).map_err(|err| {
-            ConsumerError::State(StoreError::Transition(err))
-        })?;
+        let mut next = loaded
+            .machine
+            .clone()
+            .transition(event)
+            .map_err(|err| ConsumerError::State(StoreError::Transition(err)))?;
         next.attempts = attempts.max(next.attempts);
         self.write_in_tx(&mut tx, &loaded, &next).await?;
         let outcome = AutomateOutcomeV1 {
@@ -326,7 +340,8 @@ impl ConditionConsumer {
             error: Some(error),
             attempts,
         };
-        self.enqueue_outcome(&mut tx, run_id, condition, &outcome).await?;
+        self.enqueue_outcome(&mut tx, run_id, condition, &outcome)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -358,9 +373,8 @@ impl ConditionConsumer {
             error,
             attempts,
         };
-        let payload = serde_json::to_vec(&outcome).map_err(|err| {
-            PublishError::InvalidRecord(format!("encode outcome event: {err}"))
-        })?;
+        let payload = serde_json::to_vec(&outcome)
+            .map_err(|err| PublishError::InvalidRecord(format!("encode outcome event: {err}")))?;
         let lineage = OpenLineageHeaders::new(
             self.lineage_namespace.clone(),
             format!("automation_run/{}", condition.tenant_id),
@@ -418,7 +432,10 @@ impl ConditionConsumer {
         .with_header("ol-job", format!("automation_run/{}", condition.tenant_id))
         .with_header("ol-run-id", run_id.to_string())
         .with_header("ol-producer", CONSUMER_GROUP)
-        .with_header("x-audit-correlation-id", condition.correlation_id.to_string());
+        .with_header(
+            "x-audit-correlation-id",
+            condition.correlation_id.to_string(),
+        );
         outbox::enqueue(tx, event).await
     }
 
@@ -475,7 +492,10 @@ impl ConditionConsumer {
                 id: run_id,
                 message: err.to_string(),
             })?;
-        Ok(Loaded { machine, version: row.1 })
+        Ok(Loaded {
+            machine,
+            version: row.1,
+        })
     }
 
     async fn write_in_tx(

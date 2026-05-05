@@ -31,9 +31,6 @@
 
 #![cfg(feature = "it-postgres")]
 
-use workflow_automation_service::automation_operations::domain::dispatcher::dispatch_saga;
-use workflow_automation_service::automation_operations::domain::steps::cleanup_workspace::CleanupWorkspaceInput;
-use workflow_automation_service::automation_operations::domain::steps::retention_sweep::RetentionSweepInput;
 use saga::{SagaRunner, events::SagaStepCompletedV1};
 use sqlx::{Connection, PgConnection, Row, postgres::PgPoolOptions};
 use testcontainers::{
@@ -42,9 +39,11 @@ use testcontainers::{
     runners::AsyncRunner,
 };
 use uuid::Uuid;
+use workflow_automation_service::automation_operations::domain::dispatcher::dispatch_saga;
+use workflow_automation_service::automation_operations::domain::steps::cleanup_workspace::CleanupWorkspaceInput;
+use workflow_automation_service::automation_operations::domain::steps::retention_sweep::RetentionSweepInput;
 
-const SAGA_MIGRATION: &str =
-    include_str!("../migrations/20260505020000_saga_state_and_outbox.sql");
+const SAGA_MIGRATION: &str = include_str!("../migrations/20260505020000_saga_state_and_outbox.sql");
 
 async fn boot_pg() -> (testcontainers::ContainerAsync<GenericImage>, sqlx::PgPool) {
     let image = GenericImage::new("postgres", "16-alpine")
@@ -56,19 +55,14 @@ async fn boot_pg() -> (testcontainers::ContainerAsync<GenericImage>, sqlx::PgPoo
         .with_env_var("POSTGRES_PASSWORD", "of")
         .with_env_var("POSTGRES_DB", "automation_ops_test");
 
-    let pg = image
-        .start()
-        .await
-        .expect("start postgres testcontainer");
+    let pg = image.start().await.expect("start postgres testcontainer");
     let host_port = pg
         .get_host_port_ipv4(5432)
         .await
         .expect("expose host port for postgres");
     let url = format!("postgres://of:of@127.0.0.1:{host_port}/automation_ops_test");
 
-    let mut admin = PgConnection::connect(&url)
-        .await
-        .expect("connect admin");
+    let mut admin = PgConnection::connect(&url).await.expect("connect admin");
     sqlx::raw_sql(SAGA_MIGRATION)
         .execute(&mut admin)
         .await

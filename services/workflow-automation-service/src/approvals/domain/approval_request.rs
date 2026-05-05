@@ -95,13 +95,29 @@ impl ApprovalRequestState {
         }
         matches!(
             (self, next),
-            (ApprovalRequestState::Pending, ApprovalRequestState::Approved)
-                | (ApprovalRequestState::Pending, ApprovalRequestState::Rejected)
-                | (ApprovalRequestState::Pending, ApprovalRequestState::Expired)
-                | (ApprovalRequestState::Pending, ApprovalRequestState::Escalated)
-                | (ApprovalRequestState::Escalated, ApprovalRequestState::Approved)
-                | (ApprovalRequestState::Escalated, ApprovalRequestState::Rejected)
-                | (ApprovalRequestState::Escalated, ApprovalRequestState::Expired)
+            (
+                ApprovalRequestState::Pending,
+                ApprovalRequestState::Approved
+            ) | (
+                ApprovalRequestState::Pending,
+                ApprovalRequestState::Rejected
+            ) | (ApprovalRequestState::Pending, ApprovalRequestState::Expired)
+                | (
+                    ApprovalRequestState::Pending,
+                    ApprovalRequestState::Escalated
+                )
+                | (
+                    ApprovalRequestState::Escalated,
+                    ApprovalRequestState::Approved
+                )
+                | (
+                    ApprovalRequestState::Escalated,
+                    ApprovalRequestState::Rejected
+                )
+                | (
+                    ApprovalRequestState::Escalated,
+                    ApprovalRequestState::Expired
+                )
         )
     }
 
@@ -241,16 +257,40 @@ impl StateMachine for ApprovalRequest {
         use ApprovalRequestState::*;
 
         let next = match (self.state, &event) {
-            (Pending, Approve { decided_by, comment })
-            | (Escalated, Approve { decided_by, comment }) => {
+            (
+                Pending,
+                Approve {
+                    decided_by,
+                    comment,
+                },
+            )
+            | (
+                Escalated,
+                Approve {
+                    decided_by,
+                    comment,
+                },
+            ) => {
                 self.decided_by = Some(decided_by.clone());
                 self.decided_at = Some(Utc::now());
                 self.comment = comment.clone();
                 self.expires_at = None;
                 Approved
             }
-            (Pending, Reject { decided_by, comment })
-            | (Escalated, Reject { decided_by, comment }) => {
+            (
+                Pending,
+                Reject {
+                    decided_by,
+                    comment,
+                },
+            )
+            | (
+                Escalated,
+                Reject {
+                    decided_by,
+                    comment,
+                },
+            ) => {
                 self.decided_by = Some(decided_by.clone());
                 self.decided_at = Some(Utc::now());
                 self.comment = comment.clone();
@@ -306,10 +346,7 @@ mod tests {
             ApprovalRequestState::Expired,
             ApprovalRequestState::Escalated,
         ] {
-            assert_eq!(
-                ApprovalRequestState::parse(state.as_str()).unwrap(),
-                state
-            );
+            assert_eq!(ApprovalRequestState::parse(state.as_str()).unwrap(), state);
         }
     }
 
@@ -376,10 +413,7 @@ mod tests {
                 ApprovalRequestState::Rejected,
                 ApprovalRequestState::Pending,
             ),
-            (
-                ApprovalRequestState::Expired,
-                ApprovalRequestState::Pending,
-            ),
+            (ApprovalRequestState::Expired, ApprovalRequestState::Pending),
             (
                 ApprovalRequestState::Approved,
                 ApprovalRequestState::Rejected,
@@ -397,7 +431,7 @@ mod tests {
             (
                 ApprovalRequestState::Escalated,
                 ApprovalRequestState::Escalated,
-            )
+            ),
         ];
         // Note: Escalated → Escalated is technically the self-loop,
         // which is actually allowed (idempotent). Drop it from the

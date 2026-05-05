@@ -42,9 +42,7 @@ pub async fn dispatch_saga(
         "cleanup.workspace" => dispatch_cleanup_workspace(runner, input).await,
         unknown => Err(SagaError::step(
             "dispatch",
-            format!(
-                "unknown saga type {unknown:?}; known: {KNOWN_SAGA_TYPES:?}",
-            ),
+            format!("unknown saga type {unknown:?}; known: {KNOWN_SAGA_TYPES:?}",),
         )),
     }
 }
@@ -55,9 +53,7 @@ async fn dispatch_retention_sweep(
 ) -> Result<(), SagaError> {
     let input: RetentionSweepInput = serde_json::from_value(input)
         .map_err(|err| SagaError::step("retention.sweep", format!("invalid input: {err}")))?;
-    runner
-        .execute_step::<EvictRetentionEligible>(input)
-        .await?;
+    runner.execute_step::<EvictRetentionEligible>(input).await?;
     runner.finish().await?;
     Ok(())
 }
@@ -68,7 +64,9 @@ async fn dispatch_cleanup_workspace(
 ) -> Result<(), SagaError> {
     let input: CleanupWorkspaceInput = serde_json::from_value(input)
         .map_err(|err| SagaError::step("cleanup.workspace", format!("invalid input: {err}")))?;
-    runner.execute_step::<MarkForDeletion>(input.clone()).await?;
+    runner
+        .execute_step::<MarkForDeletion>(input.clone())
+        .await?;
     runner
         .execute_step::<DropWorkspaceBlobs>(input.clone())
         .await?;

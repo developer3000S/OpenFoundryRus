@@ -16,7 +16,9 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/workspace/target,id=workflow-automation-service-target,sharing=locked \
-    cargo build --locked --profile docker-release -p workflow-automation-service  && cp /workspace/target/docker-release/workflow-automation-service /tmp/workflow-automation-service  && strip /tmp/workflow-automation-service
+    cargo build --locked --profile docker-release -p workflow-automation-service  && cp /workspace/target/docker-release/workflow-automation-service /tmp/workflow-automation-service  && strip /tmp/workflow-automation-service \
+ && cp /workspace/target/docker-release/approvals-timeout-sweep /tmp/approvals-timeout-sweep \
+ && strip /tmp/approvals-timeout-sweep
 
 FROM alpine:3.23 AS runtime
 WORKDIR /app
@@ -27,5 +29,6 @@ ENV HOST=0.0.0.0
 ENV PORT=50137
 
 COPY --from=builder /tmp/workflow-automation-service /usr/local/bin/workflow-automation-service
+COPY --from=builder /tmp/approvals-timeout-sweep /usr/local/bin/approvals-timeout-sweep
 EXPOSE 50137
 CMD ["/usr/local/bin/workflow-automation-service"]

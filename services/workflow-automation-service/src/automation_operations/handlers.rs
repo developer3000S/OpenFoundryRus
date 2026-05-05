@@ -27,10 +27,7 @@ use crate::{
 };
 
 pub async fn list_items(State(state): State<AppState>) -> impl IntoResponse {
-    let rows = sqlx::query_as::<
-        _,
-        (Uuid, String, String, Option<String>, chrono::DateTime<Utc>),
-    >(
+    let rows = sqlx::query_as::<_, (Uuid, String, String, Option<String>, chrono::DateTime<Utc>)>(
         "SELECT saga_id, name, status, current_step, updated_at \
          FROM saga.state \
          ORDER BY updated_at DESC LIMIT 100",
@@ -290,10 +287,7 @@ async fn dispatch_request(state: &AppState, request: &SagaStepRequestedV1) -> Re
         SAGA_STEP_REQUESTED_V1,
         payload,
     )
-    .with_header(
-        "x-audit-correlation-id",
-        request.correlation_id.to_string(),
-    )
+    .with_header("x-audit-correlation-id", request.correlation_id.to_string())
     .with_header("ol-job", format!("saga/{}", request.saga))
     .with_header("ol-run-id", request.saga_id.to_string())
     .with_header("ol-producer", "automation-operations-service");

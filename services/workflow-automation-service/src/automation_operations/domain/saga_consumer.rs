@@ -134,10 +134,7 @@ impl SagaConsumer {
         self.run_saga(request).await
     }
 
-    async fn run_saga(
-        &self,
-        request: SagaStepRequestedV1,
-    ) -> Result<&'static str, ConsumerError> {
+    async fn run_saga(&self, request: SagaStepRequestedV1) -> Result<&'static str, ConsumerError> {
         let mut tx = self.pool.begin().await?;
         let mut runner =
             saga::SagaRunner::start(&mut tx, request.saga_id, request.saga.clone()).await?;

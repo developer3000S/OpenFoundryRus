@@ -45,14 +45,10 @@ services:
       DATABASE_READ_URL:
         secretName: audit-compliance-db-dsn
         key: reader_url
-  automation-operations-service:
-    envSecrets:
-      DATABASE_URL:
-        secretName: automation-operations-db-dsn
-        key: writer_url
-      DATABASE_READ_URL:
-        secretName: automation-operations-db-dsn
-        key: reader_url
+  # S8 / ADR-0030: automation-operations-service merged →
+  # workflow-automation-service. Saga + automations now share the
+  # workflow-automation DSN (single Postgres pool); no separate
+  # automation-operations-db-dsn Secret is needed.
   code-repository-review-service:
     envSecrets:
       DATABASE_URL:

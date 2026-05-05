@@ -123,7 +123,10 @@ impl AutomationRunState {
                 | (AutomationRunState::Running, AutomationRunState::Completed)
                 | (AutomationRunState::Running, AutomationRunState::Failed)
                 | (AutomationRunState::Running, AutomationRunState::Suspended)
-                | (AutomationRunState::Running, AutomationRunState::Compensating)
+                | (
+                    AutomationRunState::Running,
+                    AutomationRunState::Compensating
+                )
                 | (AutomationRunState::Suspended, AutomationRunState::Running)
                 | (AutomationRunState::Suspended, AutomationRunState::Failed)
                 | (AutomationRunState::Compensating, AutomationRunState::Failed)
@@ -185,9 +188,7 @@ pub enum AutomationRunEvent {
     /// Multi-step automation requested a wait. `wait_until` becomes
     /// the row's new `expires_at` so the timeout sweep can resume the
     /// run automatically.
-    Suspend {
-        wait_until: Option<DateTime<Utc>>,
-    },
+    Suspend { wait_until: Option<DateTime<Utc>> },
     /// External signal resumed a suspended run.
     Resume,
     /// Saga compensation triggered — the run is rolling back.
@@ -392,7 +393,10 @@ mod tests {
             AutomationRunState::Suspended,
             AutomationRunState::Compensating,
         ] {
-            assert!(!non_terminal.is_terminal(), "{non_terminal} must not be terminal");
+            assert!(
+                !non_terminal.is_terminal(),
+                "{non_terminal} must not be terminal"
+            );
         }
     }
 
@@ -404,7 +408,10 @@ mod tests {
             (AutomationRunState::Running, AutomationRunState::Completed),
             (AutomationRunState::Running, AutomationRunState::Failed),
             (AutomationRunState::Running, AutomationRunState::Suspended),
-            (AutomationRunState::Running, AutomationRunState::Compensating),
+            (
+                AutomationRunState::Running,
+                AutomationRunState::Compensating,
+            ),
             (AutomationRunState::Suspended, AutomationRunState::Running),
             (AutomationRunState::Suspended, AutomationRunState::Failed),
             (AutomationRunState::Compensating, AutomationRunState::Failed),
@@ -425,8 +432,14 @@ mod tests {
             (AutomationRunState::Failed, AutomationRunState::Running),
             (AutomationRunState::Completed, AutomationRunState::Failed),
             // Compensating cannot go back to Running / Suspended
-            (AutomationRunState::Compensating, AutomationRunState::Running),
-            (AutomationRunState::Compensating, AutomationRunState::Completed),
+            (
+                AutomationRunState::Compensating,
+                AutomationRunState::Running,
+            ),
+            (
+                AutomationRunState::Compensating,
+                AutomationRunState::Completed,
+            ),
             // Queued cannot jump straight to Suspended / Compensating /
             // Completed (must go via Running first)
             (AutomationRunState::Queued, AutomationRunState::Suspended),

@@ -1853,28 +1853,8 @@ services:
     ports:
       - "${OPENFOUNDRY_CONVERSATION_STATE_HOST_PORT:-50099}:50099"
 
-  approvals-service:
-    <<: *app-common
-    profiles: *profiles-experience
-    build:
-      context: ..
-      dockerfile: services/approvals-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50071
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_workflow_service
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-      WORKFLOW_SERVICE_URL: http://workflow-automation-service:50137
-      ONTOLOGY_SERVICE_URL: http://ontology-actions-service:50106
-    depends_on:
-      postgres:
-        condition: service_healthy
-      workflow-automation-service:
-        condition: service_started
-      ontology-actions-service:
-        condition: service_started
-    ports:
-      - "${OPENFOUNDRY_APPROVALS_HOST_PORT:-50071}:50071"
+  # S8 / ADR-0030: approvals-service merged → workflow-automation-service
+  # (routes at /api/v1/approvals + /api/v1/approvals/{id}/decide).
 
   document-reporting-service:
     <<: *app-common
@@ -2267,7 +2247,9 @@ services:
       CONVERSATION_STATE_SERVICE_URL: http://conversation-state-service:50099
       AI_EVALUATION_SERVICE_URL: http://ai-evaluation-service:50075
       WORKFLOW_SERVICE_URL: http://workflow-automation-service:50137
-      APPROVALS_SERVICE_URL: http://approvals-service:50071
+      # S8 / ADR-0030: approvals-service merged → workflow-automation-service.
+      # Routes /api/v1/approvals/* now live behind WORKFLOW_SERVICE_URL.
+      APPROVALS_SERVICE_URL: http://workflow-automation-service:50137
       NOTEBOOK_SERVICE_URL: http://notebook-runtime-service:50134
       DOCUMENT_REPORTING_SERVICE_URL: http://document-reporting-service:50102
       APP_BUILDER_SERVICE_URL: http://app-builder-service:50063
@@ -2299,7 +2281,10 @@ services:
       # S8 / ADR-0030: ANALYTICAL_LOGIC_SERVICE_URL retired — reusable
       # expressions are now an internal library crate; no HTTP surface.
       WORKFLOW_AUTOMATION_SERVICE_URL: http://workflow-automation-service:50137
-      AUTOMATION_OPERATIONS_SERVICE_URL: http://automation-operations-service:50138
+      # S8 / ADR-0030: automation-operations-service merged →
+      # workflow-automation-service. Routes /api/v1/automations/* now
+      # live behind WORKFLOW_AUTOMATION_SERVICE_URL.
+      AUTOMATION_OPERATIONS_SERVICE_URL: http://workflow-automation-service:50137
       APPLICATION_COMPOSITION_SERVICE_URL: http://application-composition-service:50140
       SCENARIO_SIMULATION_SERVICE_URL: http://scenario-simulation-service:50141
       SOLUTION_DESIGN_SERVICE_URL: http://solution-design-service:50142
@@ -2399,8 +2384,7 @@ services:
         condition: service_started
       workflow-automation-service:
         condition: service_started
-      approvals-service:
-        condition: service_started
+      # S8 / ADR-0030: approvals-service merged → workflow-automation-service.
       notebook-runtime-service:
         condition: service_started
       document-reporting-service:
@@ -2439,8 +2423,7 @@ services:
       spreadsheet-computation-service:
         condition: service_started
       # S8 / ADR-0030: analytical-logic-service retired (now an internal crate).
-      automation-operations-service:
-        condition: service_started
+      # S8 / ADR-0030: automation-operations-service merged → workflow-automation-service.
       application-composition-service:
         condition: service_started
       scenario-simulation-service:

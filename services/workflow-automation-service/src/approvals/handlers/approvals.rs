@@ -223,22 +223,13 @@ pub(crate) async fn apply_decision_and_publish(
     event: ApprovalRequestEvent,
 ) -> Result<(), String> {
     let pg_store = PgStore::<ApprovalRequest>::new(state.db.clone(), APPROVAL_REQUESTS_TABLE);
-    let loaded = pg_store
-        .load(approval_id)
-        .await
-        .map_err(|err| match err {
-            state_machine::StoreError::NotFound(_) => format!("approval {approval_id} not found"),
-            other => other.to_string(),
-        })?;
+    let loaded = pg_store.load(approval_id).await.map_err(|err| match err {
+        state_machine::StoreError::NotFound(_) => format!("approval {approval_id} not found"),
+        other => other.to_string(),
+    })?;
     let Loaded { machine, version } = loaded;
     let next_loaded = pg_store
-        .apply(
-            Loaded {
-                machine,
-                version,
-            },
-            event,
-        )
+        .apply(Loaded { machine, version }, event)
         .await
         .map_err(|err| err.to_string())?;
 

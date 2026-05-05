@@ -1,6 +1,12 @@
-# FASE 11 / Tarea 11.3 — kill one automation-operations-service Pod
+# FASE 11 / Tarea 11.3 — kill one workflow-automation-service Pod
 # weekly. Validates the Foundry-pattern Saga substrate (libs/saga +
 # libs/state-machine) survives a runner crash:
+#
+# Post-S8 the saga substrate (legacy automation-operations-service)
+# was merged into workflow-automation-service; this chaos schedule
+# now targets the merged Pod. The saga consumer group id remains
+# `automation-operations-service` so changing the runtime owner did
+# NOT reprocess the topic log.
 #   * an in-flight saga resumes from its last persisted step (the
 #     `saga.state` row is the source of truth, not an in-memory
 #     ledger);
@@ -13,7 +19,7 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: Schedule
 metadata:
-  name: chaos-fp-automation-operations-kill
+  name: chaos-fp-saga-substrate-kill
   namespace: chaos-mesh
 spec:
   schedule: "0 3 * * 2"          # every Tuesday 03:00 UTC
@@ -27,5 +33,5 @@ spec:
       namespaces:
         - of-apps-ops
       labelSelectors:
-        app.kubernetes.io/name: automation-operations-service
+        app.kubernetes.io/name: workflow-automation-service
     gracePeriod: 0
