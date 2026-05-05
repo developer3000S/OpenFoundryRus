@@ -33,7 +33,7 @@ import (
 // Subsequent slices add: /auth/sessions/*, /auth/sso/*, /users/*,
 // /roles/*, /groups/*, /permissions/*, /policies/*, /control-panel/*,
 // /scim/v2/*, /jwks/rotate, /audit/metrics.
-func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *handlers.MFA, wa *handlers.WebAuthn, sso *handlers.SSO, m *observability.Metrics) *http.Server {
+func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *handlers.MFA, wa *handlers.WebAuthn, sso *handlers.SSO, rbac *handlers.RBAC, m *observability.Metrics) *http.Server {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, chimw.Compress(5))
 	r.Use(chimw.Timeout(30 * time.Second))
@@ -68,6 +68,44 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *ha
 		api.Post("/totp/disable", mfa.Disable)
 		api.Post("/webauthn/register/challenge", wa.RegisterChallenge)
 		api.Post("/webauthn/register/finish", wa.RegisterFinish)
+	})
+
+	// /api/v1/{users,roles,groups,permissions,api-keys} — bearer
+	// protected admin surface (slice 6 RBAC CRUD).
+	r.Route("/api/v1", func(api chi.Router) {
+		api.Use(authmw.Middleware(jwt))
+
+		api.Get("/users", rbac.ListUsers)
+		api.Get("/users/{id}", rbac.GetUser)
+		api.Patch("/users/{id}", rbac.UpdateUser)
+		api.Delete("/users/{id}", rbac.DeleteUser)
+		api.Get("/users/{id}/roles", rbac.ListUserRoles)
+		api.Put("/users/{id}/roles/{role_id}", rbac.AssignUserRole)
+		api.Delete("/users/{id}/roles/{role_id}", rbac.RevokeUserRole)
+
+		api.Get("/roles", rbac.ListRoles)
+		api.Post("/roles", rbac.CreateRole)
+		api.Get("/roles/{id}", rbac.GetRole)
+		api.Patch("/roles/{id}", rbac.UpdateRole)
+		api.Delete("/roles/{id}", rbac.DeleteRole)
+		api.Put("/roles/{id}/permissions/{permission_id}", rbac.AssignRolePermission)
+		api.Delete("/roles/{id}/permissions/{permission_id}", rbac.RevokeRolePermission)
+
+		api.Get("/permissions", rbac.ListPermissions)
+		api.Post("/permissions", rbac.CreatePermission)
+		api.Delete("/permissions/{id}", rbac.DeletePermission)
+
+		api.Get("/groups", rbac.ListGroups)
+		api.Post("/groups", rbac.CreateGroup)
+		api.Get("/groups/{id}", rbac.GetGroup)
+		api.Patch("/groups/{id}", rbac.UpdateGroup)
+		api.Delete("/groups/{id}", rbac.DeleteGroup)
+		api.Put("/groups/{id}/members/{user_id}", rbac.AddGroupMember)
+		api.Delete("/groups/{id}/members/{user_id}", rbac.RemoveGroupMember)
+
+		api.Get("/api-keys", rbac.ListAPIKeys)
+		api.Post("/api-keys", rbac.CreateAPIKey)
+		api.Delete("/api-keys/{id}", rbac.RevokeAPIKey)
 	})
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

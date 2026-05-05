@@ -20,7 +20,7 @@ until each service flips over.
 | 1 | Core libs (db-pool, event-bus-control, event-bus-data, audit-trail, idempotency, outbox, testing) | ✅ done |
 | 1.5 | Tier-2 libs (cassandra-kernel, authz-cedar, saga, state-machine, scheduling, search/storage/vector abstractions, geospatial, media-scanner, ontology-kernel, pipeline-expression, plugin-sdk, analytical-logic) | deferred — migrate alongside first consuming service |
 | 2 | Stateless edge services: edge-gateway, notification-alerting, sdk-generation, telemetry-governance, audit-sink, ai-sink | ✅ done — all 6 services migrated. Open follow-ups: Iceberg writer for sinks (pending iceberg-go writes), telemetry-governance streaming-monitor surface (~1000 LOC of Rust deferred to a follow-up). |
-| 3 | Identity & authz: identity-federation, authorization-policy, tenancy-organizations, audit-compliance | 🟡 in progress — `identity-federation-service` slices 1–4 ✅, 5a/8 ✅ (OIDC SSO via coreos/go-oidc; SAML deferred to slice 5b). Slices 5b–8 pending. |
+| 3 | Identity & authz: identity-federation, authorization-policy, tenancy-organizations, audit-compliance | 🟡 in progress — `identity-federation-service` slices 1–4 ✅, 5a ✅, 6/8 ✅ (RBAC CRUD: users/roles/groups/permissions/api-keys). Slices 5b, 7, 8 pending. |
 | 4 | Data & ontology: dataset-versioning, media-sets, iceberg-catalog, ontology-{definition,query,actions,indexer}, connector-management, ingestion-replication | pending |
 | 5 | pyo3-bound services as Python sidecars: notebook-runtime, pipeline-build, lineage, agent-runtime | pending |
 | 6 | ML/AI/apps & retire Rust | pending |
