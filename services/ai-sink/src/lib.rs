@@ -7,9 +7,9 @@
 //!
 //! 1. Consumer group + source topic constants.
 //! 2. The wire envelope (mirrors
-//!    [`agent_runtime_service::ai_events::AiEventEnvelope`] and the
-//!    matching constant in `prompt-workflow-service` — both producers
-//!    converge on this shape).
+//!    [`agent_runtime_service::ai_events::AiEventEnvelope`]; the
+//!    legacy `prompt-workflow-service` mirror has been retired per
+//!    ADR-0030 — both producers now live inside `agent-runtime-service`).
 //! 3. Per-table Iceberg target identifiers (catalog / namespace /
 //!    table / partition transform) for the four AI tables.
 //! 4. Routing function `route(envelope) -> &str` returning the target

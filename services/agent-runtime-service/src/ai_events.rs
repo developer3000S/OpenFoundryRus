@@ -6,9 +6,10 @@
 //! sink (`ai-sink`, S5.3.b) consumes this topic and materialises into
 //! `of_ai.{prompts,responses,evaluations,traces}`.
 //!
-//! The envelope is producer-agnostic on purpose — `prompt-workflow-
-//! service` re-uses the same shape so the downstream Iceberg writer
-//! has a single decoder.
+//! The envelope is producer-agnostic on purpose — agent-runtime
+//! emits both prompt-workflow and conversation-state events after
+//! ADR-0030's S8 consolidation absorbed those services here. The
+//! downstream Iceberg writer has a single decoder.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -69,8 +70,8 @@ pub struct AiEventEnvelope {
     /// OpenTelemetry trace id (hex 32) when the event sits inside a
     /// trace context.
     pub trace_id: Option<String>,
-    /// Producer name — `"agent-runtime-service"` or
-    /// `"prompt-workflow-service"`.
+    /// Producer name — `"agent-runtime-service"` (post-ADR-0030 the
+    /// only producer; legacy `"prompt-workflow-service"` retired).
     pub producer: String,
     /// Schema version of `payload` for the (kind, version) tuple.
     pub schema_version: u32,

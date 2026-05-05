@@ -2,8 +2,9 @@
 
 Kafka → Iceberg sink for AI-platform events.
 
-* **Source topic:** `ai.events.v1` (producers: `agent-runtime-service`,
-  `prompt-workflow-service`).
+* **Source topic:** `ai.events.v1` (producer: `agent-runtime-service`,
+  which absorbed the legacy `prompt-workflow-service` producer per
+  ADR-0030).
 * **Target catalog:** `lakekeeper`.
 * **Target namespace:** `of_ai`.
 * **Target tables:** `prompts`, `responses`, `evaluations`, `traces` —

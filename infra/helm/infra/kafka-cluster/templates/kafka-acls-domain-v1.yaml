@@ -138,24 +138,10 @@ spec:
       - resource: { type: transactionalId, name: agent-runtime-, patternType: prefix }
         operations: [Write, Describe]
 ---
-# `prompt-workflow-service` — second producer on `ai.events.v1`
-# (S5.3.a). Separate transactional-id prefix so Kafka can fence the
-# two producers independently.
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaUser
-metadata:
-  name: prompt-workflow-service
-spec:
-  authentication:
-    type: tls
-  authorization:
-    type: simple
-    acls:
-      - resource: { type: topic, name: ai.events.v1, patternType: literal }
-        operations: [Write, Describe]
-      - resource: { type: transactionalId, name: prompt-workflow-, patternType: prefix }
-        operations: [Write, Describe]
----
+# S8 / ADR-0030 — `prompt-workflow-service` merged →
+# `agent-runtime-service`. Both producers now share the
+# `agent-runtime-` transactional-id prefix declared above; the
+# separate `prompt-workflow-` prefix and KafkaUser are retired.
 # `ai-sink` — single consumer of `ai.events.v1`. Read-only on the
 # topic + Read on its consumer group (S5.3.b).
 apiVersion: kafka.strimzi.io/v1

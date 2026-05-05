@@ -989,9 +989,11 @@ services:
       PORT: 50127
       DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_agent_runtime_service
       JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-      CONVERSATION_STATE_SERVICE_URL: http://conversation-state-service:50099
+      # S8 / ADR-0030: conversation-state-service merged → agent-runtime-service.
+      CONVERSATION_STATE_SERVICE_URL: http://agent-runtime-service:50127
       LLM_CATALOG_SERVICE_URL: http://llm-catalog-service:50095
-      PROMPT_WORKFLOW_SERVICE_URL: http://prompt-workflow-service:50096
+      # S8 / ADR-0030: prompt-workflow-service merged → agent-runtime-service.
+      PROMPT_WORKFLOW_SERVICE_URL: http://agent-runtime-service:50127
       RETRIEVAL_CONTEXT_SERVICE_URL: http://retrieval-context-service:50098
     depends_on:
       postgres:
@@ -1758,23 +1760,10 @@ services:
     ports:
       - "${OPENFOUNDRY_LLM_CATALOG_HOST_PORT:-50095}:50095"
 
-  prompt-workflow-service:
-    <<: *app-common
-    profiles: *profiles-intelligence
-    build:
-      context: ..
-      dockerfile: services/prompt-workflow-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50096
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_ai_service
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_PROMPT_WORKFLOW_HOST_PORT:-50096}:50096"
-
+  # ── S8 / ADR-0030 — prompt-workflow-service merged →
+  # agent-runtime-service. The source was a substrate-only shim over
+  # libs/ai-kernel; downstream callers route to
+  # http://agent-runtime-service:50100. ──
   # ── S8 / ADR-0030 — knowledge-index-service merged into
   # retrieval-context-service. Downstream callers route to
   # http://retrieval-context-service:50098. ──
@@ -1796,22 +1785,9 @@ services:
     ports:
       - "${OPENFOUNDRY_RETRIEVAL_CONTEXT_HOST_PORT:-50098}:50098"
 
-  conversation-state-service:
-    <<: *app-common
-    profiles: *profiles-intelligence
-    build:
-      context: ..
-      dockerfile: services/conversation-state-service/Dockerfile
-    environment:
-      HOST: 0.0.0.0
-      PORT: 50099
-      DATABASE_URL: postgres://openfoundry:openfoundry@postgres:5432/openfoundry_ai_service
-      JWT_SECRET: ${OPENFOUNDRY_JWT_SECRET:-openfoundry-dev-secret}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${OPENFOUNDRY_CONVERSATION_STATE_HOST_PORT:-50099}:50099"
+  # ── S8 / ADR-0030 — conversation-state-service merged →
+  # agent-runtime-service. Downstream callers route to
+  # http://agent-runtime-service:50100. ──
 
   # S8 / ADR-0030: approvals-service merged → workflow-automation-service
   # (routes at /api/v1/approvals + /api/v1/approvals/{id}/decide).
@@ -2189,11 +2165,13 @@ services:
       RETENTION_POLICY_SERVICE_URL: http://retention-policy-service:50117
       LINEAGE_DELETION_SERVICE_URL: http://lineage-deletion-service:50118
       LLM_CATALOG_SERVICE_URL: http://llm-catalog-service:50095
-      PROMPT_WORKFLOW_SERVICE_URL: http://prompt-workflow-service:50096
+      # S8 / ADR-0030: prompt-workflow-service merged → agent-runtime-service.
+      PROMPT_WORKFLOW_SERVICE_URL: http://agent-runtime-service:50127
       # S8 / ADR-0030: KNOWLEDGE_INDEX_SERVICE_URL retired —
       # knowledge-index-service merged into retrieval-context-service (50098).
       RETRIEVAL_CONTEXT_SERVICE_URL: http://retrieval-context-service:50098
-      CONVERSATION_STATE_SERVICE_URL: http://conversation-state-service:50099
+      # S8 / ADR-0030: conversation-state-service merged → agent-runtime-service.
+      CONVERSATION_STATE_SERVICE_URL: http://agent-runtime-service:50127
       AI_EVALUATION_SERVICE_URL: http://ai-evaluation-service:50075
       WORKFLOW_SERVICE_URL: http://workflow-automation-service:50137
       # S8 / ADR-0030: approvals-service merged → workflow-automation-service.
@@ -2324,12 +2302,10 @@ services:
         condition: service_started
       llm-catalog-service:
         condition: service_started
-      prompt-workflow-service:
-        condition: service_started
+      # S8 / ADR-0030: prompt-workflow-service merged → agent-runtime-service.
       retrieval-context-service:
         condition: service_started
-      conversation-state-service:
-        condition: service_started
+      # S8 / ADR-0030: conversation-state-service merged → agent-runtime-service.
       ai-evaluation-service:
         condition: service_started
       workflow-automation-service:

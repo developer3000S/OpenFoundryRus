@@ -269,18 +269,9 @@ services:
         cpu: "1"
         memory: 1Gi
 
-  conversation-state-service:
-    replicas: 2
-    ports:
-      - name: http
-        containerPort: 8080
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: "500m"
-        memory: 512Mi
+  # S8 / ADR-0030 — `conversation-state-service` merged →
+  # `agent-runtime-service`. The source was a substrate-only shim
+  # over `libs/ai-kernel`; agent-runtime-service is the runtime owner.
 
   mcp-orchestration-service:
     replicas: 2
@@ -295,15 +286,7 @@ services:
         cpu: "1"
         memory: 1Gi
 
-  prompt-workflow-service:
-    replicas: 2
-    ports:
-      - name: http
-        containerPort: 8080
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: "500m"
-        memory: 512Mi
+  # S8 / ADR-0030 — `prompt-workflow-service` merged →
+  # `agent-runtime-service`. The source was a substrate-only shim
+  # over `libs/ai-kernel` (plus a producer-specific `ai_events.rs`
+  # mirror that has been retired in favour of agent-runtime's own).

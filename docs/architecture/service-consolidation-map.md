@@ -8,9 +8,9 @@
 >
 > Audit date: 2026-05-05 (S8 workflow-automation + retrieval-context +
 > code-repository-review + workflow-trace + event-streaming +
-> notebook-runtime consolidation). The live repository has **79
-> directories** under `services/` (`ls services/ | wc -l`). S8 is now
-> measured as
+> notebook-runtime + agent-runtime consolidation). The live
+> repository has **77 directories** under `services/`
+> (`ls services/ | wc -l`). S8 is now measured as
 > ownership/deployment consolidation, not as physical reduction of the
 > source tree to 30 directories. The three retired stubs
 > `health-check-service`, `tool-registry-service` and
@@ -75,7 +75,7 @@
 | `compute-modules-control-plane-service` | `pipeline-build-service` | merge → `pipeline-build-service` | same orchestrator |
 | `compute-modules-runtime-service` | `pipeline-build-service` | merge → `pipeline-build-service` | runtime is sidecar of build |
 | `connector-management-service` | `connector-management-service` | keep | absorbs `virtual-table-service`, OAuth-data side of `oauth-integration-service` |
-| `conversation-state-service` | `agent-runtime-service` | merge → `agent-runtime-service` | |
+| `conversation-state-service` | `agent-runtime-service` | merged → `agent-runtime-service` | S8: directory removed; the source was a substrate-only crate (`fn main() {}` stub plus `domain.rs`/`handlers.rs`/`models.rs` shims that re-exported `libs/ai-kernel`). No migrations to move. Helm Deployment retired from `of-ml-aip`; `CONVERSATION_STATE_SERVICE_URL` callers retargeted at `agent-runtime-service:50127`. |
 | `custom-endpoints-service` | `application-composition-service` | merge → `application-composition-service` | |
 | `data-asset-catalog-service` | `dataset-versioning-service` | merge → `dataset-versioning-service` | metadata/discovery only during transition; no runtime writes to `dataset_versions`, `dataset_branches`, `dataset_transactions` |
 | `dataset-quality-service` | `dataset-versioning-service` | merge → `dataset-versioning-service` | |
@@ -132,7 +132,7 @@
 | `pipeline-runner` | `pipeline-runner` | image | Scala/SBT project (FASE 3 / Tarea 3.3) that builds the Spark/Iceberg image referenced by SparkApplication CRs launched by `pipeline-build-service`. **Not** a Rust workspace member, no service binary, no Helm Deployment of its own — it is a build artifact. Listed in `tools/regenerate_service_dockerfiles.py`'s `NON_RUST_SERVICES` skip set. |
 | `pipeline-schedule-service` | `pipeline-build-service` | merge → `pipeline-build-service` | |
 | `product-distribution-service` | `federation-product-exchange-service` | merge → `federation-product-exchange-service` | |
-| `prompt-workflow-service` | `agent-runtime-service` | merge → `agent-runtime-service` | |
+| `prompt-workflow-service` | `agent-runtime-service` | merged → `agent-runtime-service` | S8: directory removed; the source was a substrate-only crate (`fn main() {}` stub, `lib.rs`, `domain.rs`/`handlers.rs`/`models.rs` shims over `libs/ai-kernel`, plus a producer-specific `ai_events.rs` mirror that has been retired in favour of agent-runtime's own — both producers now share the `agent-runtime-` Kafka transactional-id prefix). Helm Deployment retired from `of-ml-aip`; Strimzi KafkaUser + transactional-id ACL for `prompt-workflow-` retired; `PROMPT_WORKFLOW_SERVICE_URL` callers retargeted at `agent-runtime-service:50127`. |
 | `reindex-coordinator-service` | `reindex-coordinator-service` | keep | Rust replacement (FASE 4 / Tarea 4.2) for the Go `workers-go/reindex` Temporal worker (ADR-0021). Owns the resume cursor in `pg-runtime-config.reindex_jobs`, drives Cassandra page-by-page scans via `cassandra-kernel`, and fans batches out to `services/ontology-indexer` over `ontology.reindex.v1`. Distinct ownership boundary (Postgres state + Temporal-replacement semantics) from the downstream `ontology-indexer` sink. |
 | `report-service` | (legacy) | delete | already covered by `document-reporting-service` |
 | `retention-policy-service` | `audit-compliance-service` | merge → `audit-compliance-service` | |
@@ -170,12 +170,12 @@ directories under `services/` and must not be rendered by Helm or compose:
 | Status | Count |
 | ------ | ----- |
 | keep / ownership boundary | 36 |
-| merge → X (pending) | 36 |
-| merged → X (completed) | 20 |
+| merge → X (pending) | 34 |
+| merged → X (completed) | 22 |
 | delete scheduled for active legacy dirs | 3 |
 | sink | 3 |
 | image (non-Rust runtime image) | 1 |
-| **Total current service directories** | **79** |
+| **Total current service directories** | **77** |
 | **Retired service directories tracked for references** | **3** |
 | **Current target metric** | **36 ownership boundaries + 3 sinks + 1 non-Rust runtime image across 5 Helm releases** |
 
