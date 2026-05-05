@@ -1,0 +1,85 @@
+name: openfoundry-go CI
+
+on:
+  push:
+    paths:
+      - "openfoundry-go/**"
+      - "proto/**"
+      - ".github/workflows/openfoundry-go.yml"
+  pull_request:
+    paths:
+      - "openfoundry-go/**"
+      - "proto/**"
+
+defaults:
+  run:
+    working-directory: openfoundry-go
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: openfoundry-go/go.sum
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62.2
+          working-directory: openfoundry-go
+          args: --timeout 5m
+
+  proto:
+    name: proto / buf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.47.2
+      - run: buf lint
+        working-directory: openfoundry-go
+      - run: buf generate
+        working-directory: openfoundry-go
+      - name: ensure no drift between checked-in & generated proto
+        run: |
+          if [ -n "$(git status --porcelain libs/proto-gen)" ]; then
+            echo "::error::buf generate produced drift — commit the regenerated files"
+            git --no-pager diff libs/proto-gen
+            exit 1
+          fi
+        working-directory: openfoundry-go
+
+  test:
+    name: test (unit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: openfoundry-go/go.sum
+      - run: go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: openfoundry-go/coverage.out
+
+  integration:
+    name: test (integration)
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: openfoundry-go/go.sum
+      - name: run integration suite
+        run: go test -race -count=1 -tags=integration ./...
+        env:
+          # testcontainers-go uses the docker daemon already available
+          # on the GitHub-hosted runner.
+          TESTCONTAINERS_RYUK_DISABLED: "true"

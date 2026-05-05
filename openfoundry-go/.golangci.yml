@@ -1,0 +1,92 @@
+# golangci-lint configuration for openfoundry-go.
+# Mirror the strictness of the Rust workspace's clippy config:
+# zero warnings allowed in CI.
+run:
+  timeout: 5m
+  tests: true
+  build-tags:
+    - integration
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errorlint
+    - exhaustive
+    - gci
+    - gocheckcompilerdirectives
+    - gocritic
+    - gofmt
+    - gofumpt
+    - goimports
+    - gosec
+    - intrange
+    - misspell
+    - nakedret
+    - nilerr
+    - noctx
+    - nolintlint
+    - perfsprint
+    - prealloc
+    - predeclared
+    - reassign
+    - revive
+    - rowserrcheck
+    - sloglint
+    - sqlclosecheck
+    - stylecheck
+    - tenv
+    - testifylint
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+
+linters-settings:
+  gci:
+    sections:
+      - standard
+      - default
+      - prefix(github.com/openfoundry/openfoundry-go)
+  gosec:
+    excludes:
+      - G104 # handled by errcheck
+  errcheck:
+    check-type-assertions: true
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  revive:
+    rules:
+      - name: exported
+        arguments:
+          - disableStutteringCheck
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+        - prealloc
+    - path: libs/proto-gen/
+      linters:
+        - all
+  max-issues-per-linter: 0
+  max-same-issues: 0

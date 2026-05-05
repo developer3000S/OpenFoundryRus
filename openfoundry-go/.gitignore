@@ -1,0 +1,23 @@
+# Build artifacts
+/bin/
+/dist/
+/coverage.out
+/coverage.html
+*.test
+*.prof
+
+# Generated code (regenerated via `make gen`)
+/libs/proto-gen/**/*.pb.go
+/libs/proto-gen/**/*_grpc.pb.go
+
+# Local env / IDE
+.env
+.env.local
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Tooling caches
+/.cache/
+/.golangci-cache/
