@@ -5,6 +5,7 @@ const MIGRATED_ROUTES: { path: string; title: string; description: string }[] = 
   { path: '/dashboards', title: 'Dashboards', description: 'Charts, tables, KPI cards on a responsive grid.' },
   { path: '/lineage', title: 'Lineage', description: 'Dataset / pipeline / workflow graph with impact analysis and build dispatch.' },
   { path: '/notebooks', title: 'Notebooks', description: 'Multi-kernel notebooks with Monaco-backed cells and a workspace file tree.' },
+  { path: '/notepad', title: 'Notepad', description: 'Markdown documents with widget embeds, presence, and AIP knowledge-base indexing.' },
   { path: '/contour', title: 'Contour', description: 'Top-down dataset analysis: join, drill, chart-to-chart filter, materialize.' },
   { path: '/quiver', title: 'Quiver', description: 'Time-series + grouped object analytics with reusable Vega-Lite visual functions.' },
   { path: '/vertex', title: 'Vertex', description: 'Cytoscape graph + templates + scenarios + media annotations + EChartView sidecars.' },
