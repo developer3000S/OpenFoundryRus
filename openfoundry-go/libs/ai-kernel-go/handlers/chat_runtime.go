@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -10,10 +11,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/openfoundry/openfoundry-go/libs/ai-kernel-go/domain/copilot"
 	"github.com/openfoundry/openfoundry-go/libs/ai-kernel-go/domain/evaluation"
 	"github.com/openfoundry/openfoundry-go/libs/ai-kernel-go/domain/llm"
+	"github.com/openfoundry/openfoundry-go/libs/ai-kernel-go/domain/rag"
 	"github.com/openfoundry/openfoundry-go/libs/ai-kernel-go/models"
 )
 
@@ -173,6 +177,386 @@ func usageSummary(provider models.LlmProvider, promptTokens, completionTokens, l
 		CacheHit:         cacheHit,
 	}
 }
+
+// findCachedResponse mirrors fn find_cached_response — scans the
+// most recent 64 ai_semantic_cache rows for the given kind, picks the
+// best (cosine_similarity ≥ 0.92) match. On hit increments hit_count
+// + last_hit_at and returns (raw response payload, metadata, original
+// provider_id). Returns nil payload on miss.
+func findCachedResponse(ctx context.Context, pool *pgxpool.Pool, kind, prompt string) (json.RawMessage, *models.SemanticCacheMetadata, *uuid.UUID, error) {
+	rows, err := pool.Query(ctx,
+		`SELECT id, cache_key, fingerprint, response, provider_id
+         FROM ai_semantic_cache
+         WHERE kind = $1
+         ORDER BY last_hit_at DESC
+         LIMIT 64`, kind)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer rows.Close()
+
+	exactKey := llm.CacheKey(kind, prompt)
+	queryFingerprint := llm.Fingerprint(prompt)
+
+	type match struct {
+		id          uuid.UUID
+		cacheKey    string
+		response    json.RawMessage
+		providerID  *uuid.UUID
+		score       float32
+	}
+	var best *match
+
+	for rows.Next() {
+		var (
+			id            uuid.UUID
+			cacheKey      string
+			fingerprintB  []byte
+			responseB     []byte
+			providerID    *uuid.UUID
+		)
+		if err := rows.Scan(&id, &cacheKey, &fingerprintB, &responseB, &providerID); err != nil {
+			return nil, nil, nil, err
+		}
+		var rowFingerprint []float32
+		if len(fingerprintB) > 0 {
+			_ = json.Unmarshal(fingerprintB, &rowFingerprint)
+		}
+
+		score := float32(0)
+		if cacheKey == exactKey {
+			score = 1.0
+		} else {
+			score = llm.CosineSimilarity(queryFingerprint, rowFingerprint)
+		}
+		if score < 0.92 {
+			continue
+		}
+		if best == nil || score > best.score {
+			best = &match{
+				id:         id,
+				cacheKey:   cacheKey,
+				response:   responseB,
+				providerID: providerID,
+				score:      score,
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, nil, err
+	}
+	if best == nil {
+		return nil, nil, nil, nil
+	}
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE ai_semantic_cache SET hit_count = hit_count + 1, last_hit_at = NOW() WHERE id = $1`,
+		best.id); err != nil {
+		return nil, nil, nil, err
+	}
+	meta := &models.SemanticCacheMetadata{
+		CacheKey:        best.cacheKey,
+		Hit:             true,
+		SimilarityScore: best.score,
+	}
+	return best.response, meta, best.providerID, nil
+}
+
+// upsertCachedResponse mirrors fn upsert_cached_response — INSERT
+// ON CONFLICT updates the row (kind, cache_key) with the fresh
+// fingerprint + response + provider_id. Returns the metadata footer
+// (hit=false, similarity=0.0) for inclusion in the live reply.
+func upsertCachedResponse(ctx context.Context, pool *pgxpool.Pool, kind, prompt string, providerID *uuid.UUID, payload any) (models.SemanticCacheMetadata, error) {
+	cacheKey := llm.CacheKey(kind, prompt)
+	normalizedPrompt := llm.NormalizeText(prompt)
+	fingerprint := llm.Fingerprint(prompt)
+	fingerprintJSON, _ := json.Marshal(fingerprint)
+	responseJSON, _ := json.Marshal(payload)
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		id = uuid.New()
+	}
+	_, err = pool.Exec(ctx,
+		`INSERT INTO ai_semantic_cache (
+            id, kind, cache_key, normalized_prompt, fingerprint,
+            response, provider_id, hit_count, last_hit_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 0, NOW())
+         ON CONFLICT (kind, cache_key) DO UPDATE SET
+            normalized_prompt = EXCLUDED.normalized_prompt,
+            fingerprint = EXCLUDED.fingerprint,
+            response = EXCLUDED.response,
+            provider_id = EXCLUDED.provider_id,
+            last_hit_at = NOW()`,
+		id, kind, cacheKey, normalizedPrompt, fingerprintJSON,
+		responseJSON, providerID,
+	)
+	if err != nil {
+		return models.SemanticCacheMetadata{}, err
+	}
+	return models.SemanticCacheMetadata{
+		CacheKey:        cacheKey,
+		Hit:             false,
+		SimilarityScore: 0,
+	}, nil
+}
+
+// loadDocumentsForBases mirrors fn load_documents_for_bases — for
+// each KB id, fetch the documents (latest first) and aggregate.
+func loadDocumentsForBases(ctx context.Context, pool *pgxpool.Pool, knowledgeBaseIDs []uuid.UUID) ([]models.KnowledgeDocument, error) {
+	out := make([]models.KnowledgeDocument, 0)
+	for _, kbID := range knowledgeBaseIDs {
+		rows, err := pool.Query(ctx,
+			`SELECT `+knowledgeDocumentColumns+` FROM ai_knowledge_documents
+             WHERE knowledge_base_id = $1
+             ORDER BY updated_at DESC`, kbID)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			d, err := scanKnowledgeDocument(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, d)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// cachedCopilotPayload is the cacheable subset of the copilot reply
+// (mirrors Rust struct CachedCopilotPayload).
+type cachedCopilotPayload struct {
+	Answer              string                          `json:"answer"`
+	SuggestedSQL        *string                         `json:"suggested_sql"`
+	PipelineSuggestions []string                        `json:"pipeline_suggestions"`
+	OntologyHints       []string                        `json:"ontology_hints"`
+	CitedKnowledge      []models.KnowledgeSearchResult  `json:"cited_knowledge"`
+}
+
+// AskCopilot handles `POST /api/v1/copilot/ask`. Mirrors fn
+// ask_copilot verbatim: validates → loads providers → cache lookup
+// (skips cached row when private-network policy doesn't accept the
+// cached provider) → routes provider → loads KB docs + RAG retrieval
+// → copilot.Assist deterministic draft → llm.CompleteText (skipped
+// when guardrail blocked) → upsert cache → record usage → return.
+func (h *ChatHandlers) AskCopilot(w http.ResponseWriter, r *http.Request) {
+	var body models.CopilotRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(body.Question) == "" {
+		writeError(w, http.StatusBadRequest, "copilot question is required")
+		return
+	}
+	ctx := r.Context()
+
+	providers, err := loadProviderRows(ctx, h.Pool)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	if len(providers) == 0 {
+		writeError(w, http.StatusNotFound, "no AI providers configured")
+		return
+	}
+
+	promptUsed := fmt.Sprintf("question=%s datasets=%v ontology=%v knowledge_bases=%v",
+		body.Question, body.DatasetIDs, body.OntologyTypeIDs, body.KnowledgeBaseIDs)
+	guardrail := llm.EvaluateText(body.Question)
+	privacy := privacyReason(guardrail, false)
+	required := []string{"text"}
+
+	// Cache fast-path.
+	cachedRaw, cachedMeta, cachedProviderID, err := findCachedResponse(ctx, h.Pool, "copilot", promptUsed)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	if cachedMeta != nil && len(cachedRaw) > 0 {
+		var cachedPayload cachedCopilotPayload
+		if err := json.Unmarshal(cachedRaw, &cachedPayload); err == nil {
+			// Pick the originating provider; fall back to providers[0].
+			var cachedProvider models.LlmProvider
+			cachedProvider = providers[0]
+			if cachedProviderID != nil {
+				for _, p := range providers {
+					if p.ID == *cachedProviderID {
+						cachedProvider = p
+						break
+					}
+				}
+			}
+			useCached := true
+			if privacy != nil {
+				useCached = llm.ProviderUsesPrivateNetwork(cachedProvider)
+			}
+			if useCached {
+				usage := usageSummary(cachedProvider,
+					llm.EstimateTokens(promptUsed),
+					llm.EstimateTokens(cachedPayload.Answer),
+					0, true)
+				_ = recordUsageEvent(ctx, h.Pool, cachedProvider.ID, nil,
+					"copilot", "copilot", "text", usage, nil,
+					map[string]any{
+						"cache_key":            cachedMeta.CacheKey,
+						"cache_hit":            true,
+						"knowledge_base_count": len(body.KnowledgeBaseIDs),
+					})
+				writeJSON(w, http.StatusOK, models.CopilotResponse{
+					Answer:              cachedPayload.Answer,
+					SuggestedSQL:        cachedPayload.SuggestedSQL,
+					PipelineSuggestions: cachedPayload.PipelineSuggestions,
+					OntologyHints:       cachedPayload.OntologyHints,
+					CitedKnowledge:      cachedPayload.CitedKnowledge,
+					ProviderName:        cachedProvider.Name,
+					Cache:               *cachedMeta,
+					Usage:               usage,
+					CreatedAt:           time.Now().UTC(),
+				})
+				return
+			}
+		}
+	}
+
+	routed := llm.RouteProviders(providers, body.PreferredProviderID, "copilot", required, false, privacy != nil)
+	provider := llm.SelectProvider(routed, true)
+	if provider == nil {
+		writeError(w, http.StatusNotFound, "no AI provider available")
+		return
+	}
+
+	documents, err := loadDocumentsForBases(ctx, h.Pool, body.KnowledgeBaseIDs)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	citedKnowledge := rag.Search(body.Question, documents, 6, 0.55)
+
+	draft := copilot.Assist(body.Question, body.DatasetIDs, body.OntologyTypeIDs,
+		citedKnowledge, body.IncludeSQL, body.IncludePipelinePlan)
+
+	var providerAnswer string
+	var promptTokens, completionTokens, totalTokens int32
+	var latencyMs int32
+
+	if !guardrail.Blocked {
+		startedAt := time.Now()
+
+		// Build the LLM user prompt mirroring the Rust formatter.
+		suggestedSQL := ""
+		if draft.SuggestedSQL != nil {
+			suggestedSQL = *draft.SuggestedSQL
+		}
+		knowledgeContext := make([]string, 0, len(citedKnowledge))
+		for _, hit := range citedKnowledge {
+			knowledgeContext = append(knowledgeContext, fmt.Sprintf("- %s: %s", hit.DocumentTitle, hit.Excerpt))
+		}
+		userPrompt := fmt.Sprintf(
+			"Question: %s\nDraft answer: %s\nSuggested SQL: %q\nPipeline suggestions: %v\nOntology hints: %v\nKnowledge context:\n%s",
+			body.Question, draft.Answer, suggestedSQL,
+			draft.PipelineSuggestions, draft.OntologyHints,
+			strings.Join(knowledgeContext, "\n"))
+
+		maxOut := provider.MaxOutputTokens
+		if maxOut > 512 {
+			maxOut = 512
+		}
+		completion, completionErr := llm.CompleteText(ctx, nil, provider,
+			"You are OpenFoundry Copilot. Ground answers in retrieval context and suggested platform actions.",
+			userPrompt, nil, 0.2, maxOut)
+		latencyMs = int32(time.Since(startedAt).Milliseconds())
+		if latencyMs < 0 {
+			latencyMs = 0
+		}
+		if completionErr != nil {
+			writeError(w, http.StatusInternalServerError, completionErr.Error())
+			return
+		}
+		providerAnswer = completion.Text
+		promptTokens = completion.PromptTokens
+		if promptTokens <= 0 {
+			promptTokens = llm.EstimateTokens(promptUsed)
+		}
+		completionTokens = completion.CompletionTokens
+		if completionTokens <= 0 {
+			completionTokens = llm.EstimateTokens(providerAnswer)
+		}
+		totalTokens = completion.TotalTokens
+		if totalTokens <= 0 {
+			totalTokens = promptTokens + completionTokens
+		}
+	} else {
+		providerAnswer = "Guardrails blocked this copilot request. Remove unsafe instructions and retry."
+		promptTokens = llm.EstimateTokens(promptUsed)
+	}
+
+	var usage models.LlmUsageSummary
+	if guardrail.Blocked {
+		usage = models.LlmUsageSummary{
+			PromptTokens:     promptTokens,
+			CompletionTokens: 0,
+			TotalTokens:      promptTokens,
+			EstimatedCostUSD: 0,
+			LatencyMs:        0,
+			NetworkScope:     provider.RouteRules.NetworkScope,
+			CacheHit:         false,
+		}
+	} else {
+		usage = usageSummary(*provider, promptTokens, completionTokens, latencyMs, false)
+		usage.TotalTokens = totalTokens
+	}
+
+	payload := cachedCopilotPayload{
+		Answer:         providerAnswer,
+		CitedKnowledge: citedKnowledge,
+	}
+	if !guardrail.Blocked {
+		payload.SuggestedSQL = draft.SuggestedSQL
+		payload.PipelineSuggestions = draft.PipelineSuggestions
+		payload.OntologyHints = draft.OntologyHints
+	}
+
+	cache, err := upsertCachedResponse(ctx, h.Pool, "copilot", promptUsed, &provider.ID, payload)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	if err := recordUsageEvent(ctx, h.Pool, provider.ID, nil,
+		"copilot", "copilot", "text", usage, nil,
+		map[string]any{
+			"cache_key":           cache.CacheKey,
+			"cache_hit":           false,
+			"knowledge_hit_count": len(citedKnowledge),
+		}); err != nil {
+		dbError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, models.CopilotResponse{
+		Answer:              payload.Answer,
+		SuggestedSQL:        payload.SuggestedSQL,
+		PipelineSuggestions: payload.PipelineSuggestions,
+		OntologyHints:       payload.OntologyHints,
+		CitedKnowledge:      payload.CitedKnowledge,
+		ProviderName:        provider.Name,
+		Cache:               cache,
+		Usage:               usage,
+		CreatedAt:           time.Now().UTC(),
+	})
+}
+
+// silenceUnused is a helper to reference imports that may be conditionally
+// used — keeps `errors` and `pgx` available for follow-up slices that
+// distinguish pgx.ErrNoRows.
+var _ = errors.New
+var _ = pgx.ErrNoRows
 
 // recordUsageEvent mirrors fn record_usage_event — best-effort insert
 // into ai_llm_usage_events. Non-fatal at the call site (chat /

@@ -437,21 +437,6 @@ func (h *ChatHandlers) CreateChatCompletion(w http.ResponseWriter, r *http.Reque
 	writeError(w, http.StatusNotImplemented, "chat completion lands with libs/ai-kernel-go/domain/llm/runtime port")
 }
 
-// AskCopilot handles `POST /api/v1/copilot/ask`. Stub until runtime
-// port lands — see CreateChatCompletion comment.
-func (h *ChatHandlers) AskCopilot(w http.ResponseWriter, r *http.Request) {
-	var body models.CopilotRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if strings.TrimSpace(body.Question) == "" {
-		writeError(w, http.StatusBadRequest, "copilot question is required")
-		return
-	}
-	writeError(w, http.StatusNotImplemented, "copilot ask lands with libs/ai-kernel-go/domain/llm/runtime port")
-}
-
 // conversationSummary mirrors fn conversation_summary in chat.rs.
 func conversationSummary(c models.Conversation) models.ConversationSummary {
 	preview := "No messages yet"
