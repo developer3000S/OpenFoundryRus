@@ -143,6 +143,14 @@ export const router = createBrowserRouter([
         lazy: async () => ({ Component: (await import('./routes/code-repos/CodeReposPage')).CodeReposPage }),
       },
       {
+        path: 'marketplace',
+        lazy: async () => ({ Component: (await import('./routes/marketplace/MarketplacePage')).MarketplacePage }),
+      },
+      {
+        path: 'marketplace/:id',
+        lazy: async () => ({ Component: (await import('./routes/marketplace/MarketplaceProductPage')).MarketplaceProductPage }),
+      },
+      {
         path: 'charts-demo',
         lazy: async () => ({ Component: (await import('./routes/charts-demo/ChartsDemoPage')).ChartsDemoPage }),
       },
