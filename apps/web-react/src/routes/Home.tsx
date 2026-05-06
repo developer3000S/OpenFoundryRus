@@ -26,6 +26,7 @@ const MIGRATED_ROUTES: { path: string; title: string; description: string }[] = 
   { path: '/audit', title: 'Audit', description: 'Immutable audit chain + retention policies + GDPR workflows + governance templates.' },
   { path: '/code-repos', title: 'Code repos', description: 'Object-backed repos: branches + commits + CI + merge requests + reviewers + comments.' },
   { path: '/marketplace', title: 'Marketplace', description: 'Listings + versions + reviews + installs + product fleets + enrollment branches.' },
+  { path: '/virtual-tables', title: 'Virtual tables', description: 'Source-pointer tables (BigQuery, Snowflake, Iceberg…) with capability + update detection management.' },
   { path: '/auth/login', title: 'Sign in', description: 'Login + register + MFA + SSO callback.' },
   { path: '/charts-demo', title: 'Charts demo', description: 'ECharts wrapper validator.' },
   { path: '/monaco-demo', title: 'Monaco demo', description: 'Monaco editor wrapper validator.' },

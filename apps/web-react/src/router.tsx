@@ -151,6 +151,14 @@ export const router = createBrowserRouter([
         lazy: async () => ({ Component: (await import('./routes/marketplace/MarketplaceProductPage')).MarketplaceProductPage }),
       },
       {
+        path: 'virtual-tables',
+        lazy: async () => ({ Component: (await import('./routes/virtual-tables/VirtualTablesPage')).VirtualTablesPage }),
+      },
+      {
+        path: 'virtual-tables/:rid',
+        lazy: async () => ({ Component: (await import('./routes/virtual-tables/VirtualTableDetailPage')).VirtualTableDetailPage }),
+      },
+      {
         path: 'charts-demo',
         lazy: async () => ({ Component: (await import('./routes/charts-demo/ChartsDemoPage')).ChartsDemoPage }),
       },
