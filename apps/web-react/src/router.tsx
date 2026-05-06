@@ -203,6 +203,14 @@ export const router = createBrowserRouter([
         lazy: async () => ({ Component: (await import('./routes/machinery/MachineryPage')).MachineryPage }),
       },
       {
+        path: 'media-sets',
+        lazy: async () => ({ Component: (await import('./routes/media-sets/MediaSetsPage')).MediaSetsPage }),
+      },
+      {
+        path: 'media-sets/:rid',
+        lazy: async () => ({ Component: (await import('./routes/media-sets/MediaSetDetailPage')).MediaSetDetailPage }),
+      },
+      {
         path: 'charts-demo',
         lazy: async () => ({ Component: (await import('./routes/charts-demo/ChartsDemoPage')).ChartsDemoPage }),
       },
