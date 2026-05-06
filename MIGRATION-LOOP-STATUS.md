@@ -225,9 +225,10 @@ commits + 1 small handlers commit:
 - 3.7b.2 ✅ JWKS rotation half COMPLETE (4 sub-slices done)
 - 3.7b.3 (SCIM):
     - 3.7b.3.1 ✅ types + metadata + discovery + GetUser + ListUsers + in-mem store (commit `b28165a4`, 1836 LOC + 33 tests)
-    - 3.7b.3.2 ⏳ CreateUser + PatchUser + DeleteUser
-    - 3.7b.3.3 ⏳ Group endpoints
-    - 3.7b.3.4 ⏳ PostgresScimStore
+    - 3.7b.3.2 ✅ CreateUser + PatchUser + DeleteUser + helpers + org resolver (commit `b56eefde`, 1569 LOC + 29 tests)
+    - 3.7b.3.3 ✅ Group endpoints (CRUD + member ops + patch) (commit `134ca67f`, 1763 LOC + 35 tests)
+    - 3.7b.3.4 ⏳ PostgresScimStore (User + Group impls, ~600 LOC pgx)
+    - **Total so far:** ~5170 LOC + 97 tests across 3 sub-slices, full read+write SCIM contract green.
 - 3.7a (SAML, slice 5b) — pending (~850 LOC + Go XML signing libs)
 
 **Next action (iter 7):** P3.7b.3 SCIM is the big remaining
