@@ -1,8 +1,26 @@
 # Phase 6 cherry-pick inventory
 
 State: **2026-05-06**, after Phase 4 closed (object-database foundation
-landed). All Phase 0–4 services have foundation ports (modulo pyo3
-sidecars that are STOP-and-ask). This document scopes what is left.
+landed) and the identity-federation autonomous run wrapped. All
+Phase 0–4 services have foundation ports (modulo pyo3 sidecars that
+are STOP-and-ask). This document scopes what is left.
+
+**Recent additions (post-original-inventory):**
+
+- `services/identity-federation-service/` is now **feature-complete**
+  on the Go side: slice 5a OIDC + slice 5b SAML 2.0 + slice 6 RBAC +
+  slice 7a restricted views + slice 8 (Cedar wiring + JWKS rotation
+  with Vault Transit + SCIM 2.0 endpoints + Postgres stores).
+  ~10k LOC of Go across `internal/{oidc,saml,scim,cedarauthz,
+  jwksrotation,handlers,repo,server}` plus tests.
+- Phase-1 tier-2 libs that were "deferred until consumed" mostly
+  landed during this run: `cassandra-kernel` (5 stores, ~3500 LOC),
+  `state-machine`, `scheduling-cron` (parser+evaluator+DST handling),
+  `saga`, `search-abstraction` (in-memory + trait surface).
+- Phase-5 ai/ml kernel partial port: `libs/ai-kernel-go/domain/llm/runtime`,
+  `libs/ai-kernel-go/domain/agents/executor`,
+  `libs/ml-kernel-go/domain/interop`, training/runner — unblocks the
+  8 ai/ml shell services at the handler layer.
 
 ## Services NOT yet ported
 
