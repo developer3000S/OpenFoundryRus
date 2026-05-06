@@ -37,6 +37,7 @@ const MIGRATED_ROUTES: { path: string; title: string; description: string }[] = 
   { path: '/streaming', title: 'Streaming', description: 'Streams + windows + topologies + connectors + live tail. JSON-driven editors.' },
   { path: '/machinery', title: 'Machinery', description: 'Ontology rules + machinery insights + queue depth/recommendations + workflow approvals.' },
   { path: '/media-sets', title: 'Media sets', description: 'Branch-aware media stores: list + create + upload + items detail with delete.' },
+  { path: '/object-link-types', title: 'Object & link types', description: 'CRUD on object types, properties, link types, shared property types with attach/detach.' },
   { path: '/auth/login', title: 'Sign in', description: 'Login + register + MFA + SSO callback.' },
   { path: '/charts-demo', title: 'Charts demo', description: 'ECharts wrapper validator.' },
   { path: '/monaco-demo', title: 'Monaco demo', description: 'Monaco editor wrapper validator.' },

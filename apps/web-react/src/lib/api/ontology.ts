@@ -1514,3 +1514,149 @@ export function executeFunctionPackage(id: string, body: { input: Record<string,
     body,
   );
 }
+
+// ────────────────────────────────────────────────────────────────
+// Object/Link/Property/SharedProperty mutations — used by
+// /object-link-types, /ontology-manager, /ontology, /action-types.
+// ────────────────────────────────────────────────────────────────
+
+export interface PropertyInlineEditConfig {
+  action_type_id: string;
+  input_name?: string | null;
+}
+
+export function createObjectType(body: {
+  name: string;
+  display_name?: string;
+  description?: string;
+  primary_key_property?: string;
+  icon?: string;
+  color?: string;
+}) {
+  return api.post<ObjectType>('/ontology/types', body);
+}
+
+export function updateObjectType(
+  id: string,
+  body: {
+    display_name?: string;
+    description?: string;
+    primary_key_property?: string;
+    icon?: string;
+    color?: string;
+  },
+) {
+  return api.put<ObjectType>(`/ontology/types/${id}`, body);
+}
+
+export function deleteObjectType(id: string) {
+  return api.delete(`/ontology/types/${id}`);
+}
+
+export function createProperty(
+  typeId: string,
+  body: {
+    name: string;
+    display_name?: string;
+    description?: string;
+    property_type: string;
+    required?: boolean;
+    unique_constraint?: boolean;
+    time_dependent?: boolean;
+    default_value?: unknown;
+    validation_rules?: unknown;
+    inline_edit_config?: PropertyInlineEditConfig | null;
+  },
+) {
+  return api.post<Property>(`/ontology/types/${typeId}/properties`, body);
+}
+
+export function updateProperty(
+  typeId: string,
+  propertyId: string,
+  body: {
+    display_name?: string;
+    description?: string;
+    required?: boolean;
+    unique_constraint?: boolean;
+    time_dependent?: boolean;
+    default_value?: unknown;
+    validation_rules?: unknown;
+    inline_edit_config?: PropertyInlineEditConfig | null;
+  },
+) {
+  return api.patch<Property>(`/ontology/types/${typeId}/properties/${propertyId}`, body);
+}
+
+export function deleteProperty(typeId: string, propertyId: string) {
+  return api.delete(`/ontology/types/${typeId}/properties/${propertyId}`);
+}
+
+export function createSharedPropertyType(body: {
+  name: string;
+  display_name?: string;
+  description?: string;
+  property_type: string;
+  required?: boolean;
+  unique_constraint?: boolean;
+  time_dependent?: boolean;
+  default_value?: unknown;
+  validation_rules?: unknown;
+}) {
+  return api.post<SharedPropertyType>('/ontology/shared-property-types', body);
+}
+
+export function updateSharedPropertyType(
+  id: string,
+  body: {
+    display_name?: string;
+    description?: string;
+    required?: boolean;
+    unique_constraint?: boolean;
+    time_dependent?: boolean;
+    default_value?: unknown;
+    validation_rules?: unknown;
+  },
+) {
+  return api.patch<SharedPropertyType>(`/ontology/shared-property-types/${id}`, body);
+}
+
+export function deleteSharedPropertyType(id: string) {
+  return api.delete(`/ontology/shared-property-types/${id}`);
+}
+
+export function listTypeSharedPropertyTypes(typeId: string) {
+  return api
+    .get<{ data: SharedPropertyType[] }>(`/ontology/types/${typeId}/shared-property-types`)
+    .then((response) => response.data);
+}
+
+export function attachSharedPropertyType(typeId: string, sharedPropertyTypeId: string) {
+  return api.post<{ object_type_id: string; shared_property_type_id: string }>(
+    `/ontology/types/${typeId}/shared-property-types/${sharedPropertyTypeId}`,
+    {},
+  );
+}
+
+export function detachSharedPropertyType(typeId: string, sharedPropertyTypeId: string) {
+  return api.delete(`/ontology/types/${typeId}/shared-property-types/${sharedPropertyTypeId}`);
+}
+
+export function createLinkType(body: {
+  name: string;
+  display_name?: string;
+  description?: string;
+  source_type_id: string;
+  target_type_id: string;
+  cardinality?: string;
+}) {
+  return api.post<LinkType>('/ontology/links', body);
+}
+
+export function updateLinkType(id: string, body: { display_name?: string; description?: string; cardinality?: string }) {
+  return api.patch<LinkType>(`/ontology/links/${id}`, body);
+}
+
+export function deleteLinkType(id: string) {
+  return api.delete(`/ontology/links/${id}`);
+}
