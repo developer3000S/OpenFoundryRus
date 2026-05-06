@@ -171,6 +171,14 @@ export const router = createBrowserRouter([
         lazy: async () => ({ Component: (await import('./routes/object-explorer/ObjectExplorerPage')).ObjectExplorerPage }),
       },
       {
+        path: 'iceberg-tables',
+        lazy: async () => ({ Component: (await import('./routes/iceberg-tables/IcebergTablesPage')).IcebergTablesPage }),
+      },
+      {
+        path: 'iceberg-tables/:id',
+        lazy: async () => ({ Component: (await import('./routes/iceberg-tables/IcebergTableDetailPage')).IcebergTableDetailPage }),
+      },
+      {
         path: 'charts-demo',
         lazy: async () => ({ Component: (await import('./routes/charts-demo/ChartsDemoPage')).ChartsDemoPage }),
       },
