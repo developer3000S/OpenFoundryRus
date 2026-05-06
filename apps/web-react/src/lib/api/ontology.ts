@@ -1373,3 +1373,144 @@ export function createProjectMigration(
 ) {
   return api.post<OntologyProjectMigration>(`/ontology/projects/${id}/migrations`, body);
 }
+
+// ────────────────────────────────────────────────────────────────
+// Function packages — used by /functions, /object-monitors, /ml.
+// ────────────────────────────────────────────────────────────────
+
+export interface FunctionCapabilities {
+  allow_ontology_read: boolean;
+  allow_ontology_write: boolean;
+  allow_ai: boolean;
+  allow_network: boolean;
+  timeout_seconds: number;
+  max_source_bytes: number;
+}
+
+export interface FunctionPackage {
+  id: string;
+  name: string;
+  version: string;
+  display_name: string;
+  description: string;
+  runtime: string;
+  source: string;
+  entrypoint: string;
+  capabilities: FunctionCapabilities;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FunctionPackageRun {
+  id: string;
+  function_package_id: string;
+  function_package_name: string;
+  function_package_version: string;
+  runtime: string;
+  status: 'success' | 'failure' | string;
+  invocation_kind: 'simulation' | 'action' | string;
+  action_id: string | null;
+  action_name: string | null;
+  object_type_id: string | null;
+  target_object_id: string | null;
+  actor_id: string;
+  duration_ms: number;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string;
+}
+
+export interface FunctionPackageMetrics {
+  package: {
+    id: string;
+    name: string;
+    version: string;
+    display_name: string;
+    runtime: string;
+    entrypoint: string;
+    capabilities: FunctionCapabilities;
+  };
+  total_runs: number;
+  successful_runs: number;
+  failed_runs: number;
+  simulation_runs: number;
+  action_runs: number;
+  success_rate: number;
+  avg_duration_ms: number | null;
+  p95_duration_ms: number | null;
+  max_duration_ms: number | null;
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+}
+
+export function listFunctionPackages(params?: { runtime?: string; search?: string; page?: number; per_page?: number }) {
+  const qs = new URLSearchParams();
+  if (params?.runtime) qs.set('runtime', params.runtime);
+  if (params?.search) qs.set('search', params.search);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.per_page) qs.set('per_page', String(params.per_page));
+  return api.get<{ data: FunctionPackage[]; total: number; page: number; per_page: number }>(
+    `/ontology/functions?${qs}`,
+  );
+}
+
+export function createFunctionPackage(body: {
+  name: string;
+  version?: string;
+  display_name?: string;
+  description?: string;
+  runtime: string;
+  source: string;
+  entrypoint?: string;
+  capabilities?: Partial<FunctionCapabilities>;
+}) {
+  return api.post<FunctionPackage>('/ontology/functions', body);
+}
+
+export function updateFunctionPackage(
+  id: string,
+  body: {
+    display_name?: string;
+    description?: string;
+    source?: string;
+    entrypoint?: string;
+    capabilities?: Partial<FunctionCapabilities>;
+  },
+) {
+  return api.patch<FunctionPackage>(`/ontology/functions/${id}`, body);
+}
+
+export function deleteFunctionPackage(id: string) {
+  return api.delete(`/ontology/functions/${id}`);
+}
+
+export function listFunctionPackageRuns(params?: {
+  function_package_id?: string;
+  invocation_kind?: string;
+  status?: string;
+  page?: number;
+  per_page?: number;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.function_package_id) qs.set('function_package_id', params.function_package_id);
+  if (params?.invocation_kind) qs.set('invocation_kind', params.invocation_kind);
+  if (params?.status) qs.set('status', params.status);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.per_page) qs.set('per_page', String(params.per_page));
+  return api.get<{ data: FunctionPackageRun[]; total: number; page: number; per_page: number }>(
+    `/ontology/functions/runs?${qs}`,
+  );
+}
+
+export function listFunctionPackageMetrics() {
+  return api.get<{ data: FunctionPackageMetrics[] }>('/ontology/functions/metrics');
+}
+
+export function executeFunctionPackage(id: string, body: { input: Record<string, unknown> }) {
+  return api.post<{ result: unknown; logs: unknown[]; duration_ms: number }>(
+    `/ontology/functions/${id}/execute`,
+    body,
+  );
+}

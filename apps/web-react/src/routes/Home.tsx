@@ -33,6 +33,7 @@ const MIGRATED_ROUTES: { path: string; title: string; description: string }[] = 
   { path: '/iceberg-tables', title: 'Iceberg tables', description: 'List + detail (8 tabs): schema, snapshots, metadata, branches, markings, catalog access tokens.' },
   { path: '/ontology-indexing', title: 'Ontology indexing', description: 'Funnel sources + property mappings + run history + health summary for ontology hydration.' },
   { path: '/ontologies', title: 'Ontologies', description: 'Project workspaces: branches, proposals, migrations, resource bindings, working state.' },
+  { path: '/object-monitors', title: 'Object monitors', description: 'Workflow-backed monitors over object sets/types with notification + submit-action steps.' },
   { path: '/auth/login', title: 'Sign in', description: 'Login + register + MFA + SSO callback.' },
   { path: '/charts-demo', title: 'Charts demo', description: 'ECharts wrapper validator.' },
   { path: '/monaco-demo', title: 'Monaco demo', description: 'Monaco editor wrapper validator.' },
