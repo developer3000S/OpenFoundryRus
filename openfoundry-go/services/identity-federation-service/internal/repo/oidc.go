@@ -10,13 +10,17 @@ import (
 )
 
 // OAuthState is one row in oauth_state. The plaintext state token is
-// the row key; verifier + nonce travel with it.
+// the row key; verifier + nonce travel with it. SamlRequestID is
+// non-nil when the row backs a SAML flow (slice 5b) so the callback
+// can validate InResponseTo on the IdP's response — OIDC rows leave
+// it nil.
 type OAuthState struct {
 	State          string
 	CodeVerifier   string
 	Provider       string
 	RedirectAfter  string
 	Nonce          string
+	SamlRequestID  *string
 	IssuedAt       time.Time
 	ExpiresAt      time.Time
 }
@@ -24,9 +28,9 @@ type OAuthState struct {
 // InsertOAuthState persists a state row with the configured TTL.
 func (r *Repo) InsertOAuthState(ctx context.Context, s *OAuthState) error {
 	_, err := r.Pool.Exec(ctx,
-		`INSERT INTO oauth_state (state, code_verifier, provider, redirect_after, nonce, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		s.State, s.CodeVerifier, s.Provider, s.RedirectAfter, s.Nonce, s.ExpiresAt,
+		`INSERT INTO oauth_state (state, code_verifier, provider, redirect_after, nonce, saml_request_id, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		s.State, s.CodeVerifier, s.Provider, s.RedirectAfter, s.Nonce, s.SamlRequestID, s.ExpiresAt,
 	)
 	return err
 }
@@ -40,11 +44,11 @@ func (r *Repo) ConsumeOAuthState(ctx context.Context, state string) (*OAuthState
 	row := r.Pool.QueryRow(ctx,
 		`DELETE FROM oauth_state
 		 WHERE state = $1 AND expires_at > NOW()
-		 RETURNING state, code_verifier, provider, redirect_after, nonce, issued_at, expires_at`,
+		 RETURNING state, code_verifier, provider, redirect_after, nonce, saml_request_id, issued_at, expires_at`,
 		state,
 	)
 	s := &OAuthState{}
-	err := row.Scan(&s.State, &s.CodeVerifier, &s.Provider, &s.RedirectAfter, &s.Nonce, &s.IssuedAt, &s.ExpiresAt)
+	err := row.Scan(&s.State, &s.CodeVerifier, &s.Provider, &s.RedirectAfter, &s.Nonce, &s.SamlRequestID, &s.IssuedAt, &s.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
