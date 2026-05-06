@@ -552,11 +552,352 @@ func (h *ChatHandlers) AskCopilot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// silenceUnused is a helper to reference imports that may be conditionally
-// used — keeps `errors` and `pgx` available for follow-up slices that
-// distinguish pgx.ErrNoRows.
-var _ = errors.New
-var _ = pgx.ErrNoRows
+// persistConversation mirrors fn persist_conversation. Either appends
+// the (user, assistant) message pair onto an existing conversation
+// (if conversation_id resolves to a row) or inserts a fresh row with
+// the two messages as the seed. Returns the conversation_id used.
+func persistConversation(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	conversationID *uuid.UUID,
+	userMessage string,
+	userAttachments []models.ChatAttachment,
+	reply string,
+	providerID uuid.UUID,
+	citations []models.KnowledgeSearchResult,
+	guardrail models.GuardrailVerdict,
+	cacheHit bool,
+) (uuid.UUID, error) {
+	now := time.Now().UTC()
+	g := guardrail
+	userEntry := models.ChatMessage{
+		Role:             "user",
+		Content:          userMessage,
+		Attachments:      userAttachments,
+		GuardrailVerdict: &g,
+		CreatedAt:        now,
+	}
+	assistantEntry := models.ChatMessage{
+		Role:       "assistant",
+		Content:    reply,
+		ProviderID: &providerID,
+		Citations:  citations,
+		CreatedAt:  now,
+	}
+
+	if conversationID != nil {
+		row := pool.QueryRow(ctx,
+			`SELECT `+conversationColumns+` FROM ai_conversations WHERE id = $1`, *conversationID)
+		current, err := scanConversation(row)
+		if err == nil {
+			messages := append(current.Messages, userEntry, assistantEntry)
+			messagesJSON, _ := json.Marshal(messages)
+			if _, err := pool.Exec(ctx,
+				`UPDATE ai_conversations SET messages = $2, provider_id = $3,
+                    last_cache_hit = $4, last_guardrail_blocked = $5,
+                    last_activity_at = NOW() WHERE id = $1`,
+				*conversationID, messagesJSON, providerID, cacheHit, guardrail.Blocked); err != nil {
+				return uuid.Nil, err
+			}
+			return *conversationID, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, err
+		}
+		// fall through to insert with a fresh id
+	}
+
+	newID, err := uuid.NewV7()
+	if err != nil {
+		newID = uuid.New()
+	}
+	title := summarizeTitle(userMessage)
+	messages := []models.ChatMessage{userEntry, assistantEntry}
+	messagesJSON, _ := json.Marshal(messages)
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO ai_conversations (id, title, messages, provider_id,
+            last_cache_hit, last_guardrail_blocked)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+		newID, title, messagesJSON, providerID, cacheHit, guardrail.Blocked); err != nil {
+		return uuid.Nil, err
+	}
+	return newID, nil
+}
+
+// cachedChatPayload is the cacheable subset of the chat-completion
+// reply (mirrors Rust struct CachedChatPayload).
+type cachedChatPayload struct {
+	Reply            string                          `json:"reply"`
+	Citations        []models.KnowledgeSearchResult  `json:"citations"`
+	CompletionTokens int32                           `json:"completion_tokens"`
+}
+
+// CreateChatCompletion handles `POST /api/v1/chat/completions`.
+// Mirrors fn create_chat_completion verbatim:
+//
+//  1. validate user_message + load providers.
+//  2. resolve base prompt (template + variables, or system_prompt
+//     fallback, or the canned "OpenFoundry copilot" line).
+//  3. evaluate guardrail + derive privacy/required_modalities.
+//  4. (Rust additionally calls enforce_purpose_checkpoint here when
+//     require_private_network or PII is detected — that integration
+//     is deferred until the auth-middleware-go purpose-checkpoint
+//     surface lands; route-level gating + guardrail.blocked covers
+//     the policy outcomes for now.)
+//  5. retrieve KB hits when knowledge_base_id is set.
+//  6. build prompt_used signature + route via gateway.
+//  7. cache fast-path: cosine ≥ 0.92, skipping cached row when
+//     private-network policy doesn't accept the cached provider.
+//  8. live path: llm.CompleteText (skipped when blocked), build
+//     usage, upsert cache, persistConversation, recordUsageEvent.
+func (h *ChatHandlers) CreateChatCompletion(w http.ResponseWriter, r *http.Request) {
+	var body models.ChatCompletionRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(body.UserMessage) == "" {
+		writeError(w, http.StatusBadRequest, "chat completion requires a user message")
+		return
+	}
+	ctx := r.Context()
+
+	providers, err := loadProviderRows(ctx, h.Pool)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	if len(providers) == 0 {
+		writeError(w, http.StatusNotFound, "no AI providers configured")
+		return
+	}
+
+	// 2. Base prompt
+	basePrompt := ""
+	if body.PromptTemplateID != nil {
+		ph := &PromptsHandlers{Pool: h.Pool}
+		template, err := ph.loadPromptRow(ctx, *body.PromptTemplateID)
+		if err != nil {
+			dbError(w, err)
+			return
+		}
+		if template == nil {
+			writeError(w, http.StatusNotFound, "prompt template not found")
+			return
+		}
+		rendered, _ := llm.InterpolateTemplate(template.CurrentVersion.Content, body.PromptVariables, false)
+		if body.SystemPrompt != nil {
+			basePrompt = *body.SystemPrompt + "\n\n" + rendered
+		} else {
+			basePrompt = rendered
+		}
+	} else if body.SystemPrompt != nil {
+		basePrompt = *body.SystemPrompt
+	} else {
+		basePrompt = "You are the OpenFoundry platform copilot. Provide grounded operational guidance."
+	}
+
+	guardrail := llm.EvaluateText(body.UserMessage)
+	required := requiredModalities(body.Attachments)
+	privacy := privacyReason(guardrail, body.RequirePrivateNetwork)
+
+	// 5. Knowledge retrieval
+	knowledgeHits := []models.KnowledgeSearchResult{}
+	if body.KnowledgeBaseID != nil {
+		docs, err := loadDocumentsForBases(ctx, h.Pool, []uuid.UUID{*body.KnowledgeBaseID})
+		if err != nil {
+			dbError(w, err)
+			return
+		}
+		knowledgeHits = rag.Search(body.UserMessage, docs, 4, 0.55)
+	}
+
+	// 6. Prompt-used signature + routing
+	knowledgeContext := make([]string, 0, len(knowledgeHits))
+	for _, hit := range knowledgeHits {
+		knowledgeContext = append(knowledgeContext, fmt.Sprintf("- %s: %s", hit.DocumentTitle, hit.Excerpt))
+	}
+	promptUsed := fmt.Sprintf(
+		"%s\n\nUser request: %s\n\nAttachments:\n%s\n\nRetrieved context count: %d\n\nRetrieved context:\n%s",
+		basePrompt, guardrail.RedactedText, attachmentContext(body.Attachments),
+		len(knowledgeHits), strings.Join(knowledgeContext, "\n"))
+
+	routed := llm.RouteProviders(providers, body.PreferredProviderID, "chat", required, body.RequirePrivateNetwork, privacy != nil)
+	if body.RequirePrivateNetwork && len(routed) == 0 {
+		writeError(w, http.StatusBadRequest, "no private-network AI provider is configured for this request")
+		return
+	}
+	provider := llm.SelectProvider(routed, body.FallbackEnabled)
+	if provider == nil {
+		writeError(w, http.StatusNotFound, "no AI provider available")
+		return
+	}
+	routing := routingMetadata(*provider, body.RequirePrivateNetwork, privacy, routed, required)
+	modality := modalityLabel(required)
+
+	// 7. Cache fast-path
+	cachedRaw, cachedMeta, cachedProviderID, err := findCachedResponse(ctx, h.Pool, "chat", promptUsed)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	if cachedMeta != nil && len(cachedRaw) > 0 {
+		var cachedPayload cachedChatPayload
+		if err := json.Unmarshal(cachedRaw, &cachedPayload); err == nil {
+			cachedProvider := *provider
+			if cachedProviderID != nil {
+				for _, p := range providers {
+					if p.ID == *cachedProviderID {
+						cachedProvider = p
+						break
+					}
+				}
+			}
+			useCached := true
+			if body.RequirePrivateNetwork || privacy != nil {
+				useCached = llm.ProviderUsesPrivateNetwork(cachedProvider)
+			}
+			if useCached {
+				conversationID, err := persistConversation(ctx, h.Pool,
+					body.ConversationID, body.UserMessage, body.Attachments,
+					cachedPayload.Reply, cachedProvider.ID,
+					cachedPayload.Citations, guardrail, true)
+				if err != nil {
+					dbError(w, err)
+					return
+				}
+				usage := usageSummary(cachedProvider,
+					llm.EstimateTokens(promptUsed),
+					cachedPayload.CompletionTokens, 0, true)
+				_ = recordUsageEvent(ctx, h.Pool, cachedProvider.ID, &conversationID,
+					"chat", "chat", modality, usage, nil,
+					map[string]any{
+						"cache_key":           cachedMeta.CacheKey,
+						"cache_hit":           true,
+						"required_modalities": required,
+					})
+
+				writeJSON(w, http.StatusOK, models.ChatCompletionResponse{
+					ConversationID:   conversationID,
+					ProviderID:       cachedProvider.ID,
+					ProviderName:     cachedProvider.Name,
+					Reply:            cachedPayload.Reply,
+					Citations:        cachedPayload.Citations,
+					Guardrail:        guardrail,
+					Cache:            *cachedMeta,
+					PromptUsed:       promptUsed,
+					CompletionTokens: cachedPayload.CompletionTokens,
+					Usage:            usage,
+					Routing:          routingMetadata(cachedProvider, body.RequirePrivateNetwork, privacy, routed, required),
+					CreatedAt:        time.Now().UTC(),
+				})
+				return
+			}
+		}
+	}
+
+	// 8. Live path
+	var reply string
+	var promptTokens, completionTokens, totalTokens int32
+	var latencyMs int32
+
+	if !guardrail.Blocked {
+		startedAt := time.Now()
+		completion, completionErr := llm.CompleteText(ctx, nil, provider,
+			basePrompt, promptUsed, body.Attachments,
+			body.Temperature, body.MaxTokens)
+		latencyMs = int32(time.Since(startedAt).Milliseconds())
+		if latencyMs < 0 {
+			latencyMs = 0
+		}
+		if completionErr != nil {
+			writeError(w, http.StatusInternalServerError, completionErr.Error())
+			return
+		}
+		reply = completion.Text
+		promptTokens = completion.PromptTokens
+		if promptTokens <= 0 {
+			promptTokens = llm.EstimateTokens(promptUsed)
+		}
+		completionTokens = completion.CompletionTokens
+		if completionTokens <= 0 {
+			est := llm.EstimateTokens(reply)
+			if est < body.MaxTokens {
+				completionTokens = est
+			} else {
+				completionTokens = body.MaxTokens
+			}
+		}
+		totalTokens = completion.TotalTokens
+		if totalTokens <= 0 {
+			totalTokens = promptTokens + completionTokens
+		}
+	} else {
+		reply = "Guardrails blocked this request. Remove prompt-injection or toxic content and retry."
+		promptTokens = llm.EstimateTokens(promptUsed)
+	}
+
+	var usage models.LlmUsageSummary
+	if guardrail.Blocked {
+		usage = models.LlmUsageSummary{
+			PromptTokens:     promptTokens,
+			CompletionTokens: 0,
+			TotalTokens:      promptTokens,
+			EstimatedCostUSD: 0,
+			LatencyMs:        0,
+			NetworkScope:     provider.RouteRules.NetworkScope,
+			CacheHit:         false,
+		}
+	} else {
+		usage = usageSummary(*provider, promptTokens, completionTokens, latencyMs, false)
+		usage.TotalTokens = totalTokens
+	}
+
+	payload := cachedChatPayload{
+		Reply:            reply,
+		Citations:        knowledgeHits,
+		CompletionTokens: usage.CompletionTokens,
+	}
+
+	cache, err := upsertCachedResponse(ctx, h.Pool, "chat", promptUsed, &provider.ID, payload)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	conversationID, err := persistConversation(ctx, h.Pool,
+		body.ConversationID, body.UserMessage, body.Attachments,
+		reply, provider.ID, knowledgeHits, guardrail, false)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	if err := recordUsageEvent(ctx, h.Pool, provider.ID, &conversationID,
+		"chat", "chat", modality, usage, nil,
+		map[string]any{
+			"cache_key":           cache.CacheKey,
+			"cache_hit":           false,
+			"knowledge_hit_count": len(knowledgeHits),
+			"required_modalities": required,
+		}); err != nil {
+		dbError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, models.ChatCompletionResponse{
+		ConversationID:   conversationID,
+		ProviderID:       provider.ID,
+		ProviderName:     provider.Name,
+		Reply:            reply,
+		Citations:        knowledgeHits,
+		Guardrail:        guardrail,
+		Cache:            cache,
+		PromptUsed:       promptUsed,
+		CompletionTokens: usage.CompletionTokens,
+		Usage:            usage,
+		Routing:          routing,
+		CreatedAt:        time.Now().UTC(),
+	})
+}
 
 // recordUsageEvent mirrors fn record_usage_event — best-effort insert
 // into ai_llm_usage_events. Non-fatal at the call site (chat /

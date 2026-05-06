@@ -418,25 +418,6 @@ func (h *ChatHandlers) EvaluateGuardrails(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// CreateChatCompletion handles `POST /api/v1/chat/completions`. The
-// real path chains rag retrieval → semantic-cache lookup →
-// llm/runtime.complete_text → cache write → usage write → guardrails
-// → conversation upsert. Lands in the runtime slice; this stub
-// validates the wire-compat envelope (empty user_message → 400, bad
-// JSON → 400) so consumers can wire the route today.
-func (h *ChatHandlers) CreateChatCompletion(w http.ResponseWriter, r *http.Request) {
-	var body models.ChatCompletionRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if strings.TrimSpace(body.UserMessage) == "" {
-		writeError(w, http.StatusBadRequest, "chat completion requires a user message")
-		return
-	}
-	writeError(w, http.StatusNotImplemented, "chat completion lands with libs/ai-kernel-go/domain/llm/runtime port")
-}
-
 // conversationSummary mirrors fn conversation_summary in chat.rs.
 func conversationSummary(c models.Conversation) models.ConversationSummary {
 	preview := "No messages yet"

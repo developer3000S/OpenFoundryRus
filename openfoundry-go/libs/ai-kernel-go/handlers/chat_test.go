@@ -72,15 +72,6 @@ func TestEvaluateGuardrails_NoIssuesPath(t *testing.T) {
 	assert.Contains(t, resp.Recommendations, "No blocking issues detected; response is safe to continue.")
 }
 
-func TestCreateChatCompletion_StubReturns501OnValidInput(t *testing.T) {
-	t.Parallel()
-	h := &ChatHandlers{Pool: nil}
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"user_message":"hi"}`))
-	w := httptest.NewRecorder()
-	h.CreateChatCompletion(w, req)
-	assert.Equal(t, http.StatusNotImplemented, w.Code)
-}
-
 func TestCreateChatCompletion_RejectsEmptyMessage(t *testing.T) {
 	t.Parallel()
 	h := &ChatHandlers{Pool: nil}
