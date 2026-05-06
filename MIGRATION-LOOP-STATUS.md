@@ -223,7 +223,11 @@ commits + 1 small handlers commit:
 **P3.7 sub-slice ledger after iter 6:**
 - 3.7b.1 ✅ Cedar wiring
 - 3.7b.2 ✅ JWKS rotation half COMPLETE (4 sub-slices done)
-- 3.7b.3 (SCIM) — pending (~2466 LOC Rust, multi-iteration)
+- 3.7b.3 (SCIM):
+    - 3.7b.3.1 ✅ types + metadata + discovery + GetUser + ListUsers + in-mem store (commit `b28165a4`, 1836 LOC + 33 tests)
+    - 3.7b.3.2 ⏳ CreateUser + PatchUser + DeleteUser
+    - 3.7b.3.3 ⏳ Group endpoints
+    - 3.7b.3.4 ⏳ PostgresScimStore
 - 3.7a (SAML, slice 5b) — pending (~850 LOC + Go XML signing libs)
 
 **Next action (iter 7):** P3.7b.3 SCIM is the big remaining
