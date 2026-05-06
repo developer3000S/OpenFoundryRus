@@ -61,7 +61,7 @@ Stubs that were claimed pending but are now real production code:
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 3.7a | identity-federation slice 5b (SAML 2.0 + XML signing) | 🟡 in progress | 3.7a.1 ✅ (types + helpers, commit `10fc262d`), 3.7a.2 ✅ (metadata parser + HTTP fetcher, commit `bd225401`), 3.7a.3 ✅ (AuthnRequest builder, commit `4f8a96d8`), 3.7a.4 pending (response parser + signature verification — needs `github.com/russellhaering/goxmldsig`), 3.7a.5 pending (handlers/sso.go SAML routing). |
+| 3.7a | identity-federation slice 5b (SAML 2.0 + XML signing) | 🟡 domain layer done, handler wiring pending | 3.7a.1 ✅ types + helpers (`10fc262d`), 3.7a.2 ✅ metadata parser (`bd225401`), 3.7a.3 ✅ AuthnRequest builder (`4f8a96d8`), 3.7a.4a ✅ validators + element tree (`06063ffe`), 3.7a.4b ✅ signature verification with goxmldsig + etree (`e642f10c`), 3.7a.4c ✅ response parser orchestrator (`9de24cee`). Remaining: 3.7a.5 handlers/sso.go SAML routing (Start branch + POST /acs handler + provider-type lookup against sso_providers table). |
 | 3.7b.1 | slice 8: Cedar wiring (`internal/cedarauthz`) | ✅ done | commit `c465caf5` (789 LOC: cedarauthz.go + guard.go + 17 tests). AdminGuard middleware hydrates kind/mfa_age_secs/groups from claims.Attributes and emits Group/Role parent entities. |
 | 3.7b.2.1 | slice 8: JWKS orchestrator + interfaces + in-memory fake | ✅ done | commit `b841e89e` (1283 LOC + 24 tests). Service + InMemoryJwksKeyStore + FakeTransitKeyClient. |
 | 3.7b.2.2 | slice 8: PostgresJwksKeyStore | ✅ done | commit `876d41d2` (433 LOC + 10 tests). pgx-backed impl using the JwksKeysDDL constants from 2.1. |
@@ -271,6 +271,42 @@ further:
   together, fixtures from src/testdata/saml/
 - 3.7a.5: handlers/sso.go SAML routing — branches on
   provider_type=="saml" in Start + Callback
+
+### Iter 8 — 2026-05-06 (continuation)
+
+User asked to continue with the SAML port. Closed P3.7a.4 in
+three commits (the validation+verification half of slice 5b):
+
+| # | Commit    | Slice                                                  |
+|---|-----------|--------------------------------------------------------|
+| 1 | `06063ffe`| 3.7a.4a — minimal namespaced XML tree + 10 validators (validateStatusSuccess, validateExpectedIssuer, validateConditions, validateAudience, validateSubjectConfirmation, validateIssueInstant, validateOptionalDestination, validateOptionalInResponseTo, validateRequiredAttributeMatch, extractAttributes) + 29 unit tests against inline fixtures, no new deps |
+| 2 | `e642f10c`| 3.7a.4b — VerifySamlSignature using goxmldsig + etree. Walks every `<ds:Signature>` in the doc, validates each, returns the union of validated reference URIs. Handles two real-world frictions: (a) goxmldsig enforces cert validity (Rust's bergshamra doesn't), so the test pins clock to 2014-07-18 within the OneLogin sample's window; (b) etree.Copy() drops inherited xmlns declarations, so copyWithInheritedNamespaces walks ancestors and bakes them on the copy before validation. 8 tests including byte-exact tampering rejection |
+| 3 | `9de24cee`| 3.7a.4c — ParseSamlResponse / ParseSamlResponseAt orchestrator. 17-step validation chain (base64 decode → signature → root check → status → destination → in_response_to → issue_instant → assertion-count → signed-coverage → expected_issuer → assertion issue_instant → conditions → audience → subject_confirmation → NameID → attribute mapping → Identity). 11 integration tests including Response-signed and Assertion-signed happy paths. |
+
+**P3.7 sub-slice ledger after iter 8:**
+- 3.7a.1 ✅ types + helpers
+- 3.7a.2 ✅ metadata parser
+- 3.7a.3 ✅ AuthnRequest builder
+- 3.7a.4a ✅ validators + element tree
+- 3.7a.4b ✅ signature verification (goxmldsig + etree deps)
+- 3.7a.4c ✅ response parser orchestrator
+- 3.7a.5 ⏳ handlers/sso.go SAML routing — provider-type lookup
+  + Start branch + POST /acs callback handler
+
+Total LOC for 3.7a so far: 6 commits, ~2400 LOC across saml package
+(including ~85 unit + integration tests against the OneLogin sample
+fixtures). The domain layer is feature-complete and signed-fixture
+exact: the same byte-for-byte testdata round-trips through both the
+Rust and Go parsers.
+
+**Next action (iter 9):** 3.7a.5 handler wiring. Three pieces:
+- repo.FindSsoProviderBySlug + ListSsoProviders (read-only column
+  set landed by slice-5a 0004 migration)
+- handlers/sso.go Start: branch `provider.ProviderType == "saml"` →
+  saml.BuildAuthnRequest + persist request_id alongside oauth_state
+- POST /api/v1/auth/sso/{provider}/acs: parse form body, call
+  saml.ParseSamlResponse, resolve user via existing
+  `resolveUser` shape (UserResolver pattern), issue tokens.
 
 ---
 
