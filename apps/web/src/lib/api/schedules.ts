@@ -1,4 +1,4 @@
-import { api } from './client';
+import api from './client';
 
 const SCHEDULES_BASE = '/data-integration/v1/schedules';
 
@@ -115,11 +115,8 @@ export interface ListSchedulesQuery {
   paused?: boolean;
   owner?: string;
   q?: string;
-  /** Foundry doc § "Find and manage schedules" — Files filter. */
   files?: string[];
-  /** Multi-user filter. */
   users?: string[];
-  /** Multi-project filter. */
   projects?: string[];
   sort?: 'name' | 'created_at' | 'last_run_at' | 'updated_at';
   limit?: number;
@@ -163,9 +160,7 @@ export function patchSchedule(
 }
 
 export function pauseSchedule(rid: string, reason?: string) {
-  return api.post<Schedule>(`${SCHEDULES_BASE}/${encodeURIComponent(rid)}:pause`, {
-    reason,
-  });
+  return api.post<Schedule>(`${SCHEDULES_BASE}/${encodeURIComponent(rid)}:pause`, { reason });
 }
 
 export function resumeSchedule(rid: string) {
@@ -173,10 +168,7 @@ export function resumeSchedule(rid: string) {
 }
 
 export function setAutoPauseExempt(rid: string, exempt: boolean) {
-  return api.post<Schedule>(
-    `${SCHEDULES_BASE}/${encodeURIComponent(rid)}:exempt-from-auto-pause`,
-    { exempt },
-  );
+  return api.post<Schedule>(`${SCHEDULES_BASE}/${encodeURIComponent(rid)}:exempt-from-auto-pause`, { exempt });
 }
 
 export function runScheduleNow(rid: string) {
@@ -214,9 +206,7 @@ export function listScheduleVersions(
 }
 
 export function getScheduleVersion(rid: string, n: number) {
-  return api.get<ScheduleVersion>(
-    `${SCHEDULES_BASE}/${encodeURIComponent(rid)}/versions/${n}`,
-  );
+  return api.get<ScheduleVersion>(`${SCHEDULES_BASE}/${encodeURIComponent(rid)}/versions/${n}`);
 }
 
 export function getScheduleVersionDiff(rid: string, from: number, to: number) {
@@ -234,8 +224,6 @@ export function convertToProjectScope(
     body,
   );
 }
-
-// ---- Sweep linter ---------------------------------------------------------
 
 const LINTER_BASE = '/data-integration/v1/scheduling-linter';
 
@@ -278,8 +266,5 @@ export function applySweep(body: {
   finding_ids?: string[];
   report: SweepReport;
 }) {
-  return api.post<{ applied: Array<Record<string, unknown>> }>(
-    `${LINTER_BASE}/sweep:apply`,
-    body,
-  );
+  return api.post<{ applied: Array<Record<string, unknown>> }>(`${LINTER_BASE}/sweep:apply`, body);
 }

@@ -1,34 +1,39 @@
-import { writable } from 'svelte/store';
+import { useSyncExternalStore } from 'react';
 
 interface CopilotState {
-	open: boolean;
-	seedQuestion: string;
+  open: boolean;
+  seedQuestion: string;
 }
 
-function createCopilotStore() {
-	const { subscribe, set, update } = writable<CopilotState>({
-		open: false,
-		seedQuestion: '',
-	});
+let snapshot: CopilotState = { open: false, seedQuestion: '' };
+const listeners = new Set<() => void>();
 
-	return {
-		subscribe,
-		open(seedQuestion = '') {
-			set({ open: true, seedQuestion });
-		},
-		close() {
-			update((state) => ({ ...state, open: false, seedQuestion: '' }));
-		},
-		toggle(seedQuestion = '') {
-			update((state) => ({
-				open: !state.open,
-				seedQuestion: seedQuestion || state.seedQuestion,
-			}));
-		},
-		setQuestion(seedQuestion: string) {
-			update((state) => ({ ...state, seedQuestion }));
-		},
-	};
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
-export const copilot = createCopilotStore();
+function getSnapshot() {
+  return snapshot;
+}
+
+function setSnapshot(next: CopilotState) {
+  snapshot = next;
+  listeners.forEach((l) => l());
+}
+
+export const copilot = {
+  open(seedQuestion?: string) {
+    setSnapshot({ open: true, seedQuestion: seedQuestion ?? snapshot.seedQuestion });
+  },
+  close() {
+    setSnapshot({ ...snapshot, open: false });
+  },
+  setSeed(question: string) {
+    setSnapshot({ ...snapshot, seedQuestion: question });
+  },
+};
+
+export function useCopilot(): CopilotState {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}

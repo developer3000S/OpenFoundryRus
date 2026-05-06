@@ -1,4 +1,4 @@
-import type { QuiverChartKind } from '$lib/api/ontology';
+import type { QuiverChartKind } from '@/lib/api/ontology';
 
 export interface QuiverTimeSeriesRow {
   date: string;

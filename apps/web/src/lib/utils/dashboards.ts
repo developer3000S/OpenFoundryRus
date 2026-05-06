@@ -366,19 +366,11 @@ export function duplicateDashboardDefinition(dashboard: DashboardDefinition) {
 }
 
 function base64Encode(value: string) {
-  if (typeof btoa === 'function') {
-    return btoa(value);
-  }
-
-  return Buffer.from(value, 'utf-8').toString('base64');
+  return btoa(value);
 }
 
 function base64Decode(value: string) {
-  if (typeof atob === 'function') {
-    return atob(value);
-  }
-
-  return Buffer.from(value, 'base64').toString('utf-8');
+  return atob(value);
 }
 
 export function serializeDashboardSnapshot(dashboard: DashboardDefinition) {

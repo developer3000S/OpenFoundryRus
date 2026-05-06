@@ -16,18 +16,9 @@ FROM deps AS build
 COPY . .
 RUN --mount=type=cache,id=openfoundry-pnpm-store,target=/pnpm/store,sharing=locked \
 	pnpm --filter @open-foundry/web build
-RUN --mount=type=cache,id=openfoundry-pnpm-store,target=/pnpm/store,sharing=locked \
-	pnpm deploy --legacy --filter @open-foundry/web --prod /prod/web
 
-FROM node:24.15.0-alpine3.23 AS runtime
-WORKDIR /app
-ENV NODE_ENV=production
-ENV HOST=0.0.0.0
-ENV PORT=3000
-
-COPY --from=build /prod/web/package.json ./package.json
-COPY --from=build /prod/web/node_modules ./node_modules
-COPY --from=build /workspace/apps/web/build ./build
-
+FROM nginx:1.27-alpine AS runtime
+COPY --from=build /workspace/apps/web/dist /usr/share/nginx/html
+COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 3000
-CMD ["node", "build"]
+CMD ["nginx", "-g", "daemon off;"]

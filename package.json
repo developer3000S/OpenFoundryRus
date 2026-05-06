@@ -6,15 +6,12 @@
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "pnpm --filter @open-foundry/web dev",
-    "dev:react": "pnpm --filter @open-foundry/web-react dev",
     "build": "pnpm --filter @open-foundry/web build",
-    "build:react": "pnpm --filter @open-foundry/web-react build",
     "lint": "pnpm --filter @open-foundry/web lint",
     "test": "pnpm --filter @open-foundry/web test:unit",
     "test:unit": "pnpm --filter @open-foundry/web test:unit",
     "test:e2e": "pnpm --filter @open-foundry/web test:e2e",
-    "check": "pnpm --filter @open-foundry/web check",
-    "check:react": "pnpm --filter @open-foundry/web-react check"
+    "check": "pnpm --filter @open-foundry/web check"
   },
   "engines": {
     "node": ">=20",

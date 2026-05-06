@@ -432,7 +432,7 @@ export const virtualTables = {
    * in P5.
    */
   enableUpdateDetection(
-    rid: string,
+    _rid: string,
     body: { interval_seconds: number },
   ): Promise<{ enabled: boolean; interval_seconds: number; deferred: true }> {
     return Promise.resolve({
