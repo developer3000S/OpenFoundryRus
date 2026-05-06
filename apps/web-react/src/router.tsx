@@ -227,6 +227,18 @@ export const router = createBrowserRouter([
         lazy: async () => ({ Component: (await import('./routes/foundry-rules/FoundryRulesPage')).FoundryRulesPage }),
       },
       {
+        path: 'control-panel',
+        lazy: async () => ({ Component: (await import('./routes/control-panel/ControlPanelPage')).ControlPanelPage }),
+      },
+      {
+        path: 'control-panel/streaming-profiles',
+        lazy: async () => ({ Component: (await import('./routes/control-panel/StreamingProfilesPage')).StreamingProfilesPage }),
+      },
+      {
+        path: 'control-panel/data-health',
+        lazy: async () => ({ Component: (await import('./routes/control-panel/DataHealthPage')).DataHealthPage }),
+      },
+      {
         path: 'charts-demo',
         lazy: async () => ({ Component: (await import('./routes/charts-demo/ChartsDemoPage')).ChartsDemoPage }),
       },

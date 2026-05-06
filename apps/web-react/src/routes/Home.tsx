@@ -40,6 +40,7 @@ const MIGRATED_ROUTES: { path: string; title: string; description: string }[] = 
   { path: '/object-link-types', title: 'Object & link types', description: 'CRUD on object types, properties, link types, shared property types with attach/detach.' },
   { path: '/builds', title: 'Builds', description: 'V1 build envelopes: filter by state, abort, run, jobs detail with outputs + input resolutions.' },
   { path: '/foundry-rules', title: 'Foundry rules', description: 'Per-type rule CRUD with simulate/apply against a target object id.' },
+  { path: '/control-panel', title: 'Control panel', description: 'Platform settings + upgrade readiness + SSO providers + streaming profiles + data health.' },
   { path: '/auth/login', title: 'Sign in', description: 'Login + register + MFA + SSO callback.' },
   { path: '/charts-demo', title: 'Charts demo', description: 'ECharts wrapper validator.' },
   { path: '/monaco-demo', title: 'Monaco demo', description: 'Monaco editor wrapper validator.' },
