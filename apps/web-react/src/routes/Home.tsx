@@ -22,6 +22,7 @@ const MIGRATED_ROUTES: { path: string; title: string; description: string }[] = 
   { path: '/interfaces', title: 'Interfaces', description: 'Interface library + property definitions + object-type implementation bindings.' },
   { path: '/build-schedules', title: 'Build schedules', description: 'Find/manage schedules with file/user/project filters, name search, pause+sort.' },
   { path: '/fusion', title: 'Fusion', description: 'Identity resolution: match rules + merge strategies + jobs + clusters + reviews + golden records.' },
+  { path: '/nexus', title: 'Nexus', description: 'Cross-org sharing: peers + contracts + spaces + shares + federated query + audit bridge.' },
   { path: '/auth/login', title: 'Sign in', description: 'Login + register + MFA + SSO callback.' },
   { path: '/charts-demo', title: 'Charts demo', description: 'ECharts wrapper validator.' },
   { path: '/monaco-demo', title: 'Monaco demo', description: 'Monaco editor wrapper validator.' },
