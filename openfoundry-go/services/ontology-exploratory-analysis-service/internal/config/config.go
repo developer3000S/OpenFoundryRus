@@ -1,0 +1,74 @@
+// Package config resolves ontology-exploratory-analysis-service env config.
+//
+// The Rust binary is substrate-only ("migrated handlers not mounted"
+// per src/main.rs). The Go port preserves that surface verbatim plus
+// the migrations for the four service-consolidation merges that this
+// crate is the *target* of (per docs/architecture/service-consolidation-map.md):
+// ontology-timeseries-analytics, time-series-data, geospatial-intelligence,
+// scenario-simulation → ontology-exploratory-analysis.
+package config
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+)
+
+type Config struct {
+	Service struct{ Name, Version string }
+	Server  struct {
+		Host string
+		Port uint16
+	}
+	DatabaseURL                string
+	JWTSecret                  string
+	OntologyQueryServiceURL    string
+	OntologyActionsServiceURL  string
+}
+
+func FromEnv() (*Config, error) {
+	cfg := &Config{}
+	cfg.Service.Name = "ontology-exploratory-analysis-service"
+	cfg.Service.Version = defaultStr(os.Getenv("SERVICE_VERSION"), "dev")
+	cfg.Server.Host = defaultStr(os.Getenv("HOST"), "0.0.0.0")
+	cfg.Server.Port = parseUint16(os.Getenv("PORT"), 50131)
+	cfg.DatabaseURL = os.Getenv("DATABASE_URL")
+	cfg.JWTSecret = os.Getenv("JWT_SECRET")
+	cfg.OntologyQueryServiceURL = defaultStr(os.Getenv("ONTOLOGY_QUERY_SERVICE_URL"), "http://localhost:50105")
+	cfg.OntologyActionsServiceURL = defaultStr(os.Getenv("ONTOLOGY_ACTIONS_SERVICE_URL"), "http://localhost:50106")
+
+	if cfg.DatabaseURL == "" {
+		return nil, &MissingEnvError{Key: "DATABASE_URL"}
+	}
+	if cfg.JWTSecret == "" {
+		return nil, &MissingEnvError{Key: "JWT_SECRET"}
+	}
+	return cfg, nil
+}
+
+type MissingEnvError struct{ Key string }
+
+func (e *MissingEnvError) Error() string {
+	return fmt.Sprintf("required environment variable %s is not set", e.Key)
+}
+
+func IsMissingEnv(err error) bool { var me *MissingEnvError; return errors.As(err, &me) }
+
+func defaultStr(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+func parseUint16(v string, fallback uint16) uint16 {
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseUint(v, 10, 16)
+	if err != nil {
+		return fallback
+	}
+	return uint16(n)
+}
