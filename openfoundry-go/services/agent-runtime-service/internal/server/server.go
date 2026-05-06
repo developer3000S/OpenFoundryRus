@@ -1,0 +1,88 @@
+// Package server wires the chi router for agent-runtime-service.
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
+
+	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
+	"github.com/openfoundry/openfoundry-go/libs/core-models/health"
+	"github.com/openfoundry/openfoundry-go/libs/observability"
+	"github.com/openfoundry/openfoundry-go/services/agent-runtime-service/internal/config"
+	"github.com/openfoundry/openfoundry-go/services/agent-runtime-service/internal/handlers"
+)
+
+func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *observability.Metrics) *http.Server {
+	r := buildRouter(cfg, jwt, h, m)
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	return &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+}
+
+func BuildRouter(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *observability.Metrics) http.Handler {
+	return buildRouter(cfg, jwt, h, m)
+}
+
+func buildRouter(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *observability.Metrics) chi.Router {
+	r := chi.NewRouter()
+	r.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, chimw.Compress(5))
+	r.Use(chimw.Timeout(60 * time.Second))
+
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(health.OK(cfg.Service.Name, cfg.Service.Version))
+	})
+	if m != nil {
+		r.Method(http.MethodGet, "/metrics", m.Handler())
+	}
+
+	r.Route("/api/v1/agent-runtime", func(api chi.Router) {
+		api.Use(authmw.Middleware(jwt))
+
+		api.Get("/agents", h.ListAgents)
+		api.Post("/agents", h.CreateAgent)
+		api.Get("/agents/{id}", h.GetAgent)
+		api.Patch("/agents/{id}", h.UpdateAgent)
+
+		api.Get("/agents/{id}/runs", h.ListRuns)
+		api.Post("/agents/{id}/runs", h.StartRun)
+		api.Post("/agents/{id}/runs/{run_id}/steps", h.RecordStep)
+		api.Post("/agents/{id}/runs/{run_id}/human-approval", h.SubmitHumanApproval)
+
+		api.Post("/chat/completions", h.CreateChatCompletion)
+		api.Post("/copilot/ask", h.AskCopilot)
+	})
+
+	return r
+}
+
+func Run(ctx context.Context, srv *http.Server, log *slog.Logger) error {
+	errCh := make(chan error, 1)
+	go func() {
+		log.Info("listening", slog.String("addr", srv.Addr))
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		log.Info("shutting down")
+		return srv.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
+}
