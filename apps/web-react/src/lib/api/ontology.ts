@@ -19,6 +19,11 @@ export interface ObjectType {
   updated_at: string;
 }
 
+export interface PropertyInlineEditConfig {
+  enabled: boolean;
+  permission_keys?: string[];
+}
+
 export interface Property {
   id: string;
   object_type_id: string;
@@ -31,6 +36,7 @@ export interface Property {
   time_dependent: boolean;
   default_value: unknown;
   validation_rules: unknown;
+  inline_edit_config?: PropertyInlineEditConfig | null;
   created_at: string;
   updated_at: string;
 }
@@ -135,6 +141,118 @@ export interface QuiverVisualFunction {
 
 export function getObjectType(id: string) {
   return api.get<ObjectType>(`/ontology/types/${id}`);
+}
+
+export function executeInlineEdit(
+  typeId: string,
+  objectId: string,
+  propertyId: string,
+  body: { value: unknown; justification?: string },
+) {
+  return api.post<ExecuteActionResponse>(
+    `/ontology/types/${typeId}/objects/${objectId}/inline-edit/${propertyId}`,
+    body,
+  );
+}
+
+export function queryObjects(typeId: string, body: { equals?: Record<string, unknown>; limit?: number }) {
+  return api.post<{ data: ObjectInstance[]; total: number }>(
+    `/ontology/types/${typeId}/objects/query`,
+    body,
+  );
+}
+
+export type SubmissionUserAttr = 'user_id' | 'email' | 'organization_id' | 'roles' | 'permissions' | 'auth_methods';
+
+export type SubmissionOperator =
+  | 'is' | 'is_not' | 'matches' | 'lt' | 'lte' | 'gt' | 'gte'
+  | 'includes' | 'includes_any' | 'is_included_in'
+  | 'each_is' | 'each_is_not'
+  | 'is_empty' | 'is_not_empty';
+
+export type SubmissionOperand =
+  | { kind: 'static'; value: unknown }
+  | { kind: 'param'; name: string }
+  | { kind: 'user'; attr: SubmissionUserAttr };
+
+export type SubmissionNode =
+  | { type: 'leaf'; left: SubmissionOperand; op: SubmissionOperator; right?: SubmissionOperand }
+  | { type: 'all'; children: SubmissionNode[] }
+  | { type: 'any'; children: SubmissionNode[] };
+
+export interface ObjectRevision {
+  id: string;
+  object_id: string;
+  object_type_id: string;
+  operation: 'insert' | 'update' | 'delete' | string;
+  properties: Record<string, unknown>;
+  marking: string;
+  organization_id?: string | null;
+  changed_by: string;
+  revision_number: number;
+  written_at: string;
+}
+
+export interface ListObjectRevisionsResponse {
+  object_id: string;
+  total: number;
+  data: ObjectRevision[];
+}
+
+export interface RestoreObjectRevisionResponse {
+  object: ObjectInstance;
+  restored_from_revision_number: number;
+  new_revision_number: number;
+}
+
+export function listObjectRevisions(typeId: string, objectId: string, params?: { limit?: number }) {
+  const qs = new URLSearchParams();
+  if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+  const tail = qs.toString() ? `?${qs}` : '';
+  return api.get<ListObjectRevisionsResponse>(
+    `/ontology/types/${typeId}/objects/${objectId}/revisions${tail}`,
+  );
+}
+
+export function restoreObjectRevision(typeId: string, objectId: string, revisionNumber: number) {
+  return api.post<RestoreObjectRevisionResponse>(
+    `/ontology/types/${typeId}/objects/${objectId}/revisions/${revisionNumber}/restore`,
+    {},
+  );
+}
+
+export interface InlineEditBatchEntry {
+  property_id: string;
+  object_id: string;
+  value: unknown;
+  justification?: string;
+}
+
+export interface InlineEditBatchResponse {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: { property_id: string; object_id: string; status: 'success' | 'failure'; error?: string }[];
+}
+
+export function executeInlineEditBatch(typeId: string, edits: InlineEditBatchEntry[]) {
+  return api.post<InlineEditBatchResponse>(
+    `/ontology/types/${typeId}/inline-edit-batch`,
+    { edits },
+  );
+}
+
+export interface RevertActionExecutionResponse {
+  execution_id: string;
+  reverted: boolean;
+  message: string | null;
+}
+
+export function revertActionExecution(executionId: string) {
+  return api.post<RevertActionExecutionResponse>(
+    `/ontology/actions/executions/${executionId}/revert`,
+    {},
+  );
 }
 
 export function createObject(typeId: string, body: { properties: Record<string, unknown> }) {
