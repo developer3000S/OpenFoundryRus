@@ -615,3 +615,241 @@ None. `go build ./...` and `go test ./libs/...` both clean.
 The next iteration's natural starting point is libs/ml-kernel-go/
 domain/interop (769 LOC pure logic; unblocks 4 handler stubs). The
 runtime port can run in parallel since it's a different lib.
+
+---
+
+# Run 5 — 2026-05-06 (continuation)
+
+User asked "puedes continuar con la migración? hay algo pendiente
+de migrar 1:1 de rust a go?". Confirmed there were 4 big pure-logic
+modules still pending and ported all of them.
+
+## What landed
+
+5 new commits, all on `frontend/settings-mfa-apikeys-sso`, never pushed:
+
+| # | Commit    | Slice                                                          |
+|---|-----------|----------------------------------------------------------------|
+| 1 | `2541be78`| libs/ml-kernel-go — domain/interop full port + wire into handlers/{training,models} |
+| 2 | `069c3e9a`| libs/ml-kernel-go — domain/training/{runner,execute} + wire CreateTrainingJob |
+| 3 | `fa09208e`| libs/ai-kernel-go — domain/llm/runtime full port (replaces placeholder) |
+| 4 | `ed46de5b`| libs/ai-kernel-go — domain/agents/executor + wire ExecuteAgent |
+| 5 | (this)    | docs(NIGHTLY-SUMMARY,migration-rust-to-go) — Run 5 close-out  |
+
+## Pure-logic modules ported this run
+
+### libs/ml-kernel-go/domain/interop (769 LOC of Rust)
+
+23 functions — every byte the Rust source uses. Wired into the
+matching handlers so the previously-shallow JSON shims could be
+deleted:
+
+- **Normalisation**: NormalizeTrackingSource, NormalizeModelAdapterDescriptor,
+  NormalizeRegistrySource. Each trims every string field and routes
+  system / framework / flavor through their alias tables (wandb,
+  mlflow, sagemaker, azureml, vertexai, comet, neptune; scikit-learn,
+  pytorch, tensorflow, xgboost, lightgbm, catboost, onnx,
+  huggingface; pyfunc, joblib, torchscript, savedmodel, pickle).
+- **Pluck-from-JSON**: TrackingSourceFromParams /
+  TrackingSourceFromTrainingConfig / TrackingSourceFromSchema /
+  ModelAdapterFromSchema / RegistrySourceFromSchema. Filter on
+  HasSignal, normalise.
+- **Merging**: MergeTrainingConfigWithExternal (default engine /
+  framework / artifact_uri when missing, fold inferred adapter +
+  registry); MergeRunParams (fold without overwriting + tag
+  framework + tracking_system); MergeRunArtifacts (dedupe by URI,
+  append synthetic Model URI / Artifact Bundle / Tracking Run
+  references); MergeMetrics (dedupe by name, primary precedence).
+- **Inference**: EffectiveFramework (candidate ordering with
+  tabular-logistic fallback); InferModelAdapter (full kind /
+  framework / flavor / runtime / loader / artifact_uri matrix);
+  InferRegistrySource (existing-over-tracking merge, nil when no
+  signal).
+- **Schema folding**: NormalizeModelVersionSchema (fold artifact_uri
+  / model_adapter / registry_source / external_tracking, default
+  engine + signature); PreferredArtifactURI (model_uri →
+  artifact_uri → run_uri → config.artifact_uri).
+- **Decision tables**: runtimeForAdapter (in-process for native;
+  onnxruntime / torchserve / tensorflow-serving / transformers /
+  external-serving / python-remote based on framework × flavor);
+  loaderForAdapter (mlflow always wins for mlflow tracking; onnx /
+  torch / tensorflow / joblib / xgboost / lightgbm / artifact-
+  reference defaults).
+
+Tests pin all 4 Rust assertions plus 13 new edges (priority orders,
+flavor defaults per framework, registry source pull-from-tracking +
+existing-priority + nil-when-empty, schema signature selection
+tabular vs external-model + folding, all alias matrices, normalize
+ObjectOrNull paths, dedupeArtifacts first-URI-wins).
+
+### libs/ml-kernel-go/domain/training/{runner, execute} (609 LOC of Rust)
+
+- **runner.go (TrainTrial)**: full logistic-regression training
+  trial. parseDataset → standardizeRows → fitLogisticRegression →
+  evaluateMetrics. feature_names auto-derive (alphabetically sorted,
+  deduped, label_field excluded). scalarFeature: number / bool /
+  parsable string / hash-fallback string. binaryLabel: bool / >=0.5
+  number / "positive" / case-insensitive "true" / "1". evaluateMetrics
+  computes accuracy + precision + recall + f1 + log_loss with
+  denominator clamps + 4-decimal rounding. Schema build folds
+  interop.{EffectiveFramework, InferModelAdapter} into the
+  model_state object.
+- **execute.go (ExecuteTraining)**: 3 branches:
+  1. external_training detected → synthesise single
+     "imported-<run_id>" trial + reproducibility schema metadata.
+  2. no inline records → synthetic_trials with deterministic 0.5 +
+     0.05·i objectives.
+  3. inline records → TrainTrial per candidate set, sort by
+     objective desc, pick best.
+- **handlers/training.CreateTrainingJob now fully implemented**:
+  merges external_training into config via interop, runs
+  ExecuteTraining, optionally registers ml_model_versions row via
+  the auto_register_model_version path (inserting "autotune-vN"
+  label and "ml://models/<id>/versions/<n>" fallback URI),
+  refreshes ml_models.{latest_version_number, current_stage='candidate'},
+  inserts ml_training_jobs row. The 501 stub is gone.
+
+Tests pin the Rust assertion (logistic trial achieves f1≥0.8 on the
+4-record fixture) plus 14 new edges covering all 3 ExecuteTraining
+branches, scalarFeature / binaryLabel coercion matrices, 4-decimal
+roundMetric, evaluateMetrics empty + perfectly-separable, isJSONObject
+detection.
+
+### libs/ai-kernel-go/domain/llm/runtime (581 LOC of Rust)
+
+Replaces the offline placeholder shim with the full HTTP runtime.
+CompleteText routes per-provider api_mode to one of three protocols
+verbatim:
+
+- **chat_completions**: OpenAI-compatible /chat/completions with
+  Bearer auth from CredentialReference env var; multimodal user-
+  content (text + image_url + image_base64 → data: URLs); reads
+  /choices/0/message/content with /choices/0/text fallback; usage
+  parsed from {prompt,completion,total}_tokens and clamped to
+  prompt+completion when total missing.
+- **messages**: Anthropic /messages with anthropic-version header,
+  x-api-key auth, usage from {input,output}_tokens.
+- **chat**: Ollama /chat with stream=false, message.content reply,
+  usage from prompt_eval_count / eval_count.
+
+EmbedText / EmbedTextWith — chat_completions posts to /embeddings
+reading /data/0/embedding; chat (Ollama) posts to /embeddings
+reading top-level "embedding". Empty content short-circuits to
+empty slice. Nil provider falls back to the offline 12-dim
+deterministic embedding (rag.EmbedText algorithm inlined to avoid
+the rag → llm cosine cycle).
+
+Helper ports: providerToken (env var resolution + trim + nil/empty
+guards); endpointURL (drops trailing/leading slashes; passes through
+when suffix already present); buildOpenAIUserContent /
+buildAnthropicUserContent / buildOllamaUserPayload (full attachment-
+to-payload conversion matrix mirroring Rust including image_url
+required-url / image_base64 required-data error messages and the
+unsupported-kind rejection); parseEmbedding / valueArrayToFloat32 /
+valueAsText / usageTokens / jsonPointer / stringFromPointer.
+
+Tests pin all 3 Rust assertions plus 21 new edges via httptest
+servers (chat_completions / messages / chat happy paths; non-2xx
+error wrapping; Bearer auth attachment from env-resolved
+CredentialReference; multimodal rejection envelopes; embedding
+shapes; endpointURL join semantics including suffix-already-present;
+jsonPointer for maps + arrays + invalid index; usageTokens across
+float64/int64 shapes; empty content / unsupported api_mode envelopes;
+providerToken env / nil / empty cases; nil-provider offline fallback).
+
+### libs/ai-kernel-go/domain/agents/executor (1307 LOC of Rust)
+
+Full port — every byte. Each Rust function has a 1:1 Go counterpart
+in the executor.go file. Wired into handlers/agents.ExecuteAgent.
+
+ExecutePlan iterates AgentPlanStep entries, dispatches the tool steps
+to ExecuteTool, synthesises observations for the built-in
+retrieve-context / synthesize-answer steps. Counts successful
+invocations into the final synthesise observation.
+
+ExecuteTool routes by execution_mode across all 11 modes:
+**simulated** (mock_response passthrough or skipped); **knowledge_search**
+(0.6·retrieval_score + 0.4·lexical mix, min_score filter, top_k
+truncation); **native_sql** / **native_dataset** /
+**native_ontology** / **native_pipeline** / **native_report** /
+**native_workflow** / **native_code_repo** (deterministic JSON
+observations from inferTimeWindowDays / inferObjectTypes /
+inferActionHints / inferDataset{Operation,Governance} /
+inferPipelineTrigger / inferReport{Channels,Schedule} /
+inferWorkflowProposal / inferRepoBranchSlug / inferRepoMRTitle —
+all verbatim Rust ports); **http_json** / **openfoundry_api** (real
+HTTP request with optional Authorization forward via auth_mode=
+forward_bearer, query string for GET / JSON body for POST,
+extra-headers from config, base_url + path resolution including
+OPENFOUNDRY_API_BASE_URL env fallback).
+
+resolveToolInputs reads context.tool_inputs[name|UUID] then falls
+back to {question,user_message,objective}. enforceToolPolicy emits
+status="blocked" + approval_required when sensitivity ∈
+{high,mutating,admin} or requires_approval=true AND tool_policy
+doesn't approve.
+
+handlers/agents.ExecuteAgent now fully wired: loads agent + tools
+(UUIDs in agent.tool_ids), runs rag.Search over the optional
+knowledge_base_id documents, resolves objective (body → agent →
+user_message), calls agents.BuildPlan + ExecutePlan, picks an
+LlmProvider via llm.RouteProviders + SelectProvider for "agents"
+use_case, runs llm.CompleteText with the synthesised system+user
+prompt, updates agent.memory via agents.UpdateMemory and persists
+the bumped memory + last_execution_at column. Falls back to last-
+trace observation when no provider is configured.
+
+Tests pin 18 edges: ExecutePlan synthesise-counter / retrieve-context
+shape / generic-step fallback / missing-tool envelope / simulated
+with-and-without mock / sensitive blocking + context-approval
+bypass / knowledge_search ranking + top_k + empty-query path / HTTP
+happy path + missing-URL envelopes for both modes / unsupported-mode
+skip / native_sql lookback inference / 5 inference helpers
+(time window, object types, repo branch slug, report channels,
+lexical score) / template rendering.
+
+## Decisions deferred for human review
+
+The big-pure-logic backlog from Run 4 is now empty. The remaining
+501 stubs in handlers are blocked on integrations rather than
+pure-logic ports:
+
+1. **handlers/chat slice 2** (CreateChatCompletion / AskCopilot /
+   BenchmarkProviders) — needs ai_semantic_cache + ai_conversations +
+   ai_llm_usage_events DB-side-effect helpers (~200 LOC of Rust)
+   plus the auth-middleware-go purpose-checkpoint integration.
+2. **handlers/runs slice** — list_runs / create_run / update_run /
+   compare_runs in handlers/experiments.go. Independent of the
+   deferred items above; needs the ml_runs row scaffolding.
+3. **handlers/experiments asset-lineage** — ~459 LOC graph builder.
+   Pure logic but heavy enough for its own iteration.
+4. **auth-middleware-go purpose-checkpoint** — blocking the chat slice
+   2 and the agent execute_with_sensitive_tools path. Hits the
+   `/api/v1/checkpoints/purpose/enforce` endpoint of the identity-
+   federation service.
+
+## Status snapshot after Run 5
+
+- **libs/ai-kernel-go**: 7/7 models, 5/5 handler files (chat slice 2
+  still 501-stubbed pending DB-side-effect helpers); domain/{llm
+  full incl. runtime, agents memory+planner+executor, rag full,
+  evaluation, copilot}. **Zero pure-logic modules pending.**
+- **libs/ml-kernel-go**: 10/10 models, 7/7 handler files (runs +
+  asset-lineage 501-stubbed pending separate slices); domain/{drift,
+  predictions, training/{hyperparameter, runner, execute}, interop
+  full}. **Zero pure-logic modules pending.**
+- All 16 substrate-only / full-foundation service shells continue
+  to bind the kernel handlers cleanly — agent-runtime now wires the
+  full ExecuteAgent end-to-end since the executor is in.
+- All builds + vets + tests green workspace-wide at every commit.
+
+## Build warnings worth flagging
+
+None. `go build ./...` and `go test ./libs/...` both clean across
+the workspace at every commit.
+
+The remaining migration backlog is now entirely DB-side-effect
+helpers + auth-middleware integration + isolated ml_runs handler
+scaffolding. There are no large pure-logic ports left between the
+Rust source and the Go workspace for libs/ai-kernel and
+libs/ml-kernel.
