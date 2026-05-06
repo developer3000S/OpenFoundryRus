@@ -850,3 +850,110 @@ export interface ObjectViewResponse {
 export function getObjectView(typeId: string, objectId: string) {
   return api.get<ObjectViewResponse>(`/ontology/types/${typeId}/objects/${objectId}/view`);
 }
+
+// ────────────────────────────────────────────────────────────────
+// Object sets — used by /object-explorer.
+// ────────────────────────────────────────────────────────────────
+
+export interface ObjectSetPolicy {
+  allowed_markings: string[];
+  minimum_clearance: string | null;
+  deny_guest_sessions: boolean;
+  required_restricted_view_id: string | null;
+}
+
+export interface ObjectSetFilter {
+  field: string;
+  operator: string;
+  value: unknown;
+}
+
+export interface ObjectSetTraversal {
+  direction: 'outbound' | 'inbound' | 'both';
+  link_type_id: string | null;
+  target_object_type_id: string | null;
+  max_hops: number;
+}
+
+export interface ObjectSetJoin {
+  secondary_object_type_id: string;
+  left_field: string;
+  right_field: string;
+  join_kind: 'inner' | 'left';
+}
+
+export interface ObjectSetDefinition {
+  id: string;
+  name: string;
+  description: string;
+  base_object_type_id: string;
+  filters: ObjectSetFilter[];
+  traversals: ObjectSetTraversal[];
+  join: ObjectSetJoin | null;
+  projections: string[];
+  what_if_label: string | null;
+  policy: ObjectSetPolicy;
+  materialized_snapshot: unknown[] | null;
+  materialized_at: string | null;
+  materialized_row_count: number;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ObjectSetEvaluationResponse {
+  object_set: ObjectSetDefinition;
+  total_base_matches: number;
+  total_rows: number;
+  traversal_neighbor_count: number;
+  rows: Record<string, unknown>[];
+  generated_at: string;
+  materialized: boolean;
+}
+
+export function listObjectSets() {
+  return api.get<{ data: ObjectSetDefinition[] }>('/ontology/object-sets');
+}
+
+export function createObjectSet(body: {
+  name: string;
+  description?: string;
+  base_object_type_id: string;
+  filters?: ObjectSetFilter[];
+  traversals?: ObjectSetTraversal[];
+  join?: ObjectSetJoin | null;
+  projections?: string[];
+  what_if_label?: string | null;
+  policy?: Partial<ObjectSetPolicy>;
+}) {
+  return api.post<ObjectSetDefinition>('/ontology/object-sets', body);
+}
+
+export function updateObjectSet(
+  id: string,
+  body: Partial<{
+    name: string;
+    description: string;
+    base_object_type_id: string;
+    filters: ObjectSetFilter[];
+    traversals: ObjectSetTraversal[];
+    join: ObjectSetJoin | null;
+    projections: string[];
+    what_if_label: string | null;
+    policy: ObjectSetPolicy;
+  }>,
+) {
+  return api.patch<ObjectSetDefinition>(`/ontology/object-sets/${id}`, body);
+}
+
+export function deleteObjectSet(id: string) {
+  return api.delete(`/ontology/object-sets/${id}`);
+}
+
+export function evaluateObjectSet(id: string, body?: { limit?: number }) {
+  return api.post<ObjectSetEvaluationResponse>(`/ontology/object-sets/${id}/evaluate`, body ?? {});
+}
+
+export function materializeObjectSet(id: string, body?: { limit?: number }) {
+  return api.post<ObjectSetEvaluationResponse>(`/ontology/object-sets/${id}/materialize`, body ?? {});
+}
