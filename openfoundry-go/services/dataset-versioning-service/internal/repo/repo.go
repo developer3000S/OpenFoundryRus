@@ -47,8 +47,15 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// Repo wraps the SQL surface for datasets, versions and branches.
-type Repo struct{ Pool *pgxpool.Pool }
+// DB is the pgx subset used by Repo; pgxpool.Pool and pgxmock pools both satisfy it.
+type DB interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// Repo wraps the SQL surface for datasets, versions, branches and files.
+type Repo struct{ Pool DB }
 
 const datasetSelect = `SELECT id, name, description, format, storage_path,
 	size_bytes, row_count, owner_id, tags, current_version, created_at, updated_at
@@ -360,4 +367,87 @@ func scanBranch(r rowLikeT) (*models.DatasetBranch, error) {
 		v.FallbackChain = []string{}
 	}
 	return v, nil
+}
+
+const fileSelect = `SELECT df.id, df.dataset_id, df.transaction_id, df.logical_path,
+	df.physical_uri, df.size_bytes, df.sha256, df.created_at,
+	COALESCE(t.committed_at, t.started_at, df.created_at) AS modified_at,
+	df.deleted_at,
+	CASE WHEN df.deleted_at IS NULL THEN 'active' ELSE 'deleted' END AS status
+	FROM dataset_files df
+	LEFT JOIN dataset_transactions t ON t.id = df.transaction_id`
+
+// ListFiles returns the branch-effective dataset_files projection. The
+// dataset_files table is maintained by migrations from committed transaction
+// file rows; this query adds branch head cutoff and prefix filtering.
+func (r *Repo) ListFiles(ctx context.Context, datasetID uuid.UUID, branch string, prefix string) ([]models.DatasetFile, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		branch = "main"
+	}
+	prefix = strings.TrimLeft(prefix, "/")
+	rows, err := r.Pool.Query(ctx, fileSelect+`
+		WHERE df.dataset_id = $1
+		  AND ($3 = '' OR df.logical_path LIKE $3 || '%')
+		  AND (
+		    NOT EXISTS (SELECT 1 FROM dataset_branches b WHERE b.dataset_id = $1 AND b.name = $2)
+		    OR COALESCE(t.committed_at, t.started_at, df.created_at) <= COALESCE((
+		      SELECT COALESCE(ht.committed_at, ht.started_at)
+		        FROM dataset_branches b
+		        JOIN dataset_transactions ht ON ht.id = b.head_transaction_id
+		       WHERE b.dataset_id = $1 AND b.name = $2
+		       LIMIT 1
+		    ), 'infinity'::timestamptz)
+		  )
+		ORDER BY df.logical_path ASC, df.created_at DESC`, datasetID, branch, prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.DatasetFile, 0)
+	seen := map[string]struct{}{}
+	for rows.Next() {
+		v, err := scanFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[v.LogicalPath]; ok {
+			continue
+		}
+		seen[v.LogicalPath] = struct{}{}
+		out = append(out, *v)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) GetFile(ctx context.Context, datasetID uuid.UUID, fileID uuid.UUID) (*models.DatasetFile, error) {
+	row := r.Pool.QueryRow(ctx, fileSelect+` WHERE df.dataset_id = $1 AND df.id = $2`, datasetID, fileID)
+	v, err := scanFile(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func scanFile(r rowLikeT) (*models.DatasetFile, error) {
+	v := &models.DatasetFile{}
+	if err := r.Scan(&v.ID, &v.DatasetID, &v.TransactionID, &v.LogicalPath,
+		&v.PhysicalURI, &v.SizeBytes, &v.SHA256, &v.CreatedAt, &v.ModifiedAt,
+		&v.DeletedAt, &v.Status); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// GetTransactionStatus returns the status for a dataset transaction.
+func (r *Repo) GetTransactionStatus(ctx context.Context, datasetID uuid.UUID, transactionID uuid.UUID) (string, bool, error) {
+	var status string
+	err := r.Pool.QueryRow(ctx, `SELECT status FROM dataset_transactions WHERE dataset_id = $1 AND id = $2`, datasetID, transactionID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return status, true, nil
 }

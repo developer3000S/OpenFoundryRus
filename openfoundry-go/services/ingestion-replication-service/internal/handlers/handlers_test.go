@@ -212,11 +212,78 @@ func (f *fakeStore) GetResolution(_ context.Context, streamID uuid.UUID, ownerID
 	return &res, nil
 }
 
-type fakeRuntime struct{ provisioned int }
+func (f *fakeStore) ApplyCheckpoint(_ context.Context, streamID uuid.UUID, ownerID uuid.UUID, update *models.CheckpointUpdate) (*models.IncrementalCheckpoint, error) {
+	if s, ok := f.cdcStreams[streamID]; !ok || s.OwnerID != ownerID {
+		return nil, nil
+	}
+	cp := f.checkpoints[streamID]
+	if update != nil {
+		if update.LastOffset != nil {
+			cp.LastOffset = update.LastOffset
+		}
+		if update.LastLSN != nil {
+			cp.LastLSN = update.LastLSN
+		}
+		if update.LastEventAt != nil {
+			cp.LastEventAt = update.LastEventAt
+		}
+		if update.RecordsObserved != nil {
+			cp.RecordsObserved = *update.RecordsObserved
+		}
+		if update.RecordsApplied != nil {
+			cp.RecordsApplied = *update.RecordsApplied
+		}
+		cp.UpdatedAt = time.Now().UTC()
+		f.checkpoints[streamID] = cp
+	}
+	return &cp, nil
+}
+func (f *fakeStore) ApplyResolution(_ context.Context, streamID uuid.UUID, ownerID uuid.UUID, update *models.ResolutionUpdate) (*models.ResolutionState, error) {
+	if s, ok := f.cdcStreams[streamID]; !ok || s.OwnerID != ownerID {
+		return nil, nil
+	}
+	res := f.resolutions[streamID]
+	if update != nil {
+		if update.Status != nil {
+			res.Status = *update.Status
+		}
+		if update.Watermark != nil {
+			res.Watermark = update.Watermark
+		}
+		if update.ConflictCount != nil {
+			res.ConflictCount = *update.ConflictCount
+		}
+		if update.PendingResolutions != nil {
+			res.PendingResolutions = *update.PendingResolutions
+		}
+		if update.Notes != nil {
+			res.Notes = update.Notes
+		}
+		res.UpdatedAt = time.Now().UTC()
+		f.resolutions[streamID] = res
+	}
+	return &res, nil
+}
+
+type fakeRuntime struct {
+	provisioned int
+	updated     int
+	registered  int
+	err         error
+	cdcResult   *handlers.CdcRegistrationResult
+}
 
 func (f *fakeRuntime) ProvisionStream(context.Context, *models.StreamDefinition) error {
 	f.provisioned++
-	return nil
+	return f.err
+}
+func (f *fakeRuntime) UpdateStream(context.Context, *models.StreamDefinition) error {
+	f.updated++
+	return f.err
+}
+func (f *fakeRuntime) RegisterCDC(context.Context, *models.CdcStream) (*handlers.CdcRegistrationResult, error) {
+	f.registered++
+	return f.cdcResult, f.err
 }
 
 func authedReq(method, target, body string, sub uuid.UUID) *http.Request {
@@ -267,12 +334,16 @@ func TestStreamCRUDValidationAndRuntimeInterface(t *testing.T) {
 
 func TestCdcRegisterSeedsInitialMetadata(t *testing.T) {
 	owner := uuid.New()
-	h := &handlers.Handlers{Repo: newFakeStore()}
+	observed := int64(10)
+	applied := int64(9)
+	lastOffset := "42"
+	resolved := "resolved"
+	h := &handlers.Handlers{Repo: newFakeStore(), Runtime: &fakeRuntime{cdcResult: &handlers.CdcRegistrationResult{Checkpoint: &models.CheckpointUpdate{LastOffset: &lastOffset, RecordsObserved: &observed, RecordsApplied: &applied}, Resolution: &models.ResolutionUpdate{Status: &resolved}}}}
 	req := authedReq("POST", "/cdc/streams", `{"slug":"orders-cdc","source_kind":"postgres","source_ref":"pg://orders","primary_keys":["id"]}`, owner)
 	rec := httptest.NewRecorder()
 	h.RegisterCdcStream(rec, req)
 	require.Equal(t, 201, rec.Code)
-	assert.Contains(t, rec.Body.String(), "lagging")
+	assert.Contains(t, rec.Body.String(), "resolved")
 	var body struct {
 		Stream models.CdcStream `json:"stream"`
 	}
@@ -281,6 +352,7 @@ func TestCdcRegisterSeedsInitialMetadata(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.GetCdcCheckpoint(rec, req)
 	assert.Equal(t, 200, rec.Code)
+	assert.Contains(t, rec.Body.String(), "42")
 	req = withRouteParam(authedReq("GET", "/cdc/streams/"+body.Stream.ID.String()+"/resolution", "", owner), "id", body.Stream.ID.String())
 	rec = httptest.NewRecorder()
 	h.GetCdcResolution(rec, req)
@@ -302,4 +374,97 @@ func TestStreamingCdcAuthAndTenantIsolation(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.ListStreams(rec, req)
 	assert.Equal(t, 401, rec.Code)
+}
+
+func TestStreamProvisionFailureMapsRuntimeError(t *testing.T) {
+	owner := uuid.New()
+	h := &handlers.Handlers{Repo: newFakeStore(), Runtime: &fakeRuntime{err: &handlers.RuntimeError{Kind: handlers.RuntimeUpstream, Msg: "kafka provision topic: boom"}}}
+	req := authedReq("POST", "/streams", `{"name":"orders"}`, owner)
+	rec := httptest.NewRecorder()
+	h.CreateStream(rec, req)
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Contains(t, rec.Body.String(), "boom")
+}
+
+func TestStreamRuntimeUnavailable(t *testing.T) {
+	owner := uuid.New()
+	h := &handlers.Handlers{Repo: newFakeStore()}
+	req := authedReq("POST", "/streams", `{"name":"orders"}`, owner)
+	rec := httptest.NewRecorder()
+	h.CreateStream(rec, req)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+type fakeKafkaAdmin struct {
+	provisioned []handlers.KafkaTopicSpec
+	updated     []handlers.KafkaTopicSpec
+	cdc         []handlers.CdcRegistrationSpec
+	err         error
+	result      *handlers.CdcRegistrationResult
+}
+
+func (f *fakeKafkaAdmin) ProvisionTopic(_ context.Context, spec handlers.KafkaTopicSpec) error {
+	f.provisioned = append(f.provisioned, spec)
+	return f.err
+}
+func (f *fakeKafkaAdmin) UpdateTopic(_ context.Context, spec handlers.KafkaTopicSpec) error {
+	f.updated = append(f.updated, spec)
+	return f.err
+}
+func (f *fakeKafkaAdmin) RegisterCDCSource(_ context.Context, spec handlers.CdcRegistrationSpec) (*handlers.CdcRegistrationResult, error) {
+	f.cdc = append(f.cdc, spec)
+	return f.result, f.err
+}
+
+type fakeFlinkDeployer struct {
+	deployed []handlers.FlinkJobSpec
+	updated  []handlers.FlinkJobSpec
+	cdc      []handlers.CdcRegistrationSpec
+	err      error
+	result   *handlers.CdcRegistrationResult
+}
+
+func (f *fakeFlinkDeployer) DeployStream(_ context.Context, spec handlers.FlinkJobSpec) error {
+	f.deployed = append(f.deployed, spec)
+	return f.err
+}
+func (f *fakeFlinkDeployer) UpdateStream(_ context.Context, spec handlers.FlinkJobSpec) error {
+	f.updated = append(f.updated, spec)
+	return f.err
+}
+func (f *fakeFlinkDeployer) RegisterCDCJob(_ context.Context, spec handlers.CdcRegistrationSpec) (*handlers.CdcRegistrationResult, error) {
+	f.cdc = append(f.cdc, spec)
+	return f.result, f.err
+}
+
+func TestProductionStreamingRuntimeProvisionAndUpdate(t *testing.T) {
+	kafka := &fakeKafkaAdmin{}
+	flink := &fakeFlinkDeployer{}
+	rt := handlers.NewProductionStreamingRuntime(kafka, flink)
+	stream := &models.StreamDefinition{ID: uuid.New(), Name: "Orders Raw", Partitions: 6, RetentionHours: 24, Schema: []byte(`{"fields":[]}`), SourceBinding: []byte(`{"connector_type":"kafka"}`), CheckpointIntervalMS: 5000, PipelineConsistency: "AT_LEAST_ONCE"}
+	require.NoError(t, rt.ProvisionStream(context.Background(), stream))
+	require.Len(t, kafka.provisioned, 1)
+	require.Len(t, flink.deployed, 1)
+	assert.Equal(t, int32(6), kafka.provisioned[0].Partitions)
+	assert.Contains(t, kafka.provisioned[0].Topic, "orders-raw")
+	require.NoError(t, rt.UpdateStream(context.Background(), stream))
+	require.Len(t, kafka.updated, 1)
+	require.Len(t, flink.updated, 1)
+}
+
+func TestProductionStreamingRuntimeRegisterCDC(t *testing.T) {
+	lsn := "0/16B6C50"
+	status := "caught_up"
+	kafka := &fakeKafkaAdmin{result: &handlers.CdcRegistrationResult{Checkpoint: &models.CheckpointUpdate{LastLSN: &lsn}}}
+	flink := &fakeFlinkDeployer{result: &handlers.CdcRegistrationResult{Resolution: &models.ResolutionUpdate{Status: &status}}}
+	rt := handlers.NewProductionStreamingRuntime(kafka, flink)
+	stream := &models.CdcStream{ID: uuid.New(), Slug: "orders-cdc", SourceKind: "postgres", SourceRef: "pg://orders", PrimaryKeys: []byte(`["id"]`), IncrementalMode: "log_based"}
+	result, err := rt.RegisterCDC(context.Background(), stream)
+	require.NoError(t, err)
+	require.Len(t, kafka.cdc, 1)
+	require.Len(t, flink.cdc, 1)
+	require.NotNil(t, result.Checkpoint)
+	require.NotNil(t, result.Resolution)
+	assert.Equal(t, lsn, *result.Checkpoint.LastLSN)
+	assert.Equal(t, status, *result.Resolution.Status)
 }

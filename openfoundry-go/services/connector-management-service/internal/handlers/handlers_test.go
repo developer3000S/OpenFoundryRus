@@ -76,6 +76,7 @@ func TestListConnectionsRequiresAuth(t *testing.T) {
 type fakeStore struct {
 	connections []models.Connection
 	syncJobs    map[uuid.UUID][]models.SyncJob
+	mediaSyncs  map[uuid.UUID][]models.MediaSetSync
 	runs        map[uuid.UUID][]models.SyncRun
 	links       map[string]models.VirtualTableSourceLink
 	vtables     map[string]models.VirtualTable
@@ -83,7 +84,7 @@ type fakeStore struct {
 
 func newFakeStore(owner uuid.UUID) *fakeStore {
 	conn := models.Connection{ID: uuid.New(), Name: "pg", ConnectorType: "postgresql", Config: json.RawMessage(`{}`), Status: "connected", OwnerID: owner, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-	return &fakeStore{connections: []models.Connection{conn}, syncJobs: map[uuid.UUID][]models.SyncJob{}, runs: map[uuid.UUID][]models.SyncRun{}, links: map[string]models.VirtualTableSourceLink{}, vtables: map[string]models.VirtualTable{}}
+	return &fakeStore{connections: []models.Connection{conn}, syncJobs: map[uuid.UUID][]models.SyncJob{}, mediaSyncs: map[uuid.UUID][]models.MediaSetSync{}, runs: map[uuid.UUID][]models.SyncRun{}, links: map[string]models.VirtualTableSourceLink{}, vtables: map[string]models.VirtualTable{}}
 }
 
 func (f *fakeStore) ListConnections(_ context.Context, ownerID *uuid.UUID) ([]models.Connection, error) {
@@ -222,6 +223,74 @@ func (f *fakeStore) GetVirtualTable(_ context.Context, rid string, ownerID strin
 	return &v, nil
 }
 
+func (f *fakeStore) ListMediaSetSyncs(_ context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.MediaSetSync, error) {
+	if c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID); c == nil {
+		return []models.MediaSetSync{}, nil
+	}
+	return f.mediaSyncs[sourceID], nil
+}
+func (f *fakeStore) GetMediaSetSync(_ context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.MediaSetSync, error) {
+	for source, syncs := range f.mediaSyncs {
+		if c, _ := f.GetConnectionForOwner(context.Background(), source, ownerID); c == nil {
+			continue
+		}
+		for i := range syncs {
+			if syncs[i].ID == id {
+				return &syncs[i], nil
+			}
+		}
+	}
+	return nil, nil
+}
+func (f *fakeStore) CreateMediaSetSync(_ context.Context, sourceID uuid.UUID, body *models.CreateMediaSetSyncRequest, ownerID uuid.UUID) (*models.MediaSetSync, error) {
+	if c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID); c == nil {
+		return nil, nil
+	}
+	m := models.MediaSetSync{ID: uuid.New(), SourceID: sourceID, Kind: body.Kind, TargetMediaSetRID: body.TargetMediaSetRID, Subfolder: strings.Trim(body.Subfolder, "/"), Filters: body.Filters, ScheduleCron: body.ScheduleCron, CreatedAt: time.Now().UTC()}
+	f.mediaSyncs[sourceID] = append([]models.MediaSetSync{m}, f.mediaSyncs[sourceID]...)
+	return &m, nil
+}
+func (f *fakeStore) UpdateMediaSetSync(_ context.Context, id uuid.UUID, body *models.UpdateMediaSetSyncRequest, ownerID uuid.UUID) (*models.MediaSetSync, error) {
+	for source, syncs := range f.mediaSyncs {
+		if c, _ := f.GetConnectionForOwner(context.Background(), source, ownerID); c == nil {
+			continue
+		}
+		for i := range syncs {
+			if syncs[i].ID == id {
+				if body.Kind != nil {
+					syncs[i].Kind = *body.Kind
+				}
+				if body.TargetMediaSetRID != nil {
+					syncs[i].TargetMediaSetRID = *body.TargetMediaSetRID
+				}
+				if body.Subfolder != nil {
+					syncs[i].Subfolder = strings.Trim(*body.Subfolder, "/")
+				}
+				if body.Filters != nil {
+					syncs[i].Filters = *body.Filters
+				}
+				if body.ScheduleCron != nil {
+					syncs[i].ScheduleCron = body.ScheduleCron
+				}
+				f.mediaSyncs[source] = syncs
+				return &syncs[i], nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+type fakeRuntime struct {
+	report *models.MediaSetSyncExecutionReport
+	err    error
+	called bool
+}
+
+func (f *fakeRuntime) ExecuteMediaSetSync(_ context.Context, _ *models.MediaSetSync, _ *models.RunMediaSetSyncRequest, _ string) (*models.MediaSetSyncExecutionReport, error) {
+	f.called = true
+	return f.report, f.err
+}
+
 func authedReq(method, target, body string, sub uuid.UUID) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	return req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: sub}))
@@ -335,4 +404,153 @@ func TestSyncAndVirtualAuthTenantIsolation(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.ListVirtualTables(rec, req)
 	assert.Equal(t, 401, rec.Code)
+}
+
+func TestCreateListGetUpdateMediaSetSync(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	source := store.connections[0].ID
+	body := `{"kind":"MEDIA_SET_SYNC","target_media_set_rid":"ri.foundry.main.media_set.` + uuid.NewString() + `","subfolder":"images","filters":{"path_glob":"*.png","file_size_limit":1024},"schedule_cron":"0 * * * *"}`
+	req := withRouteParam(authedReq("POST", "/sources/"+source.String()+"/media-set-syncs", body, owner), "id", source.String())
+	rec := httptest.NewRecorder()
+	h.CreateMediaSetSync(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var created models.MediaSetSync
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	assert.Equal(t, source, created.SourceID)
+	assert.Equal(t, models.MediaSetSyncKindCopy, created.Kind)
+
+	req = withRouteParam(authedReq("GET", "/sources/"+source.String()+"/media-set-syncs", "", owner), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.ListMediaSetSyncs(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var list []models.MediaSetSync
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	require.Len(t, list, 1)
+
+	req = withRouteParam(authedReq("GET", "/media-set-syncs/"+created.ID.String(), "", owner), "sync_id", created.ID.String())
+	rec = httptest.NewRecorder()
+	h.GetMediaSetSync(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	patch := `{"kind":"VIRTUAL_MEDIA_SET_SYNC","subfolder":"archive"}`
+	req = withRouteParam(authedReq("PATCH", "/media-set-syncs/"+created.ID.String(), patch, owner), "sync_id", created.ID.String())
+	rec = httptest.NewRecorder()
+	h.UpdateMediaSetSync(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var updated models.MediaSetSync
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &updated))
+	assert.Equal(t, models.MediaSetSyncKindVirtual, updated.Kind)
+	assert.Equal(t, "archive", updated.Subfolder)
+}
+
+func TestMediaSetSyncValidationErrors(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	source := store.connections[0].ID
+	req := withRouteParam(authedReq("POST", "/sources/"+source.String()+"/media-set-syncs", `{"kind":"MEDIA_SET_SYNC","target_media_set_rid":"bad","filters":{"file_size_limit":0},"schedule_cron":"bad cron"}`, owner), "id", source.String())
+	rec := httptest.NewRecorder()
+	h.CreateMediaSetSync(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "target_media_set_rid")
+	assert.Contains(t, rec.Body.String(), "file_size_limit")
+
+	created, err := store.CreateMediaSetSync(context.Background(), source, &models.CreateMediaSetSyncRequest{Kind: models.MediaSetSyncKindCopy, TargetMediaSetRID: "ri.foundry.main.media_set." + uuid.NewString()}, owner)
+	require.NoError(t, err)
+	badKind := `{"kind":"BAD"}`
+	req = withRouteParam(authedReq("PATCH", "/media-set-syncs/"+created.ID.String(), badKind, owner), "sync_id", created.ID.String())
+	rec = httptest.NewRecorder()
+	h.UpdateMediaSetSync(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestMediaSetSyncAuthTenantIsolation(t *testing.T) {
+	owner := uuid.New()
+	intruder := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	source := store.connections[0].ID
+	created, err := store.CreateMediaSetSync(context.Background(), source, &models.CreateMediaSetSyncRequest{Kind: models.MediaSetSyncKindCopy, TargetMediaSetRID: "ri.foundry.main.media_set." + uuid.NewString()}, owner)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/sources/"+source.String()+"/media-set-syncs", nil)
+	req = withRouteParam(req, "id", source.String())
+	rec := httptest.NewRecorder()
+	h.ListMediaSetSyncs(rec, req)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	req = withRouteParam(authedReq("GET", "/media-set-syncs/"+created.ID.String(), "", intruder), "sync_id", created.ID.String())
+	rec = httptest.NewRecorder()
+	h.GetMediaSetSync(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	req = withRouteParam(authedReq("POST", "/sources/"+source.String()+"/media-set-syncs", `{"kind":"MEDIA_SET_SYNC","target_media_set_rid":"ri.foundry.main.media_set.x"}`, intruder), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.CreateMediaSetSync(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestRunMediaSetSyncRuntimeErrorMapping(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	source := store.connections[0].ID
+	created, err := store.CreateMediaSetSync(context.Background(), source, &models.CreateMediaSetSyncRequest{Kind: models.MediaSetSyncKindCopy, TargetMediaSetRID: "ri.foundry.main.media_set." + uuid.NewString()}, owner)
+	require.NoError(t, err)
+	rt := &fakeRuntime{err: &handlers.RuntimeError{Kind: handlers.RuntimeDispatch, Msg: "media-sets-service returned HTTP 500"}}
+	h := &handlers.Handlers{Repo: store, MediaSetRuntime: rt}
+
+	req := withRouteParam(authedReq("POST", "/media-set-syncs/"+created.ID.String()+"/run", `{"source_files":[{"path":"a.png","size_bytes":1,"mime_type":"image/png"}]}`, owner), "sync_id", created.ID.String())
+	rec := httptest.NewRecorder()
+	h.RunMediaSetSync(rec, req)
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.True(t, rt.called)
+}
+
+func TestRunMediaSetSyncRuntimeSuccess(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	source := store.connections[0].ID
+	created, err := store.CreateMediaSetSync(context.Background(), source, &models.CreateMediaSetSyncRequest{Kind: models.MediaSetSyncKindCopy, TargetMediaSetRID: "ri.foundry.main.media_set." + uuid.NewString()}, owner)
+	require.NoError(t, err)
+	h := &handlers.Handlers{Repo: store, MediaSetRuntime: &fakeRuntime{report: &models.MediaSetSyncExecutionReport{Stats: models.SyncStats{Accepted: 1}, Dispatched: 1}}}
+
+	req := withRouteParam(authedReq("POST", "/media-set-syncs/"+created.ID.String()+"/run", `{"source_files":[{"path":"a.png","size_bytes":1,"mime_type":"image/png"}]}`, owner), "sync_id", created.ID.String())
+	rec := httptest.NewRecorder()
+	h.RunMediaSetSync(rec, req)
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	assert.Contains(t, rec.Body.String(), "dispatched")
+}
+
+func TestHTTPMediaSetRuntimeDispatchesAcceptedFiles(t *testing.T) {
+	seen := []string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.Path)
+		assert.Equal(t, "Bearer token", r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	limit := uint64(10)
+	glob := "*.png"
+	sync := &models.MediaSetSync{
+		Kind:              models.MediaSetSyncKindCopy,
+		TargetMediaSetRID: "ri.foundry.main.media_set.x",
+		Filters: models.MediaSetSyncFilters{
+			PathGlob:      &glob,
+			FileSizeLimit: &limit,
+		},
+	}
+	req := &models.RunMediaSetSyncRequest{SourceFiles: []models.SourceFile{
+		{Path: "ok.png", SizeBytes: 1, MimeType: "image/png"},
+		{Path: "too-large.png", SizeBytes: 11, MimeType: "image/png"},
+		{Path: "notes.txt", SizeBytes: 1, MimeType: "text/plain"},
+	}, AllowedMIMETypes: []string{"image/png"}}
+	rt := &handlers.HTTPMediaSetRuntime{MediaSetsBaseURL: srv.URL, Client: srv.Client()}
+	report, err := rt.ExecuteMediaSetSync(context.Background(), sync, req, "Bearer token")
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), report.Dispatched)
+	require.Equal(t, uint32(1), report.Stats.Accepted)
+	require.Equal(t, uint32(2), report.Stats.Skipped)
+	require.Equal(t, []string{"/media-sets/ri.foundry.main.media_set.x/items/upload-url"}, seen)
 }

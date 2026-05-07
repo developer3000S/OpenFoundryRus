@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	storageabstraction "github.com/openfoundry/openfoundry-go/libs/storage-abstraction"
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
 	"github.com/openfoundry/openfoundry-go/services/dataset-versioning-service/internal/models"
@@ -32,9 +35,16 @@ type Store interface {
 	ListBranches(ctx context.Context, datasetID uuid.UUID) ([]models.DatasetBranch, error)
 	GetBranch(ctx context.Context, datasetID uuid.UUID, name string) (*models.DatasetBranch, error)
 	CreateBranch(ctx context.Context, dataset *models.Dataset, body *models.CreateDatasetBranchRequest) (*models.DatasetBranch, error)
+	ListFiles(ctx context.Context, datasetID uuid.UUID, branch string, prefix string) ([]models.DatasetFile, error)
+	GetFile(ctx context.Context, datasetID uuid.UUID, fileID uuid.UUID) (*models.DatasetFile, error)
+	GetTransactionStatus(ctx context.Context, datasetID uuid.UUID, transactionID uuid.UUID) (string, bool, error)
 }
 
-type Handlers struct{ Repo Store }
+type Handlers struct {
+	Repo       Store
+	BackingFS  storageabstraction.BackingFS
+	PresignTTL time.Duration
+}
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -370,4 +380,124 @@ func (h *Handlers) CreateBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, v)
+}
+
+func (h *Handlers) ListFiles(w http.ResponseWriter, r *http.Request) {
+	_, dataset, ok := h.ownedDataset(w, r)
+	if !ok {
+		return
+	}
+	branch := strings.TrimSpace(r.URL.Query().Get("branch"))
+	if branch == "" {
+		branch = "main"
+	}
+	prefix := strings.TrimLeft(strings.TrimSpace(r.URL.Query().Get("prefix")), "/")
+	files, err := h.Repo.ListFiles(r.Context(), dataset.ID, branch, prefix)
+	if err != nil {
+		slog.Error("list files", slog.String("error", err.Error()))
+		writeJSONErr(w, http.StatusInternalServerError, "failed to list files")
+		return
+	}
+	writeJSON(w, http.StatusOK, models.ListDatasetFilesResponse{Branch: branch, Total: len(files), Files: files})
+}
+
+func (h *Handlers) DownloadFile(w http.ResponseWriter, r *http.Request) {
+	_, dataset, ok := h.ownedDataset(w, r)
+	if !ok {
+		return
+	}
+	fileID, err := uuid.Parse(chi.URLParam(r, "file_id"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid file_id")
+		return
+	}
+	file, err := h.Repo.GetFile(r.Context(), dataset.ID, fileID)
+	if err != nil {
+		slog.Error("get file", slog.String("error", err.Error()))
+		writeJSONErr(w, http.StatusInternalServerError, "failed to load file")
+		return
+	}
+	if file == nil {
+		writeJSONErr(w, http.StatusNotFound, "file not found")
+		return
+	}
+	if file.DeletedAt != nil {
+		writeJSONErr(w, http.StatusGone, "file is soft-deleted")
+		return
+	}
+	if h.BackingFS == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "backing filesystem not configured")
+		return
+	}
+	ttl := h.PresignTTL
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	signed, err := h.BackingFS.PresignedURL(storageabstraction.ParsePhysicalURI(file.PhysicalURI), ttl)
+	if err != nil {
+		slog.Error("presign file", slog.String("error", err.Error()))
+		writeJSONErr(w, http.StatusInternalServerError, "failed to presign file")
+		return
+	}
+	writeJSON(w, http.StatusOK, models.DownloadDatasetFileResponse{URL: signed.URL, ExpiresAt: signed.ExpiresAt, Method: signed.Method})
+}
+
+func (h *Handlers) CreateFileUploadURL(w http.ResponseWriter, r *http.Request) {
+	_, dataset, ok := h.ownedDataset(w, r)
+	if !ok {
+		return
+	}
+	txnID, err := uuid.Parse(chi.URLParam(r, "txn"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid transaction id")
+		return
+	}
+	var body models.CreateDatasetFileUploadURLRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	logical := strings.TrimLeft(strings.TrimSpace(body.LogicalPath), "/")
+	if logical == "" {
+		writeJSONErr(w, http.StatusBadRequest, "logical_path required")
+		return
+	}
+	status, found, err := h.Repo.GetTransactionStatus(r.Context(), dataset.ID, txnID)
+	if err != nil {
+		slog.Error("get transaction status", slog.String("error", err.Error()))
+		writeJSONErr(w, http.StatusInternalServerError, "failed to load transaction")
+		return
+	}
+	if !found {
+		writeJSONErr(w, http.StatusNotFound, "transaction not found")
+		return
+	}
+	if !strings.EqualFold(status, "OPEN") {
+		writeJSONErr(w, http.StatusConflict, "transaction is not OPEN")
+		return
+	}
+	if h.BackingFS == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "backing filesystem not configured")
+		return
+	}
+	ttl := h.PresignTTL
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	physical := storageabstraction.PhysicalLocation{
+		FSID:          h.BackingFS.FSID(),
+		BaseDirectory: h.BackingFS.BaseDirectory(),
+		RelativePath:  "transactions/" + txnID.String() + "/" + logical,
+	}
+	signed, err := h.BackingFS.PresignedURL(physical, ttl)
+	if err != nil {
+		slog.Error("presign upload", slog.String("error", err.Error()))
+		writeJSONErr(w, http.StatusInternalServerError, "failed to presign upload")
+		return
+	}
+	method := signed.Method
+	if method == "" || method == "GET" {
+		method = "PUT"
+	}
+	writeJSON(w, http.StatusOK, models.CreateDatasetFileUploadURLResponse{URL: signed.URL, PhysicalURI: physical.URI(), ExpiresAt: signed.ExpiresAt, Method: method})
 }

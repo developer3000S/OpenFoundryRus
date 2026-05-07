@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
+	storageabstraction "github.com/openfoundry/openfoundry-go/libs/storage-abstraction"
 	"github.com/openfoundry/openfoundry-go/services/dataset-versioning-service/internal/handlers"
 	"github.com/openfoundry/openfoundry-go/services/dataset-versioning-service/internal/models"
 	"github.com/openfoundry/openfoundry-go/services/dataset-versioning-service/internal/repo"
@@ -92,6 +93,8 @@ type fakeStore struct {
 	datasets        []models.Dataset
 	versions        map[uuid.UUID][]models.DatasetVersion
 	branches        map[uuid.UUID][]models.DatasetBranch
+	files           map[uuid.UUID][]models.DatasetFile
+	transactions    map[uuid.UUID]string
 	versionConflict bool
 	branchConflict  bool
 }
@@ -102,7 +105,7 @@ func newFakeStore(owner uuid.UUID) *fakeStore {
 		StoragePath: "s3://bucket/sales", OwnerID: owner, CurrentVersion: 1,
 		Tags: []string{}, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	return &fakeStore{datasets: []models.Dataset{ds}, versions: map[uuid.UUID][]models.DatasetVersion{}, branches: map[uuid.UUID][]models.DatasetBranch{}}
+	return &fakeStore{datasets: []models.Dataset{ds}, versions: map[uuid.UUID][]models.DatasetVersion{}, branches: map[uuid.UUID][]models.DatasetBranch{}, files: map[uuid.UUID][]models.DatasetFile{}, transactions: map[uuid.UUID]string{}}
 }
 
 func (f *fakeStore) ListDatasets(_ context.Context, ownerID *uuid.UUID, _ int) ([]models.Dataset, error) {
@@ -190,6 +193,29 @@ func (f *fakeStore) CreateBranch(_ context.Context, dataset *models.Dataset, bod
 	b := models.DatasetBranch{ID: uuid.New(), RID: "ri.foundry.main.branch." + uuid.NewString(), DatasetID: dataset.ID, DatasetRID: "ri.foundry.main.dataset." + dataset.ID.String(), Name: strings.TrimSpace(body.Name), Labels: []byte(`{}`), FallbackChain: []string{}, Version: dataset.CurrentVersion, BaseVersion: dataset.CurrentVersion, Description: body.Description, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), LastActivityAt: time.Now().UTC()}
 	f.branches[dataset.ID] = append(f.branches[dataset.ID], b)
 	return &b, nil
+}
+
+func (f *fakeStore) ListFiles(_ context.Context, datasetID uuid.UUID, _ string, prefix string) ([]models.DatasetFile, error) {
+	out := []models.DatasetFile{}
+	for _, file := range f.files[datasetID] {
+		if prefix == "" || strings.HasPrefix(file.LogicalPath, prefix) {
+			out = append(out, file)
+		}
+	}
+	return out, nil
+}
+func (f *fakeStore) GetFile(_ context.Context, datasetID uuid.UUID, fileID uuid.UUID) (*models.DatasetFile, error) {
+	for i := range f.files[datasetID] {
+		if f.files[datasetID][i].ID == fileID {
+			return &f.files[datasetID][i], nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeStore) GetTransactionStatus(_ context.Context, _ uuid.UUID, transactionID uuid.UUID) (string, bool, error) {
+	status, ok := f.transactions[transactionID]
+	return status, ok, nil
 }
 
 func authedReq(method, target, body string, sub uuid.UUID) *http.Request {
@@ -302,4 +328,82 @@ func TestTenantIsolationForNestedSurfaces(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.ListBranches(rec, req)
 	assert.Equal(t, 404, rec.Code)
+}
+
+func TestListAndDownloadFiles(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	datasetID := store.datasets[0].ID
+	fileID := uuid.New()
+	store.files[datasetID] = []models.DatasetFile{{
+		ID: fileID, DatasetID: datasetID, TransactionID: uuid.New(), LogicalPath: "daily/part-000.parquet",
+		PhysicalURI: "local:///datasets/sales/daily/part-000.parquet", SizeBytes: 42,
+		CreatedAt: time.Now().UTC(), ModifiedAt: time.Now().UTC(), Status: "active",
+	}}
+	fs := storageabstraction.NewLocalBackingFS("http://files.local", "", []byte("test-secret"))
+	h := &handlers.Handlers{Repo: store, BackingFS: fs, PresignTTL: time.Minute}
+
+	req := datasetReq("GET", store, owner, "")
+	req.URL.RawQuery = "prefix=daily/"
+	rec := httptest.NewRecorder()
+	h.ListFiles(rec, req)
+	require.Equal(t, 200, rec.Code)
+	var listed models.ListDatasetFilesResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &listed))
+	require.Len(t, listed.Files, 1)
+	assert.Equal(t, "daily/part-000.parquet", listed.Files[0].LogicalPath)
+
+	req = withRouteParam(datasetReq("GET", store, owner, ""), "file_id", fileID.String())
+	rec = httptest.NewRecorder()
+	h.DownloadFile(rec, req)
+	require.Equal(t, 200, rec.Code)
+	var downloaded models.DownloadDatasetFileResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &downloaded))
+	assert.Equal(t, "GET", downloaded.Method)
+	assert.Contains(t, downloaded.URL, "http://files.local/api/v1/_internal/local-fs/datasets/sales/daily/part-000.parquet")
+}
+
+func TestDownloadDeletedFileReturnsGone(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	datasetID := store.datasets[0].ID
+	fileID := uuid.New()
+	deletedAt := time.Now().UTC()
+	store.files[datasetID] = []models.DatasetFile{{ID: fileID, DatasetID: datasetID, TransactionID: uuid.New(), LogicalPath: "old.csv", PhysicalURI: "local:///old.csv", DeletedAt: &deletedAt, Status: "deleted"}}
+	h := &handlers.Handlers{Repo: store, BackingFS: storageabstraction.NewLocalBackingFS("http://files.local", "", []byte("test-secret"))}
+
+	req := withRouteParam(datasetReq("GET", store, owner, ""), "file_id", fileID.String())
+	rec := httptest.NewRecorder()
+	h.DownloadFile(rec, req)
+	assert.Equal(t, http.StatusGone, rec.Code)
+}
+
+func TestCreateFileUploadURL(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	txnID := uuid.New()
+	store.transactions[txnID] = "OPEN"
+	h := &handlers.Handlers{Repo: store, BackingFS: storageabstraction.NewLocalBackingFS("http://files.local", "dataset-root", []byte("secret")), PresignTTL: time.Minute}
+
+	req := withRouteParam(datasetReq("POST", store, owner, `{"logical_path":"incoming/file.csv"}`), "txn", txnID.String())
+	rec := httptest.NewRecorder()
+	h.CreateFileUploadURL(rec, req)
+	require.Equal(t, 200, rec.Code)
+	var out models.CreateDatasetFileUploadURLResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	assert.Equal(t, "PUT", out.Method)
+	assert.Equal(t, "local:///dataset-root/transactions/"+txnID.String()+"/incoming/file.csv", out.PhysicalURI)
+}
+
+func TestCreateFileUploadURLRejectsClosedTransaction(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	txnID := uuid.New()
+	store.transactions[txnID] = "COMMITTED"
+	h := &handlers.Handlers{Repo: store, BackingFS: storageabstraction.NewLocalBackingFS("http://files.local", "", []byte("secret"))}
+
+	req := withRouteParam(datasetReq("POST", store, owner, `{"logical_path":"file.csv"}`), "txn", txnID.String())
+	rec := httptest.NewRecorder()
+	h.CreateFileUploadURL(rec, req)
+	assert.Equal(t, http.StatusConflict, rec.Code)
 }

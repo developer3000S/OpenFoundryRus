@@ -2,9 +2,8 @@
 // the Foundry ingestion + replication runtime (Kafka/Flink jobs +
 // streaming + cdc_metadata).
 //
-// Foundation slice scope: ingest_jobs CRUD on Postgres. Streaming +
-// cdc_metadata sub-modules (~30k LOC across 20+ submodule migrations)
-// land in follow-up slices.
+// Runtime scope: ingest_jobs CRUD plus streaming/CDC control-plane
+// provisioning through Kafka and Flink runtime adapters.
 package main
 
 import (
@@ -60,7 +59,11 @@ func main() {
 	}
 
 	jwt := authmw.NewJWTConfig(cfg.JWTSecret)
-	h := &handlers.Handlers{Repo: &repo.Repo{Pool: pool}}
+	runtime := handlers.NewProductionStreamingRuntime(
+		&handlers.HTTPKafkaAdmin{BaseURL: os.Getenv("KAFKA_RUNTIME_URL")},
+		&handlers.HTTPFlinkDeployer{BaseURL: os.Getenv("FLINK_RUNTIME_URL")},
+	)
+	h := &handlers.Handlers{Repo: &repo.Repo{Pool: pool}, Runtime: runtime}
 	metrics := observability.NewMetrics()
 
 	srv := server.New(cfg, jwt, h, metrics)

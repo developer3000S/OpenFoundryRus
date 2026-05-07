@@ -147,3 +147,23 @@ type ResolutionState struct {
 	Notes              *string    `json:"notes"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
+
+// CheckpointUpdate is emitted by the streaming runtime when Kafka/Flink CDC
+// registration or callbacks advance the durable source offset.
+type CheckpointUpdate struct {
+	LastOffset      *string    `json:"last_offset,omitempty"`
+	LastLSN         *string    `json:"last_lsn,omitempty"`
+	LastEventAt     *time.Time `json:"last_event_at,omitempty"`
+	RecordsObserved *int64     `json:"records_observed,omitempty"`
+	RecordsApplied  *int64     `json:"records_applied,omitempty"`
+}
+
+// ResolutionUpdate is emitted by the runtime when CDC conflict-resolution state
+// changes after registration or checkpoint callbacks.
+type ResolutionUpdate struct {
+	Status             *string    `json:"status,omitempty"`
+	Watermark          *time.Time `json:"watermark,omitempty"`
+	ConflictCount      *int64     `json:"conflict_count,omitempty"`
+	PendingResolutions *int64     `json:"pending_resolutions,omitempty"`
+	Notes              *string    `json:"notes,omitempty"`
+}

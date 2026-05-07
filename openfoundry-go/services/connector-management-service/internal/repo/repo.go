@@ -5,6 +5,7 @@ package repo
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -409,6 +410,112 @@ func scanVirtualTable(r rowLikeT) (*models.VirtualTable, error) {
 	}
 	if v.Markings == nil {
 		v.Markings = []string{}
+	}
+	return v, nil
+}
+
+const mediaSetSyncSelect = `SELECT m.id, m.source_id, m.sync_type, m.target_media_set_rid,
+	m.subfolder, m.filters, m.schedule_cron, m.created_at
+	FROM media_set_syncs m JOIN connections c ON c.id = m.source_id`
+
+func (r *Repo) ListMediaSetSyncs(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.MediaSetSync, error) {
+	rows, err := r.Pool.Query(ctx, mediaSetSyncSelect+` WHERE m.source_id = $1 AND c.owner_id = $2 ORDER BY m.created_at DESC`, sourceID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.MediaSetSync, 0)
+	for rows.Next() {
+		v, err := scanMediaSetSync(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *v)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) GetMediaSetSync(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.MediaSetSync, error) {
+	row := r.Pool.QueryRow(ctx, mediaSetSyncSelect+` WHERE m.id = $1 AND c.owner_id = $2`, id, ownerID)
+	v, err := scanMediaSetSync(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func (r *Repo) CreateMediaSetSync(ctx context.Context, sourceID uuid.UUID, body *models.CreateMediaSetSyncRequest, ownerID uuid.UUID) (*models.MediaSetSync, error) {
+	filters, err := json.Marshal(body.Filters)
+	if err != nil {
+		return nil, err
+	}
+	row := r.Pool.QueryRow(ctx,
+		`INSERT INTO media_set_syncs (id, source_id, sync_type, target_media_set_rid, subfolder, filters, schedule_cron)
+		 SELECT $1, c.id, $3, $4, $5, $6, $7 FROM connections c WHERE c.id = $2 AND c.owner_id = $8
+		 RETURNING id, source_id, sync_type, target_media_set_rid, subfolder, filters, schedule_cron, created_at`,
+		uuid.New(), sourceID, string(body.Kind), strings.TrimSpace(body.TargetMediaSetRID), strings.Trim(body.Subfolder, "/"), filters, body.ScheduleCron, ownerID,
+	)
+	v, err := scanMediaSetSync(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func (r *Repo) UpdateMediaSetSync(ctx context.Context, id uuid.UUID, body *models.UpdateMediaSetSyncRequest, ownerID uuid.UUID) (*models.MediaSetSync, error) {
+	current, err := r.GetMediaSetSync(ctx, id, ownerID)
+	if err != nil || current == nil {
+		return current, err
+	}
+	kind := current.Kind
+	if body.Kind != nil {
+		kind = *body.Kind
+	}
+	target := current.TargetMediaSetRID
+	if body.TargetMediaSetRID != nil {
+		target = strings.TrimSpace(*body.TargetMediaSetRID)
+	}
+	subfolder := current.Subfolder
+	if body.Subfolder != nil {
+		subfolder = strings.Trim(*body.Subfolder, "/")
+	}
+	filters := current.Filters
+	if body.Filters != nil {
+		filters = *body.Filters
+	}
+	schedule := current.ScheduleCron
+	if body.ScheduleCron != nil {
+		schedule = body.ScheduleCron
+	}
+	if errs := models.ValidateMediaSetSyncConfig(kind, target, filters, schedule); len(errs) > 0 {
+		return nil, errors.New(strings.Join(errs, "; "))
+	}
+	filtersJSON, err := json.Marshal(filters)
+	if err != nil {
+		return nil, err
+	}
+	row := r.Pool.QueryRow(ctx,
+		`UPDATE media_set_syncs m SET sync_type = $2, target_media_set_rid = $3, subfolder = $4, filters = $5, schedule_cron = $6
+		 FROM connections c WHERE m.source_id = c.id AND m.id = $1 AND c.owner_id = $7
+		 RETURNING m.id, m.source_id, m.sync_type, m.target_media_set_rid, m.subfolder, m.filters, m.schedule_cron, m.created_at`,
+		id, string(kind), target, subfolder, filtersJSON, schedule, ownerID,
+	)
+	return scanMediaSetSync(row)
+}
+
+func scanMediaSetSync(r rowLikeT) (*models.MediaSetSync, error) {
+	v := &models.MediaSetSync{}
+	var kind string
+	var filters []byte
+	if err := r.Scan(&v.ID, &v.SourceID, &kind, &v.TargetMediaSetRID, &v.Subfolder, &filters, &v.ScheduleCron, &v.CreatedAt); err != nil {
+		return nil, err
+	}
+	v.Kind = models.MediaSetSyncKind(kind)
+	if len(filters) == 0 {
+		filters = []byte(`{}`)
+	}
+	if err := json.Unmarshal(filters, &v.Filters); err != nil {
+		return nil, err
 	}
 	return v, nil
 }

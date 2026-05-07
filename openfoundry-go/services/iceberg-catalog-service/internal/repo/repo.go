@@ -487,3 +487,158 @@ func enforceRequirements(table *models.IcebergTable, reqs []json.RawMessage) err
 	}
 	return nil
 }
+
+func (r *Repo) DropTable(ctx context.Context, projectRID string, namespace []string, tableName string, purge bool) (bool, error) {
+	_ = purge
+	cmd, err := r.Pool.Exec(ctx,
+		`DELETE FROM iceberg_tables t USING iceberg_namespaces n
+		 WHERE t.namespace_id=n.id AND n.project_rid=$1 AND n.name=$2 AND t.name=$3`,
+		projectRID, encodePath(namespace), tableName)
+	if err != nil {
+		return false, err
+	}
+	return cmd.RowsAffected() > 0, nil
+}
+
+func (r *Repo) RenameTable(ctx context.Context, projectRID string, sourceNS []string, sourceName string, destNS []string, destName string) (*models.IcebergTable, error) {
+	dest, err := r.GetNamespaceByProjectName(ctx, projectRID, encodePath(destNS))
+	if err != nil || dest == nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("destination namespace not found")
+	}
+	row := r.Pool.QueryRow(ctx,
+		`UPDATE iceberg_tables t SET namespace_id=$4, name=$5, updated_at=NOW()
+		 FROM iceberg_namespaces n
+		 WHERE t.namespace_id=n.id AND n.project_rid=$1 AND n.name=$2 AND t.name=$3
+		 RETURNING t.id, t.rid, t.namespace_id, $6::text AS namespace_name, t.name, t.table_uuid,
+		          t.format_version, t.location, t.current_snapshot_id, t.current_metadata_location,
+		          t.last_sequence_number, t.partition_spec, t.schema_json, t.sort_order, t.properties,
+		          t.markings, t.created_at, t.updated_at`,
+		projectRID, encodePath(sourceNS), sourceName, dest.ID, strings.TrimSpace(destName), encodePath(destNS))
+	v, err := scanTable(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+const refSelect = `SELECT id, table_id, name, kind, snapshot_id, max_ref_age_ms,
+	max_snapshot_age_ms, min_snapshots_to_keep, created_at FROM iceberg_table_branches`
+
+func (r *Repo) ListRefs(ctx context.Context, tableID uuid.UUID) ([]models.TableRef, error) {
+	rows, err := r.Pool.Query(ctx, refSelect+` WHERE table_id=$1 ORDER BY name`, tableID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.TableRef{}
+	for rows.Next() {
+		v, err := scanRef(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *v)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) UpsertRef(ctx context.Context, tableID uuid.UUID, name string, body *models.UpdateRefRequest) (*models.TableRef, error) {
+	kind := body.Type
+	if kind == "" {
+		kind = "branch"
+	}
+	if !oneOf(kind, "branch", "tag") {
+		return nil, fmt.Errorf("invalid ref type `%s`", kind)
+	}
+	canonical := name
+	if canonical == "master" {
+		canonical = "main"
+	}
+	row := r.Pool.QueryRow(ctx,
+		`INSERT INTO iceberg_table_branches
+		 (id, table_id, name, kind, snapshot_id, max_ref_age_ms, max_snapshot_age_ms, min_snapshots_to_keep)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		 ON CONFLICT (table_id, name) DO UPDATE SET kind=EXCLUDED.kind, snapshot_id=EXCLUDED.snapshot_id,
+		 max_ref_age_ms=EXCLUDED.max_ref_age_ms, max_snapshot_age_ms=EXCLUDED.max_snapshot_age_ms,
+		 min_snapshots_to_keep=EXCLUDED.min_snapshots_to_keep
+		 RETURNING id, table_id, name, kind, snapshot_id, max_ref_age_ms,
+		           max_snapshot_age_ms, min_snapshots_to_keep, created_at`,
+		uuid.New(), tableID, canonical, kind, body.SnapshotID, body.MaxRefAgeMS, body.MaxSnapshotAgeMS, body.MinSnapshotsToKeep)
+	return scanRef(row)
+}
+
+func (r *Repo) GetRef(ctx context.Context, tableID uuid.UUID, name string) (*models.TableRef, error) {
+	if name == "master" {
+		name = "main"
+	}
+	row := r.Pool.QueryRow(ctx, refSelect+` WHERE table_id=$1 AND name=$2`, tableID, name)
+	v, err := scanRef(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func (r *Repo) DeleteRef(ctx context.Context, tableID uuid.UUID, name string) (bool, error) {
+	if name == "master" {
+		name = "main"
+	}
+	cmd, err := r.Pool.Exec(ctx, `DELETE FROM iceberg_table_branches WHERE table_id=$1 AND name=$2`, tableID, name)
+	if err != nil {
+		return false, err
+	}
+	return cmd.RowsAffected() > 0, nil
+}
+
+func (r *Repo) ListMetadataFiles(ctx context.Context, tableID uuid.UUID) ([]models.MetadataFile, error) {
+	rows, err := r.Pool.Query(ctx, `SELECT id, table_id, version, path, created_at FROM iceberg_table_metadata_files WHERE table_id=$1 ORDER BY version`, tableID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.MetadataFile{}
+	for rows.Next() {
+		v, err := scanMetadataFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *v)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) GetMetadataFile(ctx context.Context, tableID uuid.UUID, version int32) (*models.MetadataFile, error) {
+	row := r.Pool.QueryRow(ctx, `SELECT id, table_id, version, path, created_at FROM iceberg_table_metadata_files WHERE table_id=$1 AND version=$2`, tableID, version)
+	v, err := scanMetadataFile(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func (r *Repo) GetSnapshot(ctx context.Context, tableID uuid.UUID, snapshotID int64) (*models.Snapshot, error) {
+	row := r.Pool.QueryRow(ctx, `SELECT id, table_id, snapshot_id, parent_snapshot_id, sequence_number, operation, manifest_list_location, summary, schema_id, timestamp_ms FROM iceberg_snapshots WHERE table_id=$1 AND snapshot_id=$2`, tableID, snapshotID)
+	v, err := scanSnapshot(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func scanRef(r rowLikeT) (*models.TableRef, error) {
+	v := &models.TableRef{}
+	if err := r.Scan(&v.ID, &v.TableID, &v.Name, &v.Kind, &v.SnapshotID, &v.MaxRefAgeMS, &v.MaxSnapshotAgeMS, &v.MinSnapshotsToKeep, &v.CreatedAt); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func scanMetadataFile(r rowLikeT) (*models.MetadataFile, error) {
+	v := &models.MetadataFile{}
+	if err := r.Scan(&v.ID, &v.TableID, &v.Version, &v.Path, &v.CreatedAt); err != nil {
+		return nil, err
+	}
+	return v, nil
+}

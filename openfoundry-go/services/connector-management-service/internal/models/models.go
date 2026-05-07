@@ -6,6 +6,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -65,6 +66,110 @@ type UpdateSyncJobRequest struct {
 	OutputDatasetID *uuid.UUID `json:"output_dataset_id,omitempty"`
 	FileGlob        *string    `json:"file_glob,omitempty"`
 	ScheduleCron    *string    `json:"schedule_cron,omitempty"`
+}
+
+// MediaSetSyncKind identifies the Foundry media-set sync flavour.
+type MediaSetSyncKind string
+
+const (
+	MediaSetSyncKindCopy    MediaSetSyncKind = "MEDIA_SET_SYNC"
+	MediaSetSyncKindVirtual MediaSetSyncKind = "VIRTUAL_MEDIA_SET_SYNC"
+)
+
+type MediaSetSyncFilters struct {
+	ExcludeAlreadySynced  bool    `json:"exclude_already_synced"`
+	PathGlob              *string `json:"path_glob,omitempty"`
+	FileSizeLimit         *uint64 `json:"file_size_limit,omitempty"`
+	IgnoreUnmatchedSchema bool    `json:"ignore_unmatched_schema"`
+}
+
+type MediaSetSync struct {
+	ID                uuid.UUID           `json:"id"`
+	SourceID          uuid.UUID           `json:"source_id"`
+	Kind              MediaSetSyncKind    `json:"kind"`
+	TargetMediaSetRID string              `json:"target_media_set_rid"`
+	Subfolder         string              `json:"subfolder"`
+	Filters           MediaSetSyncFilters `json:"filters"`
+	ScheduleCron      *string             `json:"schedule_cron,omitempty"`
+	CreatedAt         time.Time           `json:"created_at"`
+}
+
+type CreateMediaSetSyncRequest struct {
+	Kind              MediaSetSyncKind    `json:"kind"`
+	TargetMediaSetRID string              `json:"target_media_set_rid"`
+	Subfolder         string              `json:"subfolder,omitempty"`
+	Filters           MediaSetSyncFilters `json:"filters,omitempty"`
+	ScheduleCron      *string             `json:"schedule_cron,omitempty"`
+}
+
+type UpdateMediaSetSyncRequest struct {
+	Kind              *MediaSetSyncKind    `json:"kind,omitempty"`
+	TargetMediaSetRID *string              `json:"target_media_set_rid,omitempty"`
+	Subfolder         *string              `json:"subfolder,omitempty"`
+	Filters           *MediaSetSyncFilters `json:"filters,omitempty"`
+	ScheduleCron      *string              `json:"schedule_cron,omitempty"`
+}
+
+type SourceFile struct {
+	Path      string `json:"path"`
+	SizeBytes uint64 `json:"size_bytes"`
+	MimeType  string `json:"mime_type"`
+}
+
+type RunMediaSetSyncRequest struct {
+	SourceFiles      []SourceFile `json:"source_files,omitempty"`
+	AlreadySynced    []string     `json:"already_synced,omitempty"`
+	AllowedMIMETypes []string     `json:"allowed_mime_types,omitempty"`
+}
+
+type SyncStats struct {
+	Accepted         uint32 `json:"accepted"`
+	Skipped          uint32 `json:"skipped"`
+	SchemaMismatched uint32 `json:"schema_mismatched"`
+}
+
+type MediaSetSyncExecutionReport struct {
+	Stats            SyncStats `json:"stats"`
+	Dispatched       uint32    `json:"dispatched"`
+	DispatchErrors   uint32    `json:"dispatch_errors"`
+	SchemaMismatches []string  `json:"schema_mismatches"`
+}
+
+func (k MediaSetSyncKind) Valid() bool {
+	return k == MediaSetSyncKindCopy || k == MediaSetSyncKindVirtual
+}
+
+func ValidateMediaSetSyncConfig(kind MediaSetSyncKind, targetRID string, filters MediaSetSyncFilters, schedule *string) []string {
+	errs := []string{}
+	if !kind.Valid() {
+		errs = append(errs, "kind must be MEDIA_SET_SYNC or VIRTUAL_MEDIA_SET_SYNC")
+	}
+	if !strings.HasPrefix(strings.TrimSpace(targetRID), "ri.foundry.main.media_set.") {
+		errs = append(errs, "target_media_set_rid must start with ri.foundry.main.media_set.")
+	}
+	if filters.PathGlob != nil {
+		if _, err := filepath.Match(*filters.PathGlob, ""); err != nil {
+			errs = append(errs, "invalid path_glob: "+err.Error())
+		}
+	}
+	if filters.FileSizeLimit != nil && *filters.FileSizeLimit == 0 {
+		errs = append(errs, "file_size_limit must be > 0")
+	}
+	if schedule != nil {
+		fields := strings.Fields(strings.TrimSpace(*schedule))
+		if len(fields) != 5 && len(fields) != 6 {
+			errs = append(errs, "schedule_cron must have 5 or 6 fields")
+		}
+	}
+	return errs
+}
+
+func (m MediaSetSync) Validate() []string {
+	return ValidateMediaSetSyncConfig(m.Kind, m.TargetMediaSetRID, m.Filters, m.ScheduleCron)
+}
+
+func (r CreateMediaSetSyncRequest) Validate() []string {
+	return ValidateMediaSetSyncConfig(r.Kind, r.TargetMediaSetRID, r.Filters, r.ScheduleCron)
 }
 
 type SyncRun struct {

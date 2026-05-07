@@ -497,3 +497,85 @@ func oneOf(v string, allowed ...string) bool {
 	return false
 }
 func jsonValid(v []byte) bool { return len(v) > 0 && json.Valid(v) }
+
+func (r *Repo) ApplyCheckpoint(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID, update *models.CheckpointUpdate) (*models.IncrementalCheckpoint, error) {
+	if update == nil {
+		return r.GetCheckpoint(ctx, streamID, ownerID)
+	}
+	current, err := r.GetCheckpoint(ctx, streamID, ownerID)
+	if err != nil || current == nil {
+		return current, err
+	}
+	lastOffset := current.LastOffset
+	if update.LastOffset != nil {
+		lastOffset = update.LastOffset
+	}
+	lastLSN := current.LastLSN
+	if update.LastLSN != nil {
+		lastLSN = update.LastLSN
+	}
+	lastEventAt := current.LastEventAt
+	if update.LastEventAt != nil {
+		lastEventAt = update.LastEventAt
+	}
+	recordsObserved := current.RecordsObserved
+	if update.RecordsObserved != nil {
+		recordsObserved = *update.RecordsObserved
+	}
+	recordsApplied := current.RecordsApplied
+	if update.RecordsApplied != nil {
+		recordsApplied = *update.RecordsApplied
+	}
+	row := r.Pool.QueryRow(ctx,
+		`UPDATE cdc_incremental_checkpoints cp SET last_offset=$3, last_lsn=$4, last_event_at=$5,
+		 records_observed=$6, records_applied=$7, updated_at=NOW()
+		 FROM cdc_streams s WHERE cp.stream_id=s.id AND cp.stream_id=$1 AND s.owner_id=$2
+		 RETURNING cp.stream_id, cp.last_offset, cp.last_lsn, cp.last_event_at, cp.records_observed, cp.records_applied, cp.updated_at`,
+		streamID, ownerID, lastOffset, lastLSN, lastEventAt, recordsObserved, recordsApplied)
+	v, err := scanCheckpoint(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func (r *Repo) ApplyResolution(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID, update *models.ResolutionUpdate) (*models.ResolutionState, error) {
+	if update == nil {
+		return r.GetResolution(ctx, streamID, ownerID)
+	}
+	current, err := r.GetResolution(ctx, streamID, ownerID)
+	if err != nil || current == nil {
+		return current, err
+	}
+	status := current.Status
+	if update.Status != nil {
+		status = *update.Status
+	}
+	watermark := current.Watermark
+	if update.Watermark != nil {
+		watermark = update.Watermark
+	}
+	conflicts := current.ConflictCount
+	if update.ConflictCount != nil {
+		conflicts = *update.ConflictCount
+	}
+	pending := current.PendingResolutions
+	if update.PendingResolutions != nil {
+		pending = *update.PendingResolutions
+	}
+	notes := current.Notes
+	if update.Notes != nil {
+		notes = update.Notes
+	}
+	row := r.Pool.QueryRow(ctx,
+		`UPDATE cdc_resolution_state rs SET status=$3, watermark=$4, conflict_count=$5,
+		 pending_resolutions=$6, notes=$7, updated_at=NOW()
+		 FROM cdc_streams s WHERE rs.stream_id=s.id AND rs.stream_id=$1 AND s.owner_id=$2
+		 RETURNING rs.stream_id, rs.status, rs.watermark, rs.conflict_count, rs.pending_resolutions, rs.notes, rs.updated_at`,
+		streamID, ownerID, status, watermark, conflicts, pending, notes)
+	v, err := scanResolution(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}

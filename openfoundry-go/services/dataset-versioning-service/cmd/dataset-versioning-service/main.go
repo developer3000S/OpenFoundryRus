@@ -1,10 +1,9 @@
 // Command dataset-versioning-service hosts the foundation slice of
 // the Rust crate `dataset-versioning-service` (25k LOC; this slice
-// covers the `datasets` table CRUD only).
+// covers datasets, versions, branches, and the Files API backing-fs vertical).
 //
-// Follow-up slices: dataset_versions, dataset_branches, dataset_quality,
-// lint, views, files, health, retention_worker, foundry-model surface,
-// storage backends (Iceberg + legacy).
+// Follow-up slices: dataset_quality, lint, views, health, retention_worker,
+// foundry-model surface, and Iceberg writer integration.
 package main
 
 import (
@@ -13,12 +12,15 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
 	"github.com/openfoundry/openfoundry-go/libs/observability"
+	storageabstraction "github.com/openfoundry/openfoundry-go/libs/storage-abstraction"
 	"github.com/openfoundry/openfoundry-go/services/dataset-versioning-service/internal/config"
 	"github.com/openfoundry/openfoundry-go/services/dataset-versioning-service/internal/handlers"
 	"github.com/openfoundry/openfoundry-go/services/dataset-versioning-service/internal/repo"
@@ -60,7 +62,12 @@ func main() {
 	}
 
 	jwt := authmw.NewJWTConfig(cfg.JWTSecret)
-	h := &handlers.Handlers{Repo: &repo.Repo{Pool: pool}}
+	baseURL := os.Getenv("DATASET_FILES_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://" + srvAddr(cfg.Server.Host, cfg.Server.Port)
+	}
+	backingFS := storageabstraction.NewLocalBackingFS(baseURL, os.Getenv("DATASET_FILES_BASE_DIR"), []byte(cfg.JWTSecret))
+	h := &handlers.Handlers{Repo: &repo.Repo{Pool: pool}, BackingFS: backingFS, PresignTTL: 15 * time.Minute}
 	metrics := observability.NewMetrics()
 
 	srv := server.New(cfg, jwt, h, metrics)
@@ -68,4 +75,11 @@ func main() {
 		log.Error("server exited with error", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+}
+
+func srvAddr(host string, port uint16) string {
+	if host == "" || host == "0.0.0.0" {
+		host = "localhost"
+	}
+	return host + ":" + strconv.FormatUint(uint64(port), 10)
 }

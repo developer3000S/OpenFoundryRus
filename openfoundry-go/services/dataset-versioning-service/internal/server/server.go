@@ -47,6 +47,10 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *obs
 		api.Get("/datasets/{id}/branches", h.ListBranches)
 		api.Post("/datasets/{id}/branches", h.CreateBranch)
 		api.Get("/datasets/{id}/branches/{branch}", h.GetBranch)
+
+		api.Get("/datasets/{id}/files", h.ListFiles)
+		api.Get("/datasets/{id}/files/{file_id}/download", h.DownloadFile)
+		api.Post("/datasets/{id}/transactions/{txn}/files", h.CreateFileUploadURL)
 	})
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

@@ -124,3 +124,54 @@ type CommitTableResponse struct {
 	Metadata         json.RawMessage `json:"metadata"`
 	MetadataLocation string          `json:"metadata-location"`
 }
+
+type TableRef struct {
+	ID                 uuid.UUID `json:"id,omitempty"`
+	TableID            uuid.UUID `json:"table_id,omitempty"`
+	Name               string    `json:"name"`
+	Kind               string    `json:"type"`
+	SnapshotID         int64     `json:"snapshot-id"`
+	MaxRefAgeMS        *int64    `json:"max-ref-age-ms,omitempty"`
+	MaxSnapshotAgeMS   *int64    `json:"max-snapshot-age-ms,omitempty"`
+	MinSnapshotsToKeep *int32    `json:"min-snapshots-to-keep,omitempty"`
+	CreatedAt          time.Time `json:"created_at,omitempty"`
+}
+
+type ListRefsResponse struct {
+	Refs map[string]TableRef `json:"refs"`
+}
+
+type UpdateRefRequest struct {
+	Type               string `json:"type"`
+	SnapshotID         int64  `json:"snapshot-id"`
+	MaxRefAgeMS        *int64 `json:"max-ref-age-ms,omitempty"`
+	MaxSnapshotAgeMS   *int64 `json:"max-snapshot-age-ms,omitempty"`
+	MinSnapshotsToKeep *int32 `json:"min-snapshots-to-keep,omitempty"`
+}
+
+type MetadataFile struct {
+	ID        uuid.UUID `json:"id,omitempty"`
+	TableID   uuid.UUID `json:"table_id,omitempty"`
+	Version   int32     `json:"version"`
+	Path      string    `json:"path"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+}
+
+type ListMetadataFilesResponse struct {
+	MetadataFiles []MetadataFile `json:"metadata-files"`
+}
+
+type MetadataFileResponse struct {
+	Metadata         json.RawMessage `json:"metadata"`
+	MetadataLocation string          `json:"metadata-location"`
+	Version          int32           `json:"version"`
+}
+
+type ListSnapshotsResponse struct {
+	Snapshots []Snapshot `json:"snapshots"`
+}
+
+type RenameTableRequest struct {
+	Source      TableIdentifier `json:"source"`
+	Destination TableIdentifier `json:"destination"`
+}

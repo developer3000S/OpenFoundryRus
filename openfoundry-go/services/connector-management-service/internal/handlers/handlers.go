@@ -30,13 +30,20 @@ type Store interface {
 	CreateSyncJob(ctx context.Context, body *models.CreateSyncJobRequest, ownerID uuid.UUID) (*models.SyncJob, error)
 	UpdateSyncJob(ctx context.Context, id uuid.UUID, body *models.UpdateSyncJobRequest, ownerID uuid.UUID) (*models.SyncJob, error)
 	RunSyncJob(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.SyncRun, error)
+	ListMediaSetSyncs(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.MediaSetSync, error)
+	GetMediaSetSync(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.MediaSetSync, error)
+	CreateMediaSetSync(ctx context.Context, sourceID uuid.UUID, body *models.CreateMediaSetSyncRequest, ownerID uuid.UUID) (*models.MediaSetSync, error)
+	UpdateMediaSetSync(ctx context.Context, id uuid.UUID, body *models.UpdateMediaSetSyncRequest, ownerID uuid.UUID) (*models.MediaSetSync, error)
 	EnableVirtualTableSource(ctx context.Context, sourceRID string, body *models.EnableVirtualTableSourceRequest) (*models.VirtualTableSourceLink, error)
 	CreateVirtualTable(ctx context.Context, sourceRID string, actorID string, body *models.CreateVirtualTableRequest) (*models.VirtualTable, error)
 	ListVirtualTables(ctx context.Context, ownerID string, project, source string, limit int) ([]models.VirtualTable, error)
 	GetVirtualTable(ctx context.Context, rid string, ownerID string) (*models.VirtualTable, error)
 }
 
-type Handlers struct{ Repo Store }
+type Handlers struct {
+	Repo            Store
+	MediaSetRuntime MediaSetRuntime
+}
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -397,4 +404,148 @@ func (h *Handlers) GetVirtualTable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+func (h *Handlers) ListMediaSetSyncs(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	sourceID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	items, err := h.Repo.ListMediaSetSyncs(r.Context(), sourceID, claims.Sub)
+	if err != nil {
+		slog.Error("list media set syncs", slog.String("error", err.Error()))
+		writeJSONErr(w, http.StatusInternalServerError, "failed to list media set syncs")
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (h *Handlers) GetMediaSetSync(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "sync_id"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid sync_id")
+		return
+	}
+	v, err := h.Repo.GetMediaSetSync(r.Context(), id, claims.Sub)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if v == nil {
+		writeJSONErr(w, http.StatusNotFound, "media set sync not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (h *Handlers) CreateMediaSetSync(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	sourceID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var body models.CreateMediaSetSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if errs := body.Validate(); len(errs) > 0 {
+		writeJSON(w, http.StatusBadRequest, map[string][]string{"errors": errs})
+		return
+	}
+	v, err := h.Repo.CreateMediaSetSync(r.Context(), sourceID, &body, claims.Sub)
+	if err != nil {
+		slog.Error("create media set sync", slog.String("error", err.Error()))
+		writeJSONErr(w, http.StatusInternalServerError, "failed to create media set sync")
+		return
+	}
+	if v == nil {
+		writeJSONErr(w, http.StatusNotFound, "source not found")
+		return
+	}
+	writeJSON(w, http.StatusCreated, v)
+}
+
+func (h *Handlers) UpdateMediaSetSync(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "sync_id"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid sync_id")
+		return
+	}
+	var body models.UpdateMediaSetSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if body.Kind != nil && !body.Kind.Valid() {
+		writeJSON(w, http.StatusBadRequest, map[string][]string{"errors": {"kind must be MEDIA_SET_SYNC or VIRTUAL_MEDIA_SET_SYNC"}})
+		return
+	}
+	if body.TargetMediaSetRID != nil && !strings.HasPrefix(strings.TrimSpace(*body.TargetMediaSetRID), "ri.foundry.main.media_set.") {
+		writeJSON(w, http.StatusBadRequest, map[string][]string{"errors": {"target_media_set_rid must start with ri.foundry.main.media_set."}})
+		return
+	}
+	v, err := h.Repo.UpdateMediaSetSync(r.Context(), id, &body, claims.Sub)
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if v == nil {
+		writeJSONErr(w, http.StatusNotFound, "media set sync not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (h *Handlers) RunMediaSetSync(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "sync_id"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid sync_id")
+		return
+	}
+	var body models.RunMediaSetSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	sync, err := h.Repo.GetMediaSetSync(r.Context(), id, claims.Sub)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sync == nil {
+		writeJSONErr(w, http.StatusNotFound, "media set sync not found")
+		return
+	}
+	if h.MediaSetRuntime == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "media set runtime not configured")
+		return
+	}
+	report, err := h.MediaSetRuntime.ExecuteMediaSetSync(r.Context(), sync, &body, r.Header.Get("Authorization"))
+	if err != nil {
+		writeJSONErr(w, runtimeHTTPStatus(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, report)
 }

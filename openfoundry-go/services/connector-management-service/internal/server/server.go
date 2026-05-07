@@ -46,6 +46,12 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *obs
 		api.Patch("/data-connection/syncs/{sync_id}", h.UpdateSyncJob)
 		api.Post("/data-connection/syncs/{sync_id}/run", h.RunSyncJob)
 
+		api.Get("/data-connection/sources/{id}/media-set-syncs", h.ListMediaSetSyncs)
+		api.Post("/data-connection/sources/{id}/media-set-syncs", h.CreateMediaSetSync)
+		api.Get("/data-connection/media-set-syncs/{sync_id}", h.GetMediaSetSync)
+		api.Patch("/data-connection/media-set-syncs/{sync_id}", h.UpdateMediaSetSync)
+		api.Post("/data-connection/media-set-syncs/{sync_id}/run", h.RunMediaSetSync)
+
 		api.Post("/virtual-table/sources/{source_rid}/enable", h.EnableVirtualTableSource)
 		api.Post("/virtual-table/sources/{source_rid}/virtual-tables", h.CreateVirtualTable)
 		api.Get("/virtual-tables", h.ListVirtualTables)

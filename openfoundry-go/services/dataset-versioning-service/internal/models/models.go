@@ -103,3 +103,50 @@ type CreateDatasetBranchRequest struct {
 	SourceVersion *int32 `json:"source_version,omitempty"`
 	Description   string `json:"description,omitempty"`
 }
+
+// DatasetFile exposes the persisted Foundry logical-to-physical backing file
+// mapping for one dataset file.
+type DatasetFile struct {
+	ID            uuid.UUID  `json:"id"`
+	DatasetID     uuid.UUID  `json:"dataset_id"`
+	TransactionID uuid.UUID  `json:"transaction_id"`
+	LogicalPath   string     `json:"logical_path"`
+	PhysicalURI   string     `json:"physical_uri"`
+	SizeBytes     int64      `json:"size_bytes"`
+	SHA256        *string    `json:"sha256,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ModifiedAt    time.Time  `json:"modified_at"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	Status        string     `json:"status"`
+}
+
+// ListDatasetFilesResponse is returned by GET /api/v1/datasets/{id}/files.
+type ListDatasetFilesResponse struct {
+	Branch string        `json:"branch"`
+	Total  int           `json:"total"`
+	Files  []DatasetFile `json:"files"`
+}
+
+// DownloadDatasetFileResponse contains a backend-specific presigned download
+// URL for a single active dataset file.
+type DownloadDatasetFileResponse struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Method    string    `json:"method"`
+}
+
+// CreateDatasetFileUploadURLRequest asks the service to presign an upload into
+// a transaction-scoped logical path.
+type CreateDatasetFileUploadURLRequest struct {
+	LogicalPath string  `json:"logical_path"`
+	ContentType *string `json:"content_type,omitempty"`
+	SHA256      *string `json:"sha256,omitempty"`
+}
+
+// CreateDatasetFileUploadURLResponse tells the caller where to PUT bytes.
+type CreateDatasetFileUploadURLResponse struct {
+	URL         string    `json:"url"`
+	PhysicalURI string    `json:"physical_uri"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	Method      string    `json:"method"`
+}

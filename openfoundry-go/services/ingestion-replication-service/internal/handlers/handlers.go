@@ -29,13 +29,15 @@ type Store interface {
 	GetCdcStream(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.CdcStream, error)
 	GetCheckpoint(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID) (*models.IncrementalCheckpoint, error)
 	GetResolution(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID) (*models.ResolutionState, error)
+	ApplyCheckpoint(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID, update *models.CheckpointUpdate) (*models.IncrementalCheckpoint, error)
+	ApplyResolution(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID, update *models.ResolutionUpdate) (*models.ResolutionState, error)
 }
 
-// StreamingRuntime hides Kafka/Flink provisioning. The first Go vertical persists
-// control-plane state and can notify a runtime implementation without coupling
-// handlers to a heavy streaming backend.
+// StreamingRuntime hides Kafka/Flink provisioning and CDC registration.
 type StreamingRuntime interface {
 	ProvisionStream(ctx context.Context, stream *models.StreamDefinition) error
+	UpdateStream(ctx context.Context, stream *models.StreamDefinition) error
+	RegisterCDC(ctx context.Context, stream *models.CdcStream) (*CdcRegistrationResult, error)
 }
 
 type Handlers struct {
@@ -230,8 +232,13 @@ func (h *Handlers) CreateStream(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if h.Runtime != nil {
-		_ = h.Runtime.ProvisionStream(r.Context(), v)
+	if h.Runtime == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "streaming runtime not configured")
+		return
+	}
+	if err := h.Runtime.ProvisionStream(r.Context(), v); err != nil {
+		writeJSONErr(w, runtimeHTTPStatus(err), err.Error())
+		return
 	}
 	writeJSON(w, http.StatusCreated, v)
 }
@@ -258,6 +265,14 @@ func (h *Handlers) UpdateStream(w http.ResponseWriter, r *http.Request) {
 	}
 	if v == nil {
 		writeJSONErr(w, http.StatusNotFound, "stream not found")
+		return
+	}
+	if h.Runtime == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "streaming runtime not configured")
+		return
+	}
+	if err := h.Runtime.UpdateStream(r.Context(), v); err != nil {
+		writeJSONErr(w, runtimeHTTPStatus(err), err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
@@ -291,6 +306,29 @@ func (h *Handlers) RegisterCdcStream(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSONErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if h.Runtime == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "streaming runtime not configured")
+		return
+	}
+	result, err := h.Runtime.RegisterCDC(r.Context(), stream)
+	if err != nil {
+		writeJSONErr(w, runtimeHTTPStatus(err), err.Error())
+		return
+	}
+	if result != nil && result.Checkpoint != nil {
+		checkpoint, err = h.Repo.ApplyCheckpoint(r.Context(), stream.ID, claims.Sub, result.Checkpoint)
+		if err != nil {
+			writeJSONErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if result != nil && result.Resolution != nil {
+		resolution, err = h.Repo.ApplyResolution(r.Context(), stream.ID, claims.Sub, result.Resolution)
+		if err != nil {
+			writeJSONErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"stream": stream, "checkpoint": checkpoint, "resolution": resolution})
 }
