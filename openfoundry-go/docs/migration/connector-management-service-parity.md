@@ -107,16 +107,16 @@ Remaining non-parity gaps are connector-runtime depth rather than HTTP route ava
 
 | Method | Rust path | Rust handler | Go path | Go handler | State | Tables/migrations | Rust tests |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/v1/data-connection/sources/{id}/credentials` | `handlers::data_connection::list_credentials` | `/api/v1/data-connection/sources/{id}/credentials` | `h.ListCredentials` | 501 | `source_credentials`; `20260430120000_data_connection_mvp.sql` | `src/credential_crypto.rs`, `src/handlers/credentials_vending.rs` |
-| POST | `/api/v1/data-connection/sources/{id}/credentials` | `handlers::data_connection::set_credential` | `/api/v1/data-connection/sources/{id}/credentials` | `h.SetCredential` | 501 | `source_credentials`; `20260430120000_data_connection_mvp.sql` | `src/credential_crypto.rs`, `src/handlers/credentials_vending.rs` |
+| GET | `/api/v1/data-connection/sources/{id}/credentials` | `handlers::data_connection::list_credentials` | `/api/v1/data-connection/sources/{id}/credentials` | `h.ListCredentials` | implemented | `source_credentials`; `20260430120000_data_connection_mvp.sql` | `src/credential_crypto.rs`, `src/handlers/credentials_vending.rs` |
+| POST | `/api/v1/data-connection/sources/{id}/credentials` | `handlers::data_connection::set_credential` | `/api/v1/data-connection/sources/{id}/credentials` | `h.SetCredential` | implemented | `source_credentials`; `20260430120000_data_connection_mvp.sql` | `src/credential_crypto.rs`, `src/handlers/credentials_vending.rs` |
 
 ### egress policies/network boundary
 
 | Method | Rust path | Rust handler | Go path | Go handler | State | Tables/migrations | Rust tests |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/v1/data-connection/sources/{id}/egress-policies` | `handlers::data_connection::list_source_policies` | `/api/v1/data-connection/sources/{id}/egress-policies` | `h.ListSourcePolicies` | 501 | `source_policy_bindings`; `20260430120000_data_connection_mvp.sql` | `src/domain/egress.rs` |
-| POST | `/api/v1/data-connection/sources/{id}/egress-policies` | `handlers::data_connection::attach_policy` | `/api/v1/data-connection/sources/{id}/egress-policies` | `h.AttachPolicy` | 501 | `source_policy_bindings`; `20260430120000_data_connection_mvp.sql` | `src/domain/egress.rs` |
-| DELETE | `/api/v1/data-connection/sources/{source_id}/egress-policies/{policy_id}` | `handlers::data_connection::detach_policy` | `/api/v1/data-connection/sources/{source_id}/egress-policies/{policy_id}` | `h.DetachPolicy` | 501 | `source_policy_bindings`; `20260430120000_data_connection_mvp.sql` | `src/domain/egress.rs` |
+| GET | `/api/v1/data-connection/sources/{id}/egress-policies` | `handlers::data_connection::list_source_policies` | `/api/v1/data-connection/sources/{id}/egress-policies` | `h.ListSourcePolicies` | implemented | `source_policy_bindings`; `20260430120000_data_connection_mvp.sql` | `src/domain/egress.rs` |
+| POST | `/api/v1/data-connection/sources/{id}/egress-policies` | `handlers::data_connection::attach_policy` | `/api/v1/data-connection/sources/{id}/egress-policies` | `h.AttachPolicy` | implemented | `source_policy_bindings`; `20260430120000_data_connection_mvp.sql` | `src/domain/egress.rs` |
+| DELETE | `/api/v1/data-connection/sources/{source_id}/egress-policies/{policy_id}` | `handlers::data_connection::detach_policy` | `/api/v1/data-connection/sources/{source_id}/egress-policies/{policy_id}` | `h.DetachPolicy` | implemented | `source_policy_bindings`; `20260430120000_data_connection_mvp.sql` | `src/domain/egress.rs` |
 
 ### sync jobs/runs/runtime dispatch
 
@@ -125,7 +125,7 @@ Remaining non-parity gaps are connector-runtime depth rather than HTTP route ava
 | GET | `/api/v1/data-connection/sources/{id}/syncs` | `handlers::data_connection::list_syncs` | `/api/v1/data-connection/sources/{id}/syncs` | `h.ListSyncJobs` | partial | `batch_sync_defs`; `20260430120000_data_connection_mvp.sql` | dataset versioning/sync tests |
 | POST | `/api/v1/data-connection/syncs` | `handlers::data_connection::create_sync` | `/api/v1/data-connection/syncs` | `h.CreateSyncJob` | partial | `batch_sync_defs`; `20260430120000_data_connection_mvp.sql` | dataset versioning/sync tests |
 | POST | `/api/v1/data-connection/syncs/{id}/run` | `handlers::data_connection::run_sync` | `/api/v1/data-connection/syncs/{id}/run` | `h.RunSyncJob` | runtime-pending | `batch_sync_defs`, `sync_runs`; `20260430120000_data_connection_mvp.sql`, `20260430140000_sync_runs_ingest_job_id.sql`, `20260501100000_sync_runs_dataset_version.sql` | `src/domain/dataset_versioning.rs`, `src/ingestion_bridge.rs`, connector integration tests |
-| GET | `/api/v1/data-connection/syncs/{id}/runs` | `handlers::data_connection::list_runs` | `/api/v1/data-connection/syncs/{id}/runs` | `h.ListRuns` | 501 | `sync_runs`; `20260430120000_data_connection_mvp.sql` | dataset versioning/sync tests |
+| GET | `/api/v1/data-connection/syncs/{id}/runs` | `handlers::data_connection::list_runs` | `/api/v1/data-connection/syncs/{id}/runs` | `h.ListRuns` | implemented (local run ledger) | `sync_runs`; `20260430120000_data_connection_mvp.sql` | dataset versioning/sync tests |
 
 ### media-set syncs
 
@@ -140,15 +140,15 @@ Remaining non-parity gaps are connector-runtime depth rather than HTTP route ava
 | Method | Rust path | Rust handler | Go path | Go handler | State | Tables/migrations | Rust tests |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/v1/data-connection/sources/{id}/registrations` | `handlers::registrations::list_registrations` | same | `h.ListRegistrations` | implemented | `connection_registrations`, `virtual_tables` | virtual-table domain/model tests |
-| POST | `/api/v1/data-connection/sources/{id}/registrations/discover` | `handlers::registrations::discover` | same | `h.DiscoverRegistrations` | partial | connector adapters, `connection_registrations` | discovery/schema inference tests |
+| POST | `/api/v1/data-connection/sources/{id}/registrations/discover` | `handlers::registrations::discover` | same | `h.DiscoverRegistrations` | partial (inline adapter parity for Rust-supported config catalogs) | connector adapters, `connection_registrations` | discovery/schema inference tests |
 | POST | `/api/v1/data-connection/sources/{id}/registrations/bulk` | `handlers::registrations::bulk_register` | same | `h.BulkRegister` | implemented | `connection_registrations`, `virtual_tables`, `virtual_table_audit` | registration tests |
 | POST | `/api/v1/data-connection/sources/{id}/registrations/bulk/preview` | `handlers::registrations::bulk_register_preview` | same | `h.BulkRegisterPreview` | implemented | connector adapters | preview tests |
 | POST | `/api/v1/data-connection/sources/{id}/registrations/auto` | `handlers::registrations::auto_register` | same | `h.AutoRegister` | partial | `virtual_table_sources_link`, `auto_register_runs`, `virtual_table_audit` | auto-registration tests |
 | PUT | `/api/v1/data-connection/sources/{id}/registrations/auto` | `handlers::registrations::update_auto_registration` | same | `h.UpdateAutoRegistration` | partial | `virtual_table_sources_link` | auto-registration tests |
 | GET | `/api/v1/data-connection/sources/{id}/registrations/auto/status` | `handlers::registrations::auto_register_status` | same | `h.AutoRegisterStatus` | partial | `auto_register_runs`, `virtual_table_sources_link` | auto-registration tests |
 | DELETE | `/api/v1/data-connection/sources/{source_id}/registrations/{registration_id}` | `handlers::registrations::delete_registration` | same | `h.DeleteRegistration` | implemented | `connection_registrations`, `virtual_tables`, `virtual_table_audit` | registration tests |
-| POST | `/api/v1/data-connection/sources/{source_id}/registrations/{registration_id}/query` | `handlers::registrations::query_registration` | same | `h.QueryRegistration` | partial | `connection_registrations`, connector adapters | query tests |
-| POST | `/api/v1/data-connection/sources/{source_id}/registrations/{registration_id}/query/arrow` | `handlers::registrations::query_registration_arrow` | same | `h.QueryRegistrationArrow` | partial | `connection_registrations`, connector adapters, Arrow IPC | Arrow/materialization tests |
+| POST | `/api/v1/data-connection/sources/{source_id}/registrations/{registration_id}/query` | `handlers::registrations::query_registration` | same | `h.QueryRegistration` | partial (inline sample rows + signatures) | `connection_registrations`, connector adapters | query tests |
+| POST | `/api/v1/data-connection/sources/{source_id}/registrations/{registration_id}/query/arrow` | `handlers::registrations::query_registration_arrow` | same | `h.QueryRegistrationArrow` | partial (real Arrow IPC stream, Utf8 columns) | `connection_registrations`, connector adapters, Arrow IPC | Arrow/materialization tests |
 
 ### virtual table source enable/list/get/create
 

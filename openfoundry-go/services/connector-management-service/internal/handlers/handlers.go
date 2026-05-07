@@ -3,12 +3,19 @@ package handlers
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -30,6 +37,12 @@ type Store interface {
 	CreateSyncJob(ctx context.Context, body *models.CreateSyncJobRequest, ownerID uuid.UUID) (*models.SyncJob, error)
 	UpdateSyncJob(ctx context.Context, id uuid.UUID, body *models.UpdateSyncJobRequest, ownerID uuid.UUID) (*models.SyncJob, error)
 	RunSyncJob(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.SyncRun, error)
+	ListSyncRuns(ctx context.Context, syncID uuid.UUID, ownerID uuid.UUID) ([]models.SyncRun, error)
+	ListCredentials(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.CredentialResponse, error)
+	SetCredential(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID, kind string, ciphertext []byte, fingerprint string) (*models.CredentialResponse, error)
+	ListSourcePolicies(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.SourcePolicyBindingResponse, error)
+	AttachPolicy(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID, policyID uuid.UUID, kind string) (*models.SourcePolicyBindingResponse, error)
+	DetachPolicy(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID, policyID uuid.UUID) (bool, error)
 	ListMediaSetSyncs(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.MediaSetSync, error)
 	GetMediaSetSync(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.MediaSetSync, error)
 	CreateMediaSetSync(ctx context.Context, sourceID uuid.UUID, body *models.CreateMediaSetSyncRequest, ownerID uuid.UUID) (*models.MediaSetSync, error)
@@ -190,28 +203,188 @@ func (h *Handlers) connectionEffectiveCapabilities(connection models.Connection,
 	}
 }
 
+var validCredentialKinds = map[string]bool{
+	"password": true, "api_key": true, "oauth_token": true, "aws_keys": true, "service_account_json": true,
+}
+
 func (h *Handlers) ListCredentials(w http.ResponseWriter, r *http.Request) {
-	h.notImplemented(w, r, "credentials_pending", true)
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	sourceID, _, err := routeUUIDParam(r, "id", "source_id")
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid source_id")
+		return
+	}
+	items, err := h.Repo.ListCredentials(r.Context(), sourceID, claims.Sub)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to list credentials")
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (h *Handlers) SetCredential(w http.ResponseWriter, r *http.Request) {
-	h.notImplemented(w, r, "credentials_pending", true)
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	sourceID, _, err := routeUUIDParam(r, "id", "source_id")
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid source_id")
+		return
+	}
+	var body models.SetCredentialRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	body.Kind = strings.TrimSpace(body.Kind)
+	if !validCredentialKinds[body.Kind] {
+		writeJSONErr(w, http.StatusBadRequest, fmt.Sprintf("unsupported credential kind: %s", body.Kind))
+		return
+	}
+	if body.Value == "" {
+		writeJSONErr(w, http.StatusBadRequest, "credential value required")
+		return
+	}
+	digest := sha256.Sum256([]byte(body.Value))
+	fingerprint := fmt.Sprintf("%x", digest[:])
+	ciphertext, err := encryptCredential(h.Config.CredentialKey, []byte(body.Value))
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "credential encryption failed")
+		return
+	}
+	v, err := h.Repo.SetCredential(r.Context(), sourceID, claims.Sub, body.Kind, ciphertext, fingerprint)
+	if errors.Is(err, pgx.ErrNoRows) || v == nil {
+		writeJSONErr(w, http.StatusNotFound, "source not found")
+		return
+	}
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to store credential")
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func encryptCredential(key [32]byte, plaintext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	out := append([]byte("ofcm1"), nonce...)
+	return gcm.Seal(out, nonce, plaintext, nil), nil
 }
 
 func (h *Handlers) ListSourcePolicies(w http.ResponseWriter, r *http.Request) {
-	h.notImplemented(w, r, "egress_policies_pending", true)
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	sourceID, _, err := routeUUIDParam(r, "id", "source_id")
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid source_id")
+		return
+	}
+	items, err := h.Repo.ListSourcePolicies(r.Context(), sourceID, claims.Sub)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to list source policies")
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (h *Handlers) AttachPolicy(w http.ResponseWriter, r *http.Request) {
-	h.notImplemented(w, r, "egress_policies_pending", true)
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	sourceID, _, err := routeUUIDParam(r, "id", "source_id")
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid source_id")
+		return
+	}
+	var body models.AttachPolicyRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if body.PolicyID == uuid.Nil {
+		writeJSONErr(w, http.StatusBadRequest, "policy_id required")
+		return
+	}
+	kind := strings.TrimSpace(body.Kind)
+	if kind == "" {
+		kind = "direct"
+	}
+	if kind != "direct" && kind != "agent_proxy" {
+		writeJSONErr(w, http.StatusBadRequest, "kind must be 'direct' or 'agent_proxy'")
+		return
+	}
+	v, err := h.Repo.AttachPolicy(r.Context(), sourceID, claims.Sub, body.PolicyID, kind)
+	if errors.Is(err, pgx.ErrNoRows) || v == nil {
+		writeJSONErr(w, http.StatusNotFound, "source not found")
+		return
+	}
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to attach policy")
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (h *Handlers) DetachPolicy(w http.ResponseWriter, r *http.Request) {
-	h.notImplemented(w, r, "egress_policies_pending", true)
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	sourceID, _, err := routeUUIDParam(r, "source_id", "id")
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid source_id")
+		return
+	}
+	policyID, _, err := routeUUIDParam(r, "policy_id")
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid policy_id")
+		return
+	}
+	deleted, err := h.Repo.DetachPolicy(r.Context(), sourceID, claims.Sub, policyID)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to detach policy")
+		return
+	}
+	if !deleted {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handlers) ListRuns(w http.ResponseWriter, r *http.Request) {
-	h.notImplemented(w, r, "sync_runs_pending", true)
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	syncID, _, err := routeUUIDParam(r, "id", "sync_id")
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid sync id")
+		return
+	}
+	items, err := h.Repo.ListSyncRuns(r.Context(), syncID, claims.Sub)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to list sync runs")
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (h *Handlers) DevAuthLogin(w http.ResponseWriter, r *http.Request) {

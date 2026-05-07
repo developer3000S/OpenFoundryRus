@@ -74,6 +74,25 @@ func (s *routerStore) RunSyncJob(context.Context, uuid.UUID, uuid.UUID) (*models
 	return &models.SyncRun{ID: uuid.New(), SyncDefID: uuid.New(), Status: "running"}, nil
 }
 
+func (s *routerStore) ListSyncRuns(context.Context, uuid.UUID, uuid.UUID) ([]models.SyncRun, error) {
+	return []models.SyncRun{}, nil
+}
+func (s *routerStore) ListCredentials(context.Context, uuid.UUID, uuid.UUID) ([]models.CredentialResponse, error) {
+	return []models.CredentialResponse{}, nil
+}
+func (s *routerStore) SetCredential(context.Context, uuid.UUID, uuid.UUID, string, []byte, string) (*models.CredentialResponse, error) {
+	return &models.CredentialResponse{ID: uuid.New(), SourceID: s.source, Kind: "api_key", Fingerprint: "abc"}, nil
+}
+func (s *routerStore) ListSourcePolicies(context.Context, uuid.UUID, uuid.UUID) ([]models.SourcePolicyBindingResponse, error) {
+	return []models.SourcePolicyBindingResponse{}, nil
+}
+func (s *routerStore) AttachPolicy(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (*models.SourcePolicyBindingResponse, error) {
+	return &models.SourcePolicyBindingResponse{SourceID: s.source, PolicyID: uuid.New(), Kind: "direct"}, nil
+}
+func (s *routerStore) DetachPolicy(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (bool, error) {
+	return true, nil
+}
+
 func (s *routerStore) ListMediaSetSyncs(context.Context, uuid.UUID, uuid.UUID) ([]models.MediaSetSync, error) {
 	return []models.MediaSetSync{}, nil
 }

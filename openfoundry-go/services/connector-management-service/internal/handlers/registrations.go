@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -40,30 +45,55 @@ func sourceBoolMetadata(raw json.RawMessage, key string, fallback bool) bool {
 }
 
 func discoverConnectionSources(c *models.Connection) []models.DiscoveredSource {
-	zeroCopyTypes := map[string]bool{"bigquery": true, "csv": true, "databricks": true, "gcs": true, "generic": true, "json": true, "open_table_catalog": true, "postgresql": true, "s3": true, "snowflake": true}
+	zeroCopyTypes := map[string]bool{"adls": true, "azure_blob": true, "bigquery": true, "csv": true, "databricks": true, "gcs": true, "generic": true, "google_cloud_storage": true, "json": true, "mysql": true, "open_table_catalog": true, "postgresql": true, "s3": true, "snowflake": true}
 	var cfg map[string]json.RawMessage
 	_ = json.Unmarshal(c.Config, &cfg)
-	if raw, ok := cfg["tables"]; ok {
-		var tables []map[string]any
-		if json.Unmarshal(raw, &tables) == nil && len(tables) > 0 {
-			out := make([]models.DiscoveredSource, 0, len(tables))
-			for _, t := range tables {
-				selector := stringValue(t, "selector", stringValue(t, "name", stringValue(t, "table", "")))
-				if selector == "" {
-					continue
-				}
-				display := stringValue(t, "display_name", selector)
-				kind := stringValue(t, "source_kind", c.ConnectorType)
-				metadata, _ := json.Marshal(t)
-				out = append(out, models.DiscoveredSource{Selector: selector, DisplayName: display, SourceKind: kind, SupportsSync: true, SupportsZeroCopy: boolValue(t, "supports_zero_copy", zeroCopyTypes[c.ConnectorType]), Metadata: metadata})
-			}
-			if len(out) > 0 {
+	for _, key := range []string{"tables", "datasets", "iceberg_tables", "delta_tables", "topics", "streams", "entities", "objects"} {
+		if raw, ok := cfg[key]; ok {
+			if out := discoveredFromConfigArray(raw, key, c.ConnectorType, zeroCopyTypes[c.ConnectorType]); len(out) > 0 {
 				return out
 			}
 		}
 	}
 	meta, _ := json.Marshal(map[string]any{"connection_type": c.ConnectorType, "supports_zero_copy": zeroCopyTypes[c.ConnectorType]})
 	return []models.DiscoveredSource{{Selector: c.Name, DisplayName: c.Name, SourceKind: c.ConnectorType, SupportsSync: true, SupportsZeroCopy: zeroCopyTypes[c.ConnectorType], Metadata: meta}}
+}
+
+func discoveredFromConfigArray(raw json.RawMessage, collection, connectorType string, zeroCopy bool) []models.DiscoveredSource {
+	var entries []map[string]any
+	if json.Unmarshal(raw, &entries) != nil || len(entries) == 0 {
+		return nil
+	}
+	out := make([]models.DiscoveredSource, 0, len(entries))
+	for _, t := range entries {
+		selector := stringValue(t, "selector", stringValue(t, "name", stringValue(t, "table", stringValue(t, "dataset", stringValue(t, "topic", stringValue(t, "stream", stringValue(t, "entity", "")))))))
+		if selector == "" {
+			continue
+		}
+		display := stringValue(t, "display_name", selector)
+		kind := stringValue(t, "source_kind", defaultSourceKind(connectorType, collection))
+		metadata, _ := json.Marshal(t)
+		out = append(out, models.DiscoveredSource{Selector: selector, DisplayName: display, SourceKind: kind, SupportsSync: true, SupportsZeroCopy: boolValue(t, "supports_zero_copy", zeroCopy), Metadata: metadata})
+	}
+	return out
+}
+
+func defaultSourceKind(connectorType, collection string) string {
+	switch collection {
+	case "topics":
+		return "topic"
+	case "streams":
+		return "stream"
+	case "iceberg_tables":
+		return "iceberg_table"
+	case "delta_tables":
+		return "delta_table"
+	case "datasets":
+		if connectorType == "parquet" {
+			return "parquet_file"
+		}
+	}
+	return connectorType
 }
 
 func stringValue(m map[string]any, key, fallback string) string {
@@ -402,16 +432,11 @@ func (h *Handlers) QueryRegistration(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil && json.NewDecoder(r.Body).Decode(&body) == nil && body.Limit != nil {
 		limit = *body.Limit
 	}
-	rows := make([]json.RawMessage, 0, limit)
-	for i := 0; i < limit; i++ {
-		b, _ := json.Marshal(map[string]any{"selector": reg.Selector, "row_number": i + 1})
-		rows = append(rows, b)
-	}
-	writeJSON(w, http.StatusOK, models.VirtualTableQueryResponse{Selector: reg.Selector, Mode: reg.RegistrationMode, Columns: []string{"selector", "row_number"}, RowCount: len(rows), Rows: rows, SourceSignature: reg.LastSourceSignature, Metadata: json.RawMessage(fmt.Sprintf(`{"connection_type":%q}`, c.ConnectorType))})
+	response := virtualTableQueryFromConfig(c, reg, limit)
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handlers) QueryRegistrationArrow(w http.ResponseWriter, r *http.Request) {
-	// Lightweight Arrow-compatible placeholder: JSON query validates auth and registration; this variant returns an IPC-like stream marker.
 	if r.Header.Get("Accept") == "application/json" {
 		h.QueryRegistration(w, r)
 		return
@@ -438,9 +463,162 @@ func (h *Handlers) QueryRegistrationArrow(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	limit := 10
+	var body models.QueryRegistrationBody
+	if r.Body != nil && json.NewDecoder(r.Body).Decode(&body) == nil && body.Limit != nil {
+		limit = *body.Limit
+	}
+	c, err := h.Repo.GetConnection(r.Context(), sid)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "connection lookup failed")
+		return
+	}
+	if c == nil {
+		writeJSONErr(w, http.StatusNotFound, "connection not found")
+		return
+	}
+	query := virtualTableQueryFromConfig(c, reg, limit)
+	stream, err := materializeArrowStream(query.Columns, query.Rows)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to encode arrow stream")
+		return
+	}
 	w.Header().Set("Content-Type", "application/vnd.apache.arrow.stream")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte("ARROW1\x00\x00openfoundry"))
+	_, _ = w.Write(stream)
+}
+
+func virtualTableQueryFromConfig(c *models.Connection, reg *models.ConnectionRegistration, limit int) models.VirtualTableQueryResponse {
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	rows := rowsForSelector(c.Config, reg.Selector, limit)
+	if len(rows) == 0 {
+		rows = make([]json.RawMessage, 0, limit)
+		for i := 0; i < limit; i++ {
+			b, _ := json.Marshal(map[string]any{"selector": reg.Selector, "row_number": i + 1})
+			rows = append(rows, b)
+		}
+	}
+	columns := columnsForRows(rows)
+	sig := reg.LastSourceSignature
+	if sig == nil {
+		b, _ := json.Marshal(rows)
+		digest := sha256.Sum256(b)
+		value := fmt.Sprintf("sha256:%x", digest[:])
+		sig = &value
+	}
+	meta := json.RawMessage(fmt.Sprintf(`{"connection_type":%q,"adapter":"go_inline"}`, c.ConnectorType))
+	return models.VirtualTableQueryResponse{Selector: reg.Selector, Mode: reg.RegistrationMode, Columns: columns, RowCount: len(rows), Rows: rows, SourceSignature: sig, Metadata: meta}
+}
+
+func rowsForSelector(config json.RawMessage, selector string, limit int) []json.RawMessage {
+	var cfg map[string]json.RawMessage
+	_ = json.Unmarshal(config, &cfg)
+	for _, key := range []string{"tables", "datasets", "iceberg_tables", "delta_tables", "topics", "streams", "entities", "objects"} {
+		raw, ok := cfg[key]
+		if !ok {
+			continue
+		}
+		var entries []map[string]any
+		if json.Unmarshal(raw, &entries) != nil {
+			continue
+		}
+		for _, entry := range entries {
+			name := stringValue(entry, "selector", stringValue(entry, "name", stringValue(entry, "table", stringValue(entry, "dataset", stringValue(entry, "topic", stringValue(entry, "stream", stringValue(entry, "entity", "")))))))
+			if name != selector {
+				continue
+			}
+			for _, rowKey := range []string{"sample_rows", "rows", "records", "messages"} {
+				if rows, ok := rawRows(entry[rowKey], limit); ok {
+					return rows
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func rawRows(value any, limit int) ([]json.RawMessage, bool) {
+	items, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	out := make([]json.RawMessage, 0, len(items))
+	for _, item := range items {
+		b, _ := json.Marshal(item)
+		out = append(out, b)
+	}
+	return out, true
+}
+
+func columnsForRows(rows []json.RawMessage) []string {
+	seen := map[string]bool{}
+	cols := []string{}
+	for _, raw := range rows {
+		var obj map[string]any
+		if json.Unmarshal(raw, &obj) != nil {
+			continue
+		}
+		for key := range obj {
+			if !seen[key] {
+				seen[key] = true
+				cols = append(cols, key)
+			}
+		}
+	}
+	if len(cols) == 0 {
+		return []string{"selector", "row_number"}
+	}
+	return cols
+}
+
+func materializeArrowStream(columns []string, rows []json.RawMessage) ([]byte, error) {
+	mem := memory.NewGoAllocator()
+	fields := make([]arrow.Field, 0, len(columns))
+	arrays := make([]arrow.Array, 0, len(columns))
+	for _, name := range columns {
+		fields = append(fields, arrow.Field{Name: name, Type: arrow.BinaryTypes.String, Nullable: true})
+		builder := array.NewStringBuilder(mem)
+		defer builder.Release()
+		for _, raw := range rows {
+			var obj map[string]any
+			_ = json.Unmarshal(raw, &obj)
+			value, ok := obj[name]
+			if !ok || value == nil {
+				builder.AppendNull()
+				continue
+			}
+			switch v := value.(type) {
+			case string:
+				builder.Append(v)
+			default:
+				builder.Append(fmt.Sprint(v))
+			}
+		}
+		arr := builder.NewArray()
+		defer arr.Release()
+		arrays = append(arrays, arr)
+	}
+	schema := arrow.NewSchema(fields, nil)
+	rec := array.NewRecord(schema, arrays, int64(len(rows)))
+	defer rec.Release()
+	var buf bytes.Buffer
+	writer := ipc.NewWriter(&buf, ipc.WithSchema(schema), ipc.WithAllocator(mem))
+	if err := writer.Write(rec); err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (h *Handlers) TestConnection(w http.ResponseWriter, r *http.Request) {

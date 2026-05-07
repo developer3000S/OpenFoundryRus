@@ -156,6 +156,87 @@ func (r *Repo) GetConnectionForOwner(ctx context.Context, id uuid.UUID, ownerID 
 	return v, err
 }
 
+func (r *Repo) ListCredentials(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.CredentialResponse, error) {
+	rows, err := r.Pool.Query(ctx,
+		`SELECT sc.id, sc.source_id, sc.kind, sc.fingerprint, sc.created_at
+		 FROM source_credentials sc JOIN connections c ON c.id = sc.source_id
+		 WHERE sc.source_id = $1 AND c.owner_id = $2 ORDER BY sc.created_at DESC`, sourceID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.CredentialResponse, 0)
+	for rows.Next() {
+		v := models.CredentialResponse{}
+		if err := rows.Scan(&v.ID, &v.SourceID, &v.Kind, &v.Fingerprint, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) SetCredential(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID, kind string, ciphertext []byte, fingerprint string) (*models.CredentialResponse, error) {
+	row := r.Pool.QueryRow(ctx,
+		`INSERT INTO source_credentials (id, source_id, kind, secret_ciphertext, fingerprint)
+		 SELECT $1, c.id, $3, $4, $5 FROM connections c WHERE c.id = $2 AND c.owner_id = $6
+		 ON CONFLICT (source_id, kind) DO UPDATE
+		   SET secret_ciphertext = EXCLUDED.secret_ciphertext,
+		       fingerprint = EXCLUDED.fingerprint,
+		       created_at = NOW()
+		 RETURNING id, source_id, kind, fingerprint, created_at`,
+		uuid.New(), sourceID, kind, ciphertext, fingerprint, ownerID)
+	v := &models.CredentialResponse{}
+	if err := row.Scan(&v.ID, &v.SourceID, &v.Kind, &v.Fingerprint, &v.CreatedAt); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func (r *Repo) ListSourcePolicies(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.SourcePolicyBindingResponse, error) {
+	rows, err := r.Pool.Query(ctx,
+		`SELECT b.source_id, b.policy_id, b.kind
+		 FROM source_policy_bindings b JOIN connections c ON c.id = b.source_id
+		 WHERE b.source_id = $1 AND c.owner_id = $2 ORDER BY b.created_at DESC`, sourceID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.SourcePolicyBindingResponse, 0)
+	for rows.Next() {
+		v := models.SourcePolicyBindingResponse{}
+		if err := rows.Scan(&v.SourceID, &v.PolicyID, &v.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) AttachPolicy(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID, policyID uuid.UUID, kind string) (*models.SourcePolicyBindingResponse, error) {
+	row := r.Pool.QueryRow(ctx,
+		`INSERT INTO source_policy_bindings (source_id, policy_id, kind)
+		 SELECT c.id, $2, $3 FROM connections c WHERE c.id = $1 AND c.owner_id = $4
+		 ON CONFLICT (source_id, policy_id) DO UPDATE SET kind = EXCLUDED.kind
+		 RETURNING source_id, policy_id, kind`, sourceID, policyID, kind, ownerID)
+	v := &models.SourcePolicyBindingResponse{}
+	if err := row.Scan(&v.SourceID, &v.PolicyID, &v.Kind); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func (r *Repo) DetachPolicy(ctx context.Context, sourceID uuid.UUID, ownerID uuid.UUID, policyID uuid.UUID) (bool, error) {
+	cmd, err := r.Pool.Exec(ctx,
+		`DELETE FROM source_policy_bindings b USING connections c
+		 WHERE b.source_id = c.id AND b.source_id = $1 AND c.owner_id = $2 AND b.policy_id = $3`,
+		sourceID, ownerID, policyID)
+	if err != nil {
+		return false, err
+	}
+	return cmd.RowsAffected() > 0, nil
+}
+
 const syncJobSelect = `SELECT d.id, d.source_id, d.output_dataset_id, d.file_glob, d.schedule_cron, d.created_at
 	FROM batch_sync_defs d JOIN connections c ON c.id = d.source_id`
 
@@ -239,6 +320,30 @@ func (r *Repo) RunSyncJob(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) 
 		return nil, nil
 	}
 	return v, err
+}
+
+func (r *Repo) ListSyncRuns(ctx context.Context, syncID uuid.UUID, ownerID uuid.UUID) ([]models.SyncRun, error) {
+	rows, err := r.Pool.Query(ctx,
+		`SELECT r.id, r.sync_def_id, r.status, r.started_at, r.finished_at, r.bytes_written,
+		        r.files_written, r.error, r.ingest_job_id, r.dataset_version_id, r.content_hash
+		 FROM sync_runs r
+		 JOIN batch_sync_defs d ON d.id = r.sync_def_id
+		 JOIN connections c ON c.id = d.source_id
+		 WHERE r.sync_def_id = $1 AND c.owner_id = $2
+		 ORDER BY r.started_at DESC LIMIT 500`, syncID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.SyncRun, 0)
+	for rows.Next() {
+		v, err := scanSyncRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *v)
+	}
+	return out, rows.Err()
 }
 
 func scanSyncJob(r rowLikeT) (*models.SyncJob, error) {

@@ -182,6 +182,38 @@ func (f *fakeStore) RunSyncJob(_ context.Context, id uuid.UUID, ownerID uuid.UUI
 	f.runs[id] = append(f.runs[id], run)
 	return &run, nil
 }
+func (f *fakeStore) ListSyncRuns(_ context.Context, syncID uuid.UUID, _ uuid.UUID) ([]models.SyncRun, error) {
+	return f.runs[syncID], nil
+}
+func (f *fakeStore) ListCredentials(_ context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.CredentialResponse, error) {
+	if c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID); c == nil {
+		return []models.CredentialResponse{}, nil
+	}
+	return []models.CredentialResponse{}, nil
+}
+func (f *fakeStore) SetCredential(_ context.Context, sourceID uuid.UUID, ownerID uuid.UUID, kind string, _ []byte, fingerprint string) (*models.CredentialResponse, error) {
+	if c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID); c == nil {
+		return nil, nil
+	}
+	return &models.CredentialResponse{ID: uuid.New(), SourceID: sourceID, Kind: kind, Fingerprint: fingerprint, CreatedAt: time.Now().UTC()}, nil
+}
+func (f *fakeStore) ListSourcePolicies(_ context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.SourcePolicyBindingResponse, error) {
+	if c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID); c == nil {
+		return []models.SourcePolicyBindingResponse{}, nil
+	}
+	return []models.SourcePolicyBindingResponse{}, nil
+}
+func (f *fakeStore) AttachPolicy(_ context.Context, sourceID uuid.UUID, ownerID uuid.UUID, policyID uuid.UUID, kind string) (*models.SourcePolicyBindingResponse, error) {
+	if c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID); c == nil {
+		return nil, nil
+	}
+	return &models.SourcePolicyBindingResponse{SourceID: sourceID, PolicyID: policyID, Kind: kind}, nil
+}
+func (f *fakeStore) DetachPolicy(_ context.Context, sourceID uuid.UUID, ownerID uuid.UUID, _ uuid.UUID) (bool, error) {
+	c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID)
+	return c != nil, nil
+}
+
 func (f *fakeStore) EnableVirtualTableSource(_ context.Context, sourceRID string, body *models.EnableVirtualTableSourceRequest) (*models.VirtualTableSourceLink, error) {
 	if body.Provider == "" {
 		return nil, assert.AnError
