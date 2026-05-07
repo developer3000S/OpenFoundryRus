@@ -89,6 +89,15 @@ func TestMediaSetToProtoCarriesAllFields(t *testing.T) {
 	assert.Equal(t, pb.TransactionPolicy_TRANSACTION_POLICY_TRANSACTIONAL, got.GetTransactionPolicy())
 }
 
+func TestServiceSatisfiesGeneratedMediaSetServer(t *testing.T) {
+	t.Parallel()
+	var _ pb.MediaSetServiceServer = (*Service)(nil)
+
+	server := grpc.NewServer()
+	Register(server, &Service{})
+	server.Stop()
+}
+
 // ── In-process round-trip via bufconn ───────────────────────────
 
 // stubServer overrides only the RPC the test exercises so we can

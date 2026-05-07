@@ -2,6 +2,7 @@ package accesspatterns
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -128,10 +129,10 @@ func (*noopTx) Rollback(context.Context) error { return nil }
 
 // fakeWorker captures the last request and returns a configured response.
 type fakeWorker struct {
-	calls    int
-	lastReq  transformclient.TransformRequest
-	resp     *transformclient.TransformResponse
-	respErr  error
+	calls   int
+	lastReq transformclient.TransformRequest
+	resp    *transformclient.TransformResponse
+	respErr error
 }
 
 func (f *fakeWorker) Transform(_ context.Context, req transformclient.TransformRequest) (*transformclient.TransformResponse, error) {
@@ -144,10 +145,12 @@ func (f *fakeWorker) Transform(_ context.Context, req transformclient.TransformR
 // the real outbox SQL insert (no Postgres) and just records the event.
 type recordingEmitter struct {
 	events []audittrail.AuditEvent
+	ctxs   []audittrail.AuditContext
 }
 
-func (r *recordingEmitter) emit(_ context.Context, _ pgx.Tx, event audittrail.AuditEvent, _ audittrail.AuditContext) error {
+func (r *recordingEmitter) emit(_ context.Context, _ pgx.Tx, event audittrail.AuditEvent, auditCtx audittrail.AuditContext) error {
 	r.events = append(r.events, event)
+	r.ctxs = append(r.ctxs, auditCtx)
 	return nil
 }
 
@@ -262,6 +265,8 @@ func TestRunRecomputeChargesViaWorkerAndEmitsAudit(t *testing.T) {
 	assert.Equal(t, "thumbnail", em.events[0].AccessPattern)
 	assert.Equal(t, "ri.set.1", em.events[0].ResourceRID)
 	assert.Equal(t, []string{"PUBLIC"}, em.events[0].MarkingsAtEvent)
+	require.Len(t, em.ctxs, 1)
+	assert.Equal(t, "actor", em.ctxs[0].ActorID)
 }
 
 func TestRunCacheHitSkipsWorkerAndCharges0(t *testing.T) {
@@ -342,6 +347,84 @@ func TestRunNotImplementedSurfacesReason(t *testing.T) {
 	require.Len(t, r.invocations, 1, "even unimplemented kinds land an invocation row")
 	assert.Equal(t, int64(0), r.invocations[0].ComputeSeconds)
 	require.Len(t, em.events, 1, "audit emitted for unimplemented attempts")
+}
+
+func TestRunOKTransformationPassesRuntimeEnvelope(t *testing.T) {
+	t.Parallel()
+	s, r, w, _ := newSvc(t)
+	seedSet(r, "ri.set.1")
+	seedItem(r, "ri.item.1", "ri.set.1", "image/png", 3)
+	seedPattern(r, "ri.ap.1", "ri.set.1", "thumbnail", string(models.PersistenceRecompute), 0)
+
+	outBytes := base64.StdEncoding.EncodeToString([]byte("PNG"))
+	w.resp = &transformclient.TransformResponse{
+		Status: transformclient.StatusOK, Kind: "thumbnail",
+		OutputMimeType: "image/webp", ComputeSeconds: 2, OutputBytesBase64: &outBytes,
+	}
+
+	resp, err := s.Run(context.Background(), RunInput{
+		PatternID: "ri.ap.1", ItemRID: "ri.item.1", ItemBytes: []byte("raw"), InvokedBy: "actor",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, transformclient.StatusOK, w.resp.Status)
+	assert.Equal(t, base64.StdEncoding.EncodeToString([]byte("raw")), w.lastReq.BytesBase64)
+	assert.Equal(t, "image/png", w.lastReq.MimeType)
+	assert.Equal(t, json.RawMessage(`{"max_dim":64}`), w.lastReq.Params)
+	assert.Equal(t, "image/webp", resp.OutputMimeType)
+	assert.Equal(t, outBytes, resp.OutputBytesBase64)
+	assert.Empty(t, resp.OutputStorageURI, "RECOMPUTE should not synthesize persistent storage")
+	require.Len(t, r.invocations, 1)
+	assert.Equal(t, int64(2), r.invocations[0].ComputeSeconds)
+}
+
+func TestRunNotImplementedPassthroughForCatalogAndExternalReasons(t *testing.T) {
+	t.Parallel()
+	for name, reason := range map[string]string{
+		"catalog_not_implemented": "Geo tile pyramids land in the geospatial-intelligence-service follow-up.",
+		"external_binary":         "external binary `tesseract` is not wired yet — handler will land in a follow-up PR",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s, r, w, em := newSvc(t)
+			seedSet(r, "ri.set.1")
+			seedItem(r, "ri.item.1", "ri.set.1", "image/png", 4096)
+			seedPattern(r, "ri.ap.1", "ri.set.1", "ocr", string(models.PersistenceRecompute), 0)
+			w.resp = &transformclient.TransformResponse{
+				Status: transformclient.StatusNotImplemented, Kind: "ocr", OutputMimeType: "image/png", Reason: &reason,
+			}
+
+			resp, err := s.Run(context.Background(), RunInput{
+				PatternID: "ri.ap.1", ItemRID: "ri.item.1", InvokedBy: "actor",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, uint64(0), resp.ComputeSeconds)
+			assert.Equal(t, reason, resp.NotImplementedReason)
+			assert.Empty(t, resp.OutputStorageURI)
+			require.Len(t, r.invocations, 1)
+			assert.Equal(t, int64(0), r.invocations[0].ComputeSeconds)
+			require.Len(t, em.events, 1)
+		})
+	}
+}
+
+func TestRunWorkerErrorEnvelopeRemainsInspectable(t *testing.T) {
+	t.Parallel()
+	s, r, w, _ := newSvc(t)
+	seedSet(r, "ri.set.1")
+	seedItem(r, "ri.item.1", "ri.set.1", "image/png", 4096)
+	seedPattern(r, "ri.ap.1", "ri.set.1", "bogus", string(models.PersistenceRecompute), 0)
+	w.respErr = &transformclient.ErrorEnvelope{
+		StatusCode: 400, Code: "MEDIA_TRANSFORM_UNKNOWN_KIND", Message: "unknown transformation kind `bogus`",
+	}
+
+	_, err := s.Run(context.Background(), RunInput{PatternID: "ri.ap.1", ItemRID: "ri.item.1", InvokedBy: "actor"})
+	require.Error(t, err)
+	env, ok := transformclient.AsErrorEnvelope(err)
+	require.True(t, ok)
+	assert.Equal(t, "MEDIA_TRANSFORM_UNKNOWN_KIND", env.Code)
+	assert.Equal(t, 400, env.StatusCode)
+	assert.Empty(t, r.invocations, "failed runtime invocations must not be charged")
 }
 
 func TestRunRejectsItemFromDifferentSet(t *testing.T) {
