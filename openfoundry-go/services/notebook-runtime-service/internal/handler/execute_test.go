@@ -96,6 +96,25 @@ func TestExecuteCellSuccessfulPythonExecution(t *testing.T) {
 	}
 }
 
+func TestExecuteCellPythonRequiresConfiguredSidecar(t *testing.T) {
+	s, r, nb := executeTestState(t, nil)
+	s.PythonKernel = nil
+	cell := putTestCell(s, nb, "print('missing sidecar')", 1)
+
+	w := httptest.NewRecorder()
+	req := withClaims(httptest.NewRequest(http.MethodPost, "/api/v1/notebooks/"+nb.String()+"/cells/"+cell.ID.String()+"/execute", bytes.NewReader([]byte(`{}`))), uuid.New())
+	req.ContentLength = 2
+	r.ServeHTTP(w, req)
+
+	var got models.CellOutput
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if got.OutputType != "error" || !bytes.Contains(got.Content, []byte("python kernel sidecar is not configured")) {
+		t.Fatalf("sidecar config error drift: %+v content=%s", got, got.Content)
+	}
+}
+
 func TestExecuteCellStdoutStderrContract(t *testing.T) {
 	fk := &fakePythonKernel{results: map[string]*pythonsidecar.NotebookCellResult{
 		"logs": {OutputType: "text", ContentJSON: []byte(jsonString("out\n")), Stdout: "out\n", Stderr: "err\n"},
@@ -187,6 +206,30 @@ func TestExecuteAllCellsOrdering(t *testing.T) {
 	}
 	if len(env.Results) != 2 || env.Results[0].CellID != first.ID || env.Results[1].CellID != second.ID {
 		t.Fatalf("result order drift: %+v", env.Results)
+	}
+}
+
+func TestExecuteAllCellsPythonRequiresConfiguredSidecar(t *testing.T) {
+	s, r, nb := executeTestState(t, nil)
+	s.PythonKernel = nil
+	cell := putTestCell(s, nb, "print('missing sidecar')", 1)
+
+	w := httptest.NewRecorder()
+	req := withClaims(httptest.NewRequest(http.MethodPost, "/api/v1/notebooks/"+nb.String()+"/cells/execute-all", bytes.NewReader([]byte(`{}`))), uuid.New())
+	req.ContentLength = 2
+	r.ServeHTTP(w, req)
+
+	var env struct {
+		Results []struct {
+			CellID uuid.UUID         `json:"cell_id"`
+			Output models.CellOutput `json:"output"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if len(env.Results) != 1 || env.Results[0].CellID != cell.ID || env.Results[0].Output.OutputType != "error" || !bytes.Contains(env.Results[0].Output.Content, []byte("python kernel sidecar is not configured")) {
+		t.Fatalf("execute-all sidecar config error drift: %+v", env.Results)
 	}
 }
 

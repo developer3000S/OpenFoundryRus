@@ -44,6 +44,7 @@ type State struct {
 	RKernel      NotebookRKernel
 	LLMKernel    NotebookLLMKernel
 	NotepadRepo  nbrepo.NotepadRepository
+	ListRepo     NotebookListRepository
 	MemoryRepo   *MemoryNotebookRepo
 }
 
@@ -56,6 +57,19 @@ func (s *State) memoryRepo() *MemoryNotebookRepo {
 		s.MemoryRepo = NewMemoryNotebookRepo()
 	}
 	return s.MemoryRepo
+}
+
+func (s *State) notebookListRepo() NotebookListRepository {
+	if s.ListRepo != nil {
+		return s.ListRepo
+	}
+	if s.Pool != nil {
+		return PostgresNotebookListRepository{Pool: s.Pool}
+	}
+	if s.smokeMode() {
+		return s.memoryRepo()
+	}
+	return nil
 }
 
 func (s *State) databaseRequired(w http.ResponseWriter) {

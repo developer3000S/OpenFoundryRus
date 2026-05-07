@@ -97,42 +97,19 @@ func (s *State) ListNotebooks(w http.ResponseWriter, r *http.Request) {
 	case perPage > 100:
 		perPage = 100
 	}
-	offset := (page - 1) * perPage
-	pattern := "%" + q.Get("search") + "%"
-
-	if s.Pool == nil {
-		if !s.smokeMode() {
-			s.databaseRequired(w)
-			return
-		}
-		notebooks := s.memoryRepo().listNotebooks()
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": notebooks, "total": len(notebooks), "page": page, "per_page": perPage,
-		})
+	repo := s.notebookListRepo()
+	if repo == nil {
+		s.databaseRequired(w)
 		return
 	}
-	var total int64
-	_ = s.Pool.QueryRow(r.Context(),
-		`SELECT COUNT(*) FROM notebooks WHERE name ILIKE $1`, pattern).Scan(&total)
-
-	rows, err := s.Pool.Query(r.Context(), `
-        SELECT id, name, description, owner_id, default_kernel, created_at, updated_at
-        FROM notebooks WHERE name ILIKE $1
-        ORDER BY updated_at DESC LIMIT $2 OFFSET $3`,
-		pattern, perPage, offset)
+	notebooks, total, err := repo.ListNotebooks(r.Context(), ListNotebooksParams{
+		Search:  q.Get("search"),
+		Page:    page,
+		PerPage: perPage,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
 		return
-	}
-	defer rows.Close()
-	notebooks := []models.Notebook{}
-	for rows.Next() {
-		nb, err := scanNotebook(rows)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
-			return
-		}
-		notebooks = append(notebooks, nb)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": notebooks, "total": total, "page": page, "per_page": perPage,
