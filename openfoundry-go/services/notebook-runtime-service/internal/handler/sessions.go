@@ -81,31 +81,15 @@ func (s *State) ListSessions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errBody("invalid notebook id"))
 		return
 	}
-	if s.Pool == nil {
-		if !s.smokeMode() {
-			s.databaseRequired(w)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"data": s.memoryRepo().listSessions(notebookID)})
+	repo := s.notebookListRepo()
+	if repo == nil {
+		s.databaseRequired(w)
 		return
 	}
-	rows, err := s.Pool.Query(r.Context(), `
-        SELECT id, notebook_id, kernel, status, started_by, created_at, last_activity
-        FROM sessions WHERE notebook_id = $1
-        ORDER BY created_at DESC`, notebookID)
+	sessions, err := repo.ListSessions(r.Context(), notebookID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
 		return
-	}
-	defer rows.Close()
-	sessions := []models.Session{}
-	for rows.Next() {
-		sess, err := scanSession(rows)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
-			return
-		}
-		sessions = append(sessions, sess)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": sessions})
 }

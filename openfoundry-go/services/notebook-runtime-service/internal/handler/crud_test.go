@@ -8,9 +8,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -109,6 +111,46 @@ func TestListNotebooksRequiresDatabaseOutsideSmokeMode(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/notebooks", nil))
 	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestListNotebooksUsesConfiguredRepository(t *testing.T) {
+	t.Parallel()
+	now := fixedTime()
+	repo := &fakeNotebookListRepo{
+		notebooks: []models.Notebook{{ID: uuid.New(), Name: "db-listed", DefaultKernel: "python", CreatedAt: now, UpdatedAt: now}},
+		total:     7,
+	}
+	r := mountTestRouter(&State{Cfg: &config.Config{}, ListRepo: repo})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/notebooks?search=db&page=3&per_page=2", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if repo.notebookParams.Search != "db" || repo.notebookParams.Page != 3 || repo.notebookParams.PerPage != 2 {
+		t.Fatalf("repo params drift: %+v", repo.notebookParams)
+	}
+	var env struct {
+		Data    []models.Notebook `json:"data"`
+		Total   int64             `json:"total"`
+		Page    int64             `json:"page"`
+		PerPage int64             `json:"per_page"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if env.Total != 7 || len(env.Data) != 1 || env.Data[0].Name != "db-listed" {
+		t.Fatalf("repository envelope drift: %+v", env)
+	}
+}
+
+func TestListNotebooksRepositoryErrorReturns500(t *testing.T) {
+	t.Parallel()
+	r := mountTestRouter(&State{Cfg: &config.Config{}, ListRepo: &fakeNotebookListRepo{err: errors.New("db down")}})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/notebooks", nil))
+	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
@@ -335,6 +377,43 @@ func TestListSessionsNoDB(t *testing.T) {
 	}
 }
 
+func TestListSessionsRequiresDatabaseOutsideSmokeMode(t *testing.T) {
+	t.Parallel()
+	r := mountTestRouter(&State{Cfg: &config.Config{}, Pool: nil})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
+		"/api/v1/notebooks/"+uuid.New().String()+"/sessions", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestListSessionsUsesConfiguredRepository(t *testing.T) {
+	t.Parallel()
+	notebookID := uuid.New()
+	sess := models.Session{ID: uuid.New(), NotebookID: notebookID, Kernel: "python", Status: "idle", StartedBy: uuid.New(), CreatedAt: fixedTime(), LastActivity: fixedTime()}
+	repo := &fakeNotebookListRepo{sessions: []models.Session{sess}}
+	r := mountTestRouter(&State{Cfg: &config.Config{}, ListRepo: repo})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
+		"/api/v1/notebooks/"+notebookID.String()+"/sessions", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if repo.sessionNotebookID != notebookID {
+		t.Fatalf("repo notebook id drift: %s", repo.sessionNotebookID)
+	}
+	var env struct {
+		Data []models.Session `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if len(env.Data) != 1 || env.Data[0].ID != sess.ID {
+		t.Fatalf("repository session envelope drift: %+v", env)
+	}
+}
+
 func TestStopSessionNoDBReturns404(t *testing.T) {
 	t.Parallel()
 	r := mountTestRouter(newState())
@@ -388,5 +467,29 @@ func TestRowScannerInterfaceWorks(t *testing.T) {
 	}
 }
 
-// keep ctx import live (used by loadCells in a future tableless test path)
-var _ = context.Background
+func fixedTime() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
+
+type fakeNotebookListRepo struct {
+	notebooks         []models.Notebook
+	total             int64
+	sessions          []models.Session
+	err               error
+	notebookParams    ListNotebooksParams
+	sessionNotebookID uuid.UUID
+}
+
+func (f *fakeNotebookListRepo) ListNotebooks(_ context.Context, params ListNotebooksParams) ([]models.Notebook, int64, error) {
+	f.notebookParams = params
+	if f.err != nil {
+		return nil, 0, f.err
+	}
+	return f.notebooks, f.total, nil
+}
+
+func (f *fakeNotebookListRepo) ListSessions(_ context.Context, notebookID uuid.UUID) ([]models.Session, error) {
+	f.sessionNotebookID = notebookID
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.sessions, nil
+}

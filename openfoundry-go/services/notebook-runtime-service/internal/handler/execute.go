@@ -99,6 +99,30 @@ func (m *MemoryNotebookRepo) listNotebooks() []models.Notebook {
 	return out
 }
 
+func (m *MemoryNotebookRepo) ListNotebooks(_ context.Context, params ListNotebooksParams) ([]models.Notebook, int64, error) {
+	notebooks := m.listNotebooks()
+	if params.Search != "" {
+		filtered := notebooks[:0]
+		needle := strings.ToLower(params.Search)
+		for _, nb := range notebooks {
+			if strings.Contains(strings.ToLower(nb.Name), needle) {
+				filtered = append(filtered, nb)
+			}
+		}
+		notebooks = filtered
+	}
+	total := int64(len(notebooks))
+	start := (params.Page - 1) * params.PerPage
+	if start >= int64(len(notebooks)) {
+		return []models.Notebook{}, total, nil
+	}
+	end := start + params.PerPage
+	if end > int64(len(notebooks)) {
+		end = int64(len(notebooks))
+	}
+	return notebooks[start:end], total, nil
+}
+
 func (m *MemoryNotebookRepo) loadNotebook(id uuid.UUID) (models.Notebook, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -250,6 +274,10 @@ func (m *MemoryNotebookRepo) listSessions(notebookID uuid.UUID) []models.Session
 	}
 	sortSessionsByCreatedAt(out)
 	return out
+}
+
+func (m *MemoryNotebookRepo) ListSessions(_ context.Context, notebookID uuid.UUID) ([]models.Session, error) {
+	return m.listSessions(notebookID), nil
 }
 
 func (m *MemoryNotebookRepo) stopSession(id uuid.UUID) (models.Session, bool) {
