@@ -24,6 +24,7 @@ import (
 	"github.com/openfoundry/openfoundry-go/services/iceberg-catalog-service/internal/config"
 	"github.com/openfoundry/openfoundry-go/services/iceberg-catalog-service/internal/handlers"
 	"github.com/openfoundry/openfoundry-go/services/iceberg-catalog-service/internal/handlers/auth"
+	icmetrics "github.com/openfoundry/openfoundry-go/services/iceberg-catalog-service/internal/metrics"
 	"github.com/openfoundry/openfoundry-go/services/iceberg-catalog-service/internal/repo"
 	"github.com/openfoundry/openfoundry-go/services/iceberg-catalog-service/internal/server"
 )
@@ -81,6 +82,7 @@ func main() {
 	}
 	oauthValidator := &auth.HTTPClientValidator{BaseURL: cfg.OAuthIntegrationURL, HTTP: http.DefaultClient}
 	metrics := observability.NewMetrics()
+	icebergMetrics := icmetrics.New(metrics)
 
 	deps := server.Deps{
 		Handlers:       h,
@@ -89,6 +91,7 @@ func main() {
 		BearerStore:    repoBackend,
 		IssueAPIStore:  repoBackend,
 		OAuthValidator: oauthValidator,
+		Metrics:        icebergMetrics,
 	}
 	srv := server.New(cfg, jwt, deps, metrics)
 	if err := server.Run(ctx, srv, log); err != nil && !errors.Is(err, context.Canceled) {

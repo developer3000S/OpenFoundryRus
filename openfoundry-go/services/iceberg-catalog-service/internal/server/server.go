@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +21,7 @@ import (
 	"github.com/openfoundry/openfoundry-go/services/iceberg-catalog-service/internal/config"
 	"github.com/openfoundry/openfoundry-go/services/iceberg-catalog-service/internal/handlers"
 	"github.com/openfoundry/openfoundry-go/services/iceberg-catalog-service/internal/handlers/auth"
+	icmetrics "github.com/openfoundry/openfoundry-go/services/iceberg-catalog-service/internal/metrics"
 )
 
 // Deps bundles every collaborator the chi router needs. Built once in
@@ -31,6 +34,7 @@ type Deps struct {
 	BearerStore    auth.TokenStore
 	IssueAPIStore  auth.IssueAPITokenStore
 	OAuthValidator auth.OAuthClientValidator
+	Metrics        *icmetrics.Metrics
 }
 
 func New(cfg *config.Config, jwt *authmw.JWTConfig, deps Deps, m *observability.Metrics) *http.Server {
@@ -38,11 +42,15 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, deps Deps, m *observability.
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, chimw.Compress(5))
 	r.Use(chimw.Timeout(30 * time.Second))
+	if deps.Metrics != nil {
+		r.Use(instrument(deps.Metrics))
+	}
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(health.OK(cfg.Service.Name, cfg.Service.Version))
 	})
+	r.Get("/version", versionHandler(cfg))
 	r.Method(http.MethodGet, "/metrics", m.Handler())
 
 	r.Route("/api/v1", func(api chi.Router) {
@@ -123,6 +131,7 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, deps Deps, m *observability.
 		api.Get("/namespaces/{namespace}/tables/{table}/metadata/{version}", h.GetMetadataFile)
 		api.Get("/namespaces/{namespace}/tables/{table}/snapshots", h.ListSnapshots)
 		api.Get("/namespaces/{namespace}/tables/{table}/snapshots/{snapshot_id}", h.GetSnapshot)
+		api.Post("/transactions/commit", h.MultiTableCommit)
 	})
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -130,6 +139,68 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, deps Deps, m *observability.
 		Addr:              addr,
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
+	}
+}
+
+// instrument records the per-route counter, histogram and in-flight
+// gauge declared by the iceberg metrics package. The route label is
+// resolved via chi's RouteContext after the handler chain runs so
+// path-parameterised endpoints aggregate under a single label rather
+// than blowing up cardinality (one series per concrete URL).
+func instrument(m *icmetrics.Metrics) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+
+			// In-flight gauge is keyed on method + a coarse "all"
+			// endpoint label rather than the request URL: chi has not
+			// resolved the route pattern at this point and using the
+			// raw path would let arbitrary client input expand the
+			// label set.
+			inFlight := m.RESTRequestsInFlight.WithLabelValues(r.Method, "all")
+			inFlight.Inc()
+			defer inFlight.Dec()
+
+			next.ServeHTTP(ww, r)
+
+			route := routeLabel(r)
+			method := r.Method
+			status := strconv.Itoa(ww.Status())
+			if ww.Status() == 0 {
+				status = "200"
+			}
+
+			m.RESTRequestsTotal.WithLabelValues(method, route, status).Inc()
+			m.RESTRequestLatencySeconds.WithLabelValues(method, route).Observe(time.Since(start).Seconds())
+		})
+	}
+}
+
+// routeLabel resolves the chi route pattern for a request, falling back
+// to the URL path when chi has no template registered (e.g. for the
+// root `/healthz` and `/metrics` endpoints).
+func routeLabel(r *http.Request) string {
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+		if pattern := rctx.RoutePattern(); pattern != "" {
+			return pattern
+		}
+	}
+	return r.URL.Path
+}
+
+// versionHandler renders BUILD_GIT_SHA and the configured semantic
+// version as JSON. Mirrors the `/version` correlator the build pipeline
+// uses to align deploys with the originating commit.
+func versionHandler(cfg *config.Config) http.HandlerFunc {
+	gitSHA := os.Getenv("BUILD_GIT_SHA")
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"service":       cfg.Service.Name,
+			"version":       cfg.Service.Version,
+			"build_git_sha": gitSHA,
+		})
 	}
 }
 
