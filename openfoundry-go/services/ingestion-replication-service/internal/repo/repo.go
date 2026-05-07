@@ -539,6 +539,79 @@ func (r *Repo) ApplyCheckpoint(ctx context.Context, streamID uuid.UUID, ownerID 
 	return v, err
 }
 
+// ErrStreamNotFound is returned by SchemaStore lookups when the stream
+// row does not exist. Handlers translate it to HTTP 404 — keeping it
+// as a typed sentinel lets repo and handler layers stay decoupled.
+var ErrStreamNotFound = errors.New("stream not found")
+
+// StreamExists reports whether streaming_streams contains the given id.
+// Used by the schema-history endpoint to surface a 404 before listing.
+func (r *Repo) StreamExists(ctx context.Context, streamID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.Pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM streaming_streams WHERE id = $1)`,
+		streamID,
+	).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+// CurrentSchema returns the persisted Avro schema bytes and the
+// compatibility mode for streamID. Returns ErrStreamNotFound when the
+// stream does not exist. The schema_avro column may be NULL — callers
+// receive nil bytes in that case (treated as "no current schema").
+func (r *Repo) CurrentSchema(ctx context.Context, streamID uuid.UUID) ([]byte, string, error) {
+	var (
+		schemaAvro []byte
+		mode       string
+	)
+	err := r.Pool.QueryRow(ctx,
+		`SELECT schema_avro, schema_compatibility_mode
+		   FROM streaming_streams WHERE id = $1`,
+		streamID,
+	).Scan(&schemaAvro, &mode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", ErrStreamNotFound
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return schemaAvro, mode, nil
+}
+
+// ListSchemaHistory returns every accepted schema version for streamID
+// in descending version order — used by GET /streams/{id}/schema/history.
+// Mirrors the Rust query that drives StreamSchemaHistoryRow ↔ StreamSchemaVersion
+// in event_streaming/handlers/schemas.rs.
+func (r *Repo) ListSchemaHistory(ctx context.Context, streamID uuid.UUID) ([]models.StreamSchemaVersion, error) {
+	rows, err := r.Pool.Query(ctx,
+		`SELECT id, stream_id, version, schema_avro, fingerprint, compatibility,
+		        created_by, created_at
+		   FROM streaming_stream_schema_history
+		  WHERE stream_id = $1
+		  ORDER BY version DESC`,
+		streamID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.StreamSchemaVersion, 0)
+	for rows.Next() {
+		var v models.StreamSchemaVersion
+		if err := rows.Scan(
+			&v.ID, &v.StreamID, &v.Version, &v.SchemaAvro,
+			&v.Fingerprint, &v.Compatibility, &v.CreatedBy, &v.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 func (r *Repo) ApplyResolution(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID, update *models.ResolutionUpdate) (*models.ResolutionState, error) {
 	if update == nil {
 		return r.GetResolution(ctx, streamID, ownerID)
