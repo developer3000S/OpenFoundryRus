@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -917,9 +918,261 @@ func (r *Repo) RefreshDatasetView(ctx context.Context, datasetID uuid.UUID, view
 }
 
 func (r *Repo) GetViewAt(ctx context.Context, datasetID uuid.UUID, branch string, at *time.Time, transactionID *uuid.UUID) (*models.ViewOut, error) {
-	// The Rust implementation resolves the branch-effective view at a timestamp or transaction.
-	// The Go parity query uses the current projection until transaction file replay lands.
-	return r.GetCurrentView(ctx, datasetID, branch)
+	if transactionID != nil {
+		txnAt, err := r.committedTransactionTime(ctx, datasetID, branch, *transactionID)
+		if err != nil {
+			return nil, err
+		}
+		at = &txnAt
+	}
+	return r.computeViewAt(ctx, datasetID, branch, at)
+}
+
+func (r *Repo) CompareViews(ctx context.Context, datasetID uuid.UUID, baseBranch string, targetBranch string, baseTransaction *uuid.UUID, targetTransaction *uuid.UUID) (*models.CompareOut, error) {
+	if strings.TrimSpace(baseBranch) == "" {
+		baseBranch = "master"
+	}
+	if strings.TrimSpace(targetBranch) == "" {
+		targetBranch = baseBranch
+	}
+	var baseAt *time.Time
+	if baseTransaction != nil {
+		at, err := r.committedTransactionTime(ctx, datasetID, baseBranch, *baseTransaction)
+		if err != nil {
+			return nil, err
+		}
+		baseAt = &at
+	}
+	var targetAt *time.Time
+	if targetTransaction != nil {
+		at, err := r.committedTransactionTime(ctx, datasetID, targetBranch, *targetTransaction)
+		if err != nil {
+			return nil, err
+		}
+		targetAt = &at
+	}
+	base, err := r.computeViewAt(ctx, datasetID, baseBranch, baseAt)
+	if err != nil {
+		return nil, err
+	}
+	target, err := r.computeViewAt(ctx, datasetID, targetBranch, targetAt)
+	if err != nil {
+		return nil, err
+	}
+	return &models.CompareOut{Base: *base, Target: *target, Files: diffViews(base.Files, target.Files)}, nil
+}
+
+func (r *Repo) committedTransactionTime(ctx context.Context, datasetID uuid.UUID, branch string, txnID uuid.UUID) (time.Time, error) {
+	var status string
+	var startedAt time.Time
+	var committedAt *time.Time
+	err := r.Pool.QueryRow(ctx, `SELECT status, started_at, committed_at
+		FROM dataset_transactions WHERE dataset_id = $1 AND branch_name = $2 AND id = $3`, datasetID, branch, txnID).Scan(&status, &startedAt, &committedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, ErrNotFound
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	if status != string(models.TransactionStatusCommitted) {
+		return time.Time{}, fmt.Errorf("%w: view-at-time transaction must be COMMITTED", ErrValidation)
+	}
+	if committedAt != nil {
+		return *committedAt, nil
+	}
+	return startedAt, nil
+}
+
+type viewTransactionRecord struct {
+	ID          uuid.UUID
+	TxType      string
+	StartedAt   time.Time
+	CommittedAt *time.Time
+}
+
+func (r *Repo) computeViewAt(ctx context.Context, datasetID uuid.UUID, branch string, at *time.Time) (*models.ViewOut, error) {
+	requested, err := r.GetRuntimeBranch(ctx, datasetID, branch)
+	if err != nil {
+		return nil, err
+	}
+	target, fallbackChain, txns, err := r.resolveBranchView(ctx, datasetID, requested, at)
+	if err != nil {
+		return nil, err
+	}
+
+	startIdx := 0
+	for i := range txns {
+		if txns[i].TxType == string(models.TransactionTypeSnapshot) {
+			startIdx = i
+		}
+	}
+
+	filesByPath := map[string]models.RuntimeViewFile{}
+	for _, txn := range txns[startIdx:] {
+		rows, err := r.listTransactionFiles(ctx, txn.ID)
+		if err != nil {
+			return nil, err
+		}
+		switch txn.TxType {
+		case string(models.TransactionTypeSnapshot):
+			filesByPath = map[string]models.RuntimeViewFile{}
+			for _, row := range rows {
+				filesByPath[row.LogicalPath] = models.RuntimeViewFile{LogicalPath: row.LogicalPath, PhysicalPath: row.PhysicalPath, SizeBytes: row.SizeBytes, IntroducedBy: &txn.ID}
+			}
+		case string(models.TransactionTypeAppend):
+			for _, row := range rows {
+				if _, exists := filesByPath[row.LogicalPath]; !exists {
+					filesByPath[row.LogicalPath] = models.RuntimeViewFile{LogicalPath: row.LogicalPath, PhysicalPath: row.PhysicalPath, SizeBytes: row.SizeBytes, IntroducedBy: &txn.ID}
+				}
+			}
+		case string(models.TransactionTypeUpdate):
+			for _, row := range rows {
+				if row.Op == models.FileOperationRemove {
+					delete(filesByPath, row.LogicalPath)
+					continue
+				}
+				filesByPath[row.LogicalPath] = models.RuntimeViewFile{LogicalPath: row.LogicalPath, PhysicalPath: row.PhysicalPath, SizeBytes: row.SizeBytes, IntroducedBy: &txn.ID}
+			}
+		case string(models.TransactionTypeDelete):
+			for _, row := range rows {
+				delete(filesByPath, row.LogicalPath)
+			}
+		}
+	}
+
+	paths := make([]string, 0, len(filesByPath))
+	for path := range filesByPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	files := make([]models.RuntimeViewFile, 0, len(paths))
+	var sizeBytes int64
+	for _, path := range paths {
+		file := filesByPath[path]
+		files = append(files, file)
+		sizeBytes += file.SizeBytes
+	}
+
+	headTxnID := uuid.Nil
+	if len(txns) > 0 {
+		headTxnID = txns[len(txns)-1].ID
+	}
+	return &models.ViewOut{ID: uuid.Nil, DatasetID: datasetID, BranchID: target.ID, HeadTransactionID: headTxnID, RequestedBranch: branch, ResolvedBranch: target.Name, FallbackChain: fallbackChain, ComputedAt: time.Now().UTC(), FileCount: int32(len(files)), SizeBytes: sizeBytes, Files: files}, nil
+}
+
+func (r *Repo) resolveBranchView(ctx context.Context, datasetID uuid.UUID, requested *models.RuntimeBranch, at *time.Time) (*models.RuntimeBranch, []string, []viewTransactionRecord, error) {
+	current := requested
+	fallbackChain := []string{}
+	seen := map[string]struct{}{}
+	for {
+		if _, ok := seen[current.Name]; ok {
+			return nil, nil, nil, fmt.Errorf("%w: fallback chain contains a cycle", ErrValidation)
+		}
+		seen[current.Name] = struct{}{}
+		txns, err := r.listCommittedBranchTransactions(ctx, current.ID, at)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if len(txns) > 0 {
+			return current, fallbackChain, txns, nil
+		}
+		fallbacks, err := r.ListFallbacks(ctx, current.ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if len(fallbacks) == 0 {
+			return current, fallbackChain, txns, nil
+		}
+		next := fallbacks[0].FallbackBranchName
+		fallbackChain = append(fallbackChain, next)
+		current, err = r.GetRuntimeBranch(ctx, datasetID, next)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+}
+
+func (r *Repo) listCommittedBranchTransactions(ctx context.Context, branchID uuid.UUID, at *time.Time) ([]viewTransactionRecord, error) {
+	rows, err := r.Pool.Query(ctx, `SELECT id, tx_type, started_at, committed_at
+		FROM dataset_transactions
+		WHERE branch_id = $1 AND status = 'COMMITTED'
+		  AND ($2::timestamptz IS NULL OR COALESCE(committed_at, started_at) <= $2)
+		ORDER BY COALESCE(committed_at, started_at) ASC, started_at ASC`, branchID, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []viewTransactionRecord{}
+	for rows.Next() {
+		var v viewTransactionRecord
+		if err := rows.Scan(&v.ID, &v.TxType, &v.StartedAt, &v.CommittedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) listTransactionFiles(ctx context.Context, transactionID uuid.UUID) ([]models.RuntimeTransactionFile, error) {
+	rows, err := r.Pool.Query(ctx, `SELECT logical_path, physical_path, size_bytes, op
+		FROM dataset_transaction_files WHERE transaction_id = $1 ORDER BY logical_path`, transactionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.RuntimeTransactionFile{}
+	for rows.Next() {
+		var v models.RuntimeTransactionFile
+		if err := rows.Scan(&v.LogicalPath, &v.PhysicalPath, &v.SizeBytes, &v.Op); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func diffViews(base []models.RuntimeViewFile, target []models.RuntimeViewFile) models.FileDiff {
+	baseByPath := map[string]models.RuntimeViewFile{}
+	for _, file := range base {
+		baseByPath[file.LogicalPath] = file
+	}
+	targetByPath := map[string]models.RuntimeViewFile{}
+	for _, file := range target {
+		targetByPath[file.LogicalPath] = file
+	}
+
+	paths := make([]string, 0, len(targetByPath))
+	for path := range targetByPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	added := []models.RuntimeViewFile{}
+	modified := []models.FileChange{}
+	for _, path := range paths {
+		targetFile := targetByPath[path]
+		baseFile, ok := baseByPath[path]
+		if !ok {
+			added = append(added, targetFile)
+			continue
+		}
+		if baseFile.PhysicalPath != targetFile.PhysicalPath || baseFile.SizeBytes != targetFile.SizeBytes {
+			modified = append(modified, models.FileChange{LogicalPath: path, Before: baseFile, After: targetFile})
+		}
+	}
+
+	basePaths := make([]string, 0, len(baseByPath))
+	for path := range baseByPath {
+		basePaths = append(basePaths, path)
+	}
+	sort.Strings(basePaths)
+	removed := []models.RuntimeViewFile{}
+	for _, path := range basePaths {
+		if _, ok := targetByPath[path]; !ok {
+			removed = append(removed, baseByPath[path])
+		}
+	}
+	return models.FileDiff{Added: added, Removed: removed, Modified: modified}
 }
 
 func (r *Repo) GetViewSchema(ctx context.Context, viewID uuid.UUID) (*models.SchemaResponse, error) {

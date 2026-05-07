@@ -636,6 +636,17 @@ func (f *fakeStore) GetCurrentView(ctx context.Context, datasetID uuid.UUID, bra
 func (f *fakeStore) GetViewAt(ctx context.Context, datasetID uuid.UUID, branch string, _ *time.Time, _ *uuid.UUID) (*models.ViewOut, error) {
 	return f.GetCurrentView(ctx, datasetID, branch)
 }
+func (f *fakeStore) CompareViews(ctx context.Context, datasetID uuid.UUID, baseBranch string, targetBranch string, _ *uuid.UUID, _ *uuid.UUID) (*models.CompareOut, error) {
+	base, err := f.GetCurrentView(ctx, datasetID, baseBranch)
+	if err != nil {
+		return nil, err
+	}
+	target, err := f.GetCurrentView(ctx, datasetID, targetBranch)
+	if err != nil {
+		return nil, err
+	}
+	return &models.CompareOut{Base: *base, Target: *target, Files: models.FileDiff{Added: []models.RuntimeViewFile{}, Removed: []models.RuntimeViewFile{}, Modified: []models.FileChange{}}}, nil
+}
 func (f *fakeStore) ListViewFiles(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]models.RuntimeViewFile, error) {
 	return []models.RuntimeViewFile{{LogicalPath: "part.parquet", PhysicalPath: "s3://x/part.parquet", SizeBytes: 42}}, nil
 }
@@ -1233,6 +1244,12 @@ func TestViewsSchemaPreviewHandlers(t *testing.T) {
 	req.URL.RawQuery = "ts=2026-05-07T00:00:00Z"
 	rec = httptest.NewRecorder()
 	h.GetViewAt(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	req = catalogReq(http.MethodGet, store, claims, "")
+	req.URL.RawQuery = "base_branch=master&target_branch=master"
+	rec = httptest.NewRecorder()
+	h.CompareViews(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	req = catalogReq(http.MethodGet, store, claims, "")

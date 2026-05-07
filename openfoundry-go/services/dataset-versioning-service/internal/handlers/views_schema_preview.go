@@ -148,6 +148,46 @@ func (h *Handlers) GetViewAt(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (h *Handlers) CompareViews(w http.ResponseWriter, r *http.Request) {
+	datasetID, ok := h.resolveDatasetForCatalog(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	baseBranch := q.Get("base_branch")
+	if baseBranch == "" {
+		baseBranch = "master"
+	}
+	targetBranch := q.Get("target_branch")
+	if targetBranch == "" {
+		targetBranch = baseBranch
+	}
+	var baseTxn *uuid.UUID
+	if raw := q.Get("base_transaction"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			writeJSONErr(w, http.StatusBadRequest, "invalid base_transaction")
+			return
+		}
+		baseTxn = &id
+	}
+	var targetTxn *uuid.UUID
+	if raw := q.Get("target_transaction"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			writeJSONErr(w, http.StatusBadRequest, "invalid target_transaction")
+			return
+		}
+		targetTxn = &id
+	}
+	out, err := h.Repo.CompareViews(r.Context(), datasetID, baseBranch, targetBranch, baseTxn, targetTxn)
+	if err != nil {
+		writeViewError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (h *Handlers) ListViewFiles(w http.ResponseWriter, r *http.Request) {
 	datasetID, ok := h.resolveDatasetForCatalog(w, r)
 	if !ok {

@@ -8,8 +8,3 @@ func (h *Handlers) notImplemented(w http.ResponseWriter, _ *http.Request, featur
 		"feature": feature,
 	})
 }
-
-func (h *Handlers) CompareViews(w http.ResponseWriter, r *http.Request) {
-	// TODO(dataset-versioning parity): port dataset view comparison.
-	h.notImplemented(w, r, "compare views")
-}
