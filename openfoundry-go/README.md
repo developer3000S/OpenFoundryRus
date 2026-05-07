@@ -105,6 +105,14 @@ make ci             # full local CI gate (tidy + vet + lint + test)
 - ✅ CI workflow (`lint`, `proto-drift`, `test`, `integration`).
 - ✅ Strict `golangci-lint` config matching the Rust workspace's clippy posture.
 
+## Tools parity status (2026-05-07)
+
+- ✅ `tools/of-cli/` is now ported to Go as `go run ./tools/of-cli -- ...`.
+  It closes the Rust `tools/of-cli` gap for command/flag parsing and the
+  principal tool surfaces: OpenAPI generation/validation from proto files,
+  TypeScript/Python/Java SDK scaffold generation/validation, scenario-driven
+  smoke runs, sequential benchmark runs, and the local AI mock provider.
+
 ## Phase 1 deliverables (this commit)
 
 - ✅ `libs/db-pool/` — pgxpool-backed DualPool (writer + optional reader)
