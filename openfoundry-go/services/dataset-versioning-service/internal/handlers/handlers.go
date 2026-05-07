@@ -26,6 +26,8 @@ type Store interface {
 	ListDatasets(ctx context.Context, ownerID *uuid.UUID, limit int) ([]models.Dataset, error)
 	GetDataset(ctx context.Context, id uuid.UUID) (*models.Dataset, error)
 	GetDatasetForOwner(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.Dataset, error)
+	GetCatalogFacets(ctx context.Context) (*models.CatalogFacets, error)
+	GetInternalDatasetMetadata(ctx context.Context, datasetID uuid.UUID) (*models.InternalDatasetMetadata, error)
 	CreateDataset(ctx context.Context, body *models.CreateDatasetRequest, ownerID uuid.UUID) (*models.Dataset, error)
 	UpdateDataset(ctx context.Context, id uuid.UUID, body *models.UpdateDatasetRequest) (*models.Dataset, error)
 	DeleteDataset(ctx context.Context, id uuid.UUID) (bool, error)

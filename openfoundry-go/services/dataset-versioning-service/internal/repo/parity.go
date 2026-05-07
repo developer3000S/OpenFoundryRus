@@ -35,6 +35,80 @@ func defaultRawObject(v models.JSONValue) []byte {
 }
 
 // Dataset model / metadata / markings / permissions / lineage / file index.
+func (r *Repo) GetCatalogFacets(ctx context.Context) (*models.CatalogFacets, error) {
+	tagRows, err := r.Pool.Query(ctx, `SELECT tag AS value, COUNT(*) AS count
+		FROM datasets, unnest(tags) AS tag
+		GROUP BY tag
+		ORDER BY count DESC, tag ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer tagRows.Close()
+	facets := &models.CatalogFacets{Tags: []models.CatalogTagFacet{}, Owners: []models.CatalogOwnerFacet{}}
+	for tagRows.Next() {
+		var tag models.CatalogTagFacet
+		if err := tagRows.Scan(&tag.Value, &tag.Count); err != nil {
+			return nil, err
+		}
+		facets.Tags = append(facets.Tags, tag)
+	}
+	if err := tagRows.Err(); err != nil {
+		return nil, err
+	}
+
+	ownerRows, err := r.Pool.Query(ctx, `SELECT owner_id, COUNT(*) AS count
+		FROM datasets
+		GROUP BY owner_id
+		ORDER BY count DESC, owner_id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer ownerRows.Close()
+	for ownerRows.Next() {
+		var owner models.CatalogOwnerFacet
+		if err := ownerRows.Scan(&owner.OwnerID, &owner.Count); err != nil {
+			return nil, err
+		}
+		facets.Owners = append(facets.Owners, owner)
+	}
+	if err := ownerRows.Err(); err != nil {
+		return nil, err
+	}
+	return facets, nil
+}
+
+func (r *Repo) GetInternalDatasetMetadata(ctx context.Context, datasetID uuid.UUID) (*models.InternalDatasetMetadata, error) {
+	var out models.InternalDatasetMetadata
+	var storagePath string
+	err := r.Pool.QueryRow(ctx, `SELECT id, name, format, tags, current_version, active_branch, owner_id, updated_at, storage_path
+		FROM datasets WHERE id = $1`, datasetID).Scan(&out.ID, &out.Name, &out.Format, &out.Tags, &out.CurrentVersion, &out.ActiveBranch, &out.OwnerID, &out.UpdatedAt, &storagePath)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.Pool.Query(ctx, `SELECT marking_id FROM dataset_markings
+		WHERE dataset_rid = $1 AND source = 'direct'
+		ORDER BY marking_id`, storagePath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out.Markings = []uuid.UUID{}
+	for rows.Next() {
+		var markingID uuid.UUID
+		if err := rows.Scan(&markingID); err != nil {
+			return nil, err
+		}
+		out.Markings = append(out.Markings, markingID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (r *Repo) GetCatalogDataset(ctx context.Context, datasetID uuid.UUID) (*models.CatalogDataset, error) {
 	row := r.Pool.QueryRow(ctx, `SELECT id, name, description, format, storage_path, size_bytes, row_count,
 		owner_id, tags, current_version, active_branch, metadata, health_status, current_view_id,

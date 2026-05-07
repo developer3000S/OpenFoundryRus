@@ -36,7 +36,6 @@ func TestRustParityRoutesRequireAuth(t *testing.T) {
 		{http.MethodGet, "/api/v1/datasets/00000000-0000-0000-0000-000000000001/lint"},
 		{http.MethodGet, "/api/v1/datasets/ri.foundry.main.dataset.example/health"},
 		{http.MethodGet, "/internal/datasets/ri.foundry.main.dataset.example/metadata"},
-		{http.MethodGet, "/v1/catalog/facets"},
 		{http.MethodGet, "/v1/datasets"},
 		{http.MethodPost, "/v1/datasets"},
 		{http.MethodGet, "/v1/datasets/00000000-0000-0000-0000-000000000001"},
@@ -132,7 +131,6 @@ func TestPlaceholderRoutesReturnNotImplementedAfterAuth(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/v1/catalog/facets"},
 		{http.MethodPost, "/v1/datasets/ri.foundry.main.dataset.example/transactions:batchGet"},
 	} {
 		rec := httptest.NewRecorder()

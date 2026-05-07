@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -146,6 +147,50 @@ func (f *fakeStore) GetDatasetForOwner(_ context.Context, id uuid.UUID, ownerID 
 		}
 	}
 	return nil, nil
+}
+func (f *fakeStore) GetCatalogFacets(_ context.Context) (*models.CatalogFacets, error) {
+	tagCounts := map[string]int64{}
+	ownerCounts := map[uuid.UUID]int64{}
+	for _, d := range f.datasets {
+		ownerCounts[d.OwnerID]++
+		for _, tag := range d.Tags {
+			tagCounts[tag]++
+		}
+	}
+	facets := &models.CatalogFacets{Tags: []models.CatalogTagFacet{}, Owners: []models.CatalogOwnerFacet{}}
+	for tag, count := range tagCounts {
+		facets.Tags = append(facets.Tags, models.CatalogTagFacet{Value: tag, Count: count})
+	}
+	sort.Slice(facets.Tags, func(i, j int) bool {
+		if facets.Tags[i].Count != facets.Tags[j].Count {
+			return facets.Tags[i].Count > facets.Tags[j].Count
+		}
+		return facets.Tags[i].Value < facets.Tags[j].Value
+	})
+	for ownerID, count := range ownerCounts {
+		facets.Owners = append(facets.Owners, models.CatalogOwnerFacet{OwnerID: ownerID, Count: count})
+	}
+	sort.Slice(facets.Owners, func(i, j int) bool {
+		if facets.Owners[i].Count != facets.Owners[j].Count {
+			return facets.Owners[i].Count > facets.Owners[j].Count
+		}
+		return facets.Owners[i].OwnerID.String() < facets.Owners[j].OwnerID.String()
+	})
+	return facets, nil
+}
+func (f *fakeStore) GetInternalDatasetMetadata(ctx context.Context, datasetID uuid.UUID) (*models.InternalDatasetMetadata, error) {
+	d, err := f.GetDataset(ctx, datasetID)
+	if err != nil || d == nil {
+		return nil, err
+	}
+	out := &models.InternalDatasetMetadata{ID: d.ID, Name: d.Name, Format: d.Format, Markings: []uuid.UUID{}, Tags: d.Tags, CurrentVersion: d.CurrentVersion, ActiveBranch: "main", OwnerID: d.OwnerID, UpdatedAt: d.UpdatedAt}
+	for _, marking := range f.markings[datasetID] {
+		if marking.Source.Kind == "direct" {
+			out.Markings = append(out.Markings, marking.ID)
+		}
+	}
+	sort.Slice(out.Markings, func(i, j int) bool { return out.Markings[i].String() < out.Markings[j].String() })
+	return out, nil
 }
 func (f *fakeStore) CreateDataset(_ context.Context, body *models.CreateDatasetRequest, ownerID uuid.UUID) (*models.Dataset, error) {
 	d := models.Dataset{ID: uuid.New(), Name: body.Name, StoragePath: body.StoragePath, Format: "parquet", OwnerID: ownerID, Tags: []string{}, CurrentVersion: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
@@ -820,6 +865,50 @@ func catalogReq(method string, store *fakeStore, claims *authmw.Claims, body str
 	req := httptest.NewRequest(method, "/v1/datasets/"+rid, strings.NewReader(body))
 	req = req.WithContext(authmw.ContextWithClaims(context.Background(), claims))
 	return withRouteParam(req, "rid", rid)
+}
+
+func TestCatalogFacetsHandlerReturnsRustShape(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	store.datasets[0].Tags = []string{"finance", "daily"}
+	store.datasets = append(store.datasets, models.Dataset{ID: uuid.New(), Name: "inventory", Format: "parquet", StoragePath: "s3://bucket/inventory", OwnerID: owner, Tags: []string{"finance"}, CurrentVersion: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
+	h := &handlers.Handlers{Repo: store}
+	req := httptest.NewRequest(http.MethodGet, "/v1/catalog/facets", nil)
+	req = req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner}))
+	rec := httptest.NewRecorder()
+
+	h.GetCatalogFacets(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var facets models.CatalogFacets
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &facets))
+	require.Equal(t, []models.CatalogTagFacet{{Value: "finance", Count: 2}, {Value: "daily", Count: 1}}, facets.Tags)
+	require.Equal(t, []models.CatalogOwnerFacet{{OwnerID: owner, Count: 2}}, facets.Owners)
+}
+
+func TestGetDatasetMetadataReturnsDirectMarkingsOnly(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	datasetID := store.datasets[0].ID
+	directID := uuid.New()
+	store.markings[datasetID] = []models.EffectiveMarking{
+		{ID: uuid.New(), Source: models.MarkingReason{Kind: "inherited_from_upstream"}},
+		{ID: directID, Source: models.MarkingReason{Kind: "direct"}},
+	}
+	h := &handlers.Handlers{Repo: store}
+	rid := "ri.foundry.main.dataset." + datasetID.String()
+	req := httptest.NewRequest(http.MethodGet, "/internal/datasets/"+rid+"/metadata", nil)
+	req = req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner}))
+	req = withRouteParam(req, "rid", rid)
+	rec := httptest.NewRecorder()
+
+	h.GetDatasetMetadata(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var metadata models.InternalDatasetMetadata
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &metadata))
+	require.Equal(t, datasetID, metadata.ID)
+	require.Equal(t, []uuid.UUID{directID}, metadata.Markings)
 }
 
 func TestDatasetModelCatalogHandlersReadAndPatch(t *testing.T) {

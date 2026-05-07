@@ -44,6 +44,46 @@ func migrationNames(t *testing.T, dir string) []string {
 	return names
 }
 
+func TestGetCatalogFacetsAggregatesTagsAndOwners(t *testing.T) {
+	ctx := context.Background()
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	ownerID := uuid.New()
+	mock.ExpectQuery("SELECT tag AS value").WillReturnRows(pgxmock.NewRows([]string{"value", "count"}).AddRow("finance", int64(2)).AddRow("daily", int64(1)))
+	mock.ExpectQuery("SELECT owner_id, COUNT").WillReturnRows(pgxmock.NewRows([]string{"owner_id", "count"}).AddRow(ownerID, int64(3)))
+
+	r := &repo.Repo{Pool: mock}
+	facets, err := r.GetCatalogFacets(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []models.CatalogTagFacet{{Value: "finance", Count: 2}, {Value: "daily", Count: 1}}, facets.Tags)
+	require.Equal(t, []models.CatalogOwnerFacet{{OwnerID: ownerID, Count: 3}}, facets.Owners)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGetInternalDatasetMetadataUsesStoragePathDirectMarkings(t *testing.T) {
+	ctx := context.Background()
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	datasetID := uuid.New()
+	ownerID := uuid.New()
+	markingID := uuid.New()
+	now := time.Now().UTC()
+	storagePath := "ri.foundry.main.dataset." + datasetID.String()
+	mock.ExpectQuery("SELECT id, name, format, tags").WithArgs(datasetID).WillReturnRows(pgxmock.NewRows([]string{"id", "name", "format", "tags", "current_version", "active_branch", "owner_id", "updated_at", "storage_path"}).AddRow(datasetID, "orders", "parquet", []string{"finance"}, int32(7), "master", ownerID, now, storagePath))
+	mock.ExpectQuery("SELECT marking_id FROM dataset_markings").WithArgs(storagePath).WillReturnRows(pgxmock.NewRows([]string{"marking_id"}).AddRow(markingID))
+
+	r := &repo.Repo{Pool: mock}
+	metadata, err := r.GetInternalDatasetMetadata(ctx, datasetID)
+	require.NoError(t, err)
+	require.Equal(t, datasetID, metadata.ID)
+	require.Equal(t, []uuid.UUID{markingID}, metadata.Markings)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestPatchDatasetMetadataScansCatalogDataset(t *testing.T) {
 	ctx := context.Background()
 	mock, err := pgxmock.NewPool()
