@@ -19,54 +19,30 @@ func TestNewInMemoryWiresAllStores(t *testing.T) {
 	require.NotNil(t, s.Objects)
 	require.NotNil(t, s.Links)
 	require.NotNil(t, s.Actions)
+	require.NotNil(t, s.ObjectSetMaterializations)
 
 	// Compile-time pin doubled at runtime via interface assertion.
 	var _ storageabstraction.ObjectStore = s.Objects
 	var _ storageabstraction.LinkStore = s.Links
 	var _ storageabstraction.ActionLogStore = s.Actions
+	var _ stores.ObjectSetMaterializationStore = s.ObjectSetMaterializations
 }
 
-// libs/ontology-kernel/src/stores/pg.rs — every PostgresObjectStore
-// method returns the verbatim NOT_YET error wrapped as
-// RepoError::Backend. Mirrors the Rust contract for the stub
-// adapters used while a service has not migrated off direct PG.
-func TestPostgresObjectStoreReturnsNotYetError(t *testing.T) {
-	s := &stores.PostgresObjectStore{Pool: nil}
+// Postgres stores surface backend errors when they are not wired with a pool.
+// The adapters are real SQL implementations; nil pools fail fast instead of
+// returning the historical NOT_YET stub.
+func TestPostgresStoresRequirePool(t *testing.T) {
 	ctx := context.Background()
-
-	const wantSubstr = "PostgreSQL adapter for storage-abstraction trait is a stub"
-
-	_, err := s.Get(ctx, "tenant-1", "obj-1", storageabstraction.Strong())
+	obj := &stores.PostgresObjectStore{Pool: nil}
+	_, err := obj.Get(ctx, "tenant-1", "obj-1", storageabstraction.Strong())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), wantSubstr)
+	assert.Contains(t, err.Error(), "postgres pool is nil")
 	assert.True(t, storageabstraction.IsBackendError(err))
 
-	_, err = s.Put(ctx, storageabstraction.Object{}, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), wantSubstr)
-
-	_, err = s.Delete(ctx, "tenant-1", "obj-1")
-	require.Error(t, err)
-
-	_, err = s.ListByType(ctx, "tenant-1", "type", storageabstraction.Page{}, storageabstraction.Strong())
-	require.Error(t, err)
-	_, err = s.ListByOwner(ctx, "tenant-1", "owner", storageabstraction.Page{}, storageabstraction.Strong())
-	require.Error(t, err)
-	_, err = s.ListByMarking(ctx, "tenant-1", "marking", storageabstraction.Page{}, storageabstraction.Strong())
-	require.Error(t, err)
-}
-
-// libs/ontology-kernel/src/stores/pg.rs — same NOT_YET contract for
-// the Link and ActionLog adapters.
-func TestPostgresLinkAndActionLogReturnNotYet(t *testing.T) {
-	ctx := context.Background()
 	link := &stores.PostgresLinkStore{}
-	action := &stores.PostgresActionLogStore{}
-
 	require.Error(t, link.Put(ctx, storageabstraction.Link{}))
-	_, err := link.Delete(ctx, "t", "lt", "f", "to")
-	require.Error(t, err)
 
+	action := &stores.PostgresActionLogStore{}
 	require.Error(t, action.Append(ctx, storageabstraction.ActionLogEntry{}))
 }
 

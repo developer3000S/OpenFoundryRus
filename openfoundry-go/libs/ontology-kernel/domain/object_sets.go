@@ -10,13 +10,160 @@ package domain
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/google/uuid"
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
+	ontologykernel "github.com/openfoundry/openfoundry-go/libs/ontology-kernel"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/models"
 )
+
+// EvaluateObjectSet mirrors `pub async fn evaluate_object_set`. It validates
+// the definition and policy, loads tenant-scoped accessible objects through the
+// function runtime helpers, applies filters/traversals/joins/projections, and
+// returns the same response envelope as Rust.
+func EvaluateObjectSet(ctx context.Context, state *ontologykernel.AppState, claims *authmw.Claims, definition models.ObjectSetDefinition, limit int, materialized bool) (models.ObjectSetEvaluationResponse, error) {
+	if err := ValidateObjectSetDefinition(definition); err != nil {
+		return models.ObjectSetEvaluationResponse{}, err
+	}
+	if err := EnforceObjectSetPolicy(claims, definition.Policy); err != nil {
+		return models.ObjectSetEvaluationResponse{}, err
+	}
+	if limit < 0 {
+		limit = 0
+	}
+
+	baseObjects, err := LoadAccessibleObjectSet(ctx, state, claims, definition.BaseObjectTypeID)
+	if err != nil {
+		return models.ObjectSetEvaluationResponse{}, err
+	}
+	filtered := make([]json.RawMessage, 0, len(baseObjects))
+	for _, object := range baseObjects {
+		if AllowsObjectSetMarking(claims, definition.Policy, object) && MatchesObjectSetFilters(object, definition.Filters) {
+			filtered = append(filtered, object)
+		}
+	}
+
+	var secondaryRows []json.RawMessage
+	if definition.Join != nil {
+		secondaryRows, err = LoadAccessibleObjectSet(ctx, state, claims, definition.Join.SecondaryObjectTypeID)
+		if err != nil {
+			return models.ObjectSetEvaluationResponse{}, err
+		}
+	}
+
+	rows := []json.RawMessage{}
+	traversalNeighborCount := 0
+	for _, base := range filtered {
+		neighbors, err := resolveObjectSetTraversals(ctx, state, claims, base, definition.Traversals)
+		if err != nil {
+			return models.ObjectSetEvaluationResponse{}, err
+		}
+		traversalNeighborCount += len(neighbors)
+		seed, _ := json.Marshal(map[string]any{
+			"base":          json.RawMessage(base),
+			"neighbors":     neighbors,
+			"what_if_label": definition.WhatIfLabel,
+		})
+
+		if definition.Join == nil {
+			rows = append(rows, seed)
+			continue
+		}
+
+		joined := []json.RawMessage{}
+		for _, candidate := range secondaryRows {
+			if JoinMatches(base, candidate, *definition.Join) {
+				joined = append(joined, candidate)
+			}
+		}
+		if len(joined) == 0 {
+			if strings.EqualFold(definition.Join.JoinKind, "left") {
+				rows = append(rows, AugmentObjectSetRowWithJoin(seed, json.RawMessage("null")))
+			}
+			continue
+		}
+		for _, item := range joined {
+			rows = append(rows, AugmentObjectSetRowWithJoin(seed, item))
+		}
+	}
+
+	totalRows := len(rows)
+	if limit > len(rows) {
+		limit = len(rows)
+	}
+	limited := make([]json.RawMessage, 0, limit)
+	for _, row := range rows[:limit] {
+		limited = append(limited, ProjectObjectSetRow(row, definition.Projections))
+	}
+
+	return models.ObjectSetEvaluationResponse{
+		ObjectSet:              definition,
+		TotalBaseMatches:       len(filtered),
+		TotalRows:              totalRows,
+		TraversalNeighborCount: traversalNeighborCount,
+		Rows:                   limited,
+		GeneratedAt:            time.Now().UTC(),
+		Materialized:           materialized,
+	}, nil
+}
+
+func resolveObjectSetTraversals(ctx context.Context, state *ontologykernel.AppState, claims *authmw.Claims, base json.RawMessage, traversals []models.ObjectSetTraversal) ([]json.RawMessage, error) {
+	if len(traversals) == 0 {
+		return []json.RawMessage{}, nil
+	}
+	idRaw := ResolveObjectSetPath(base, "id")
+	idText, ok := jsonString(idRaw)
+	if !ok {
+		return []json.RawMessage{}, nil
+	}
+	id, err := uuid.Parse(idText)
+	if err != nil {
+		return []json.RawMessage{}, nil
+	}
+	frontier := []uuid.UUID{id}
+	seen := map[uuid.UUID]bool{id: true}
+	resolved := []json.RawMessage{}
+	maxHops := int32(0)
+	for _, traversal := range traversals {
+		if traversal.MaxHops > maxHops {
+			maxHops = traversal.MaxHops
+		}
+	}
+	for hop := int32(0); hop < maxHops && len(frontier) > 0; hop++ {
+		next := []uuid.UUID{}
+		for _, current := range frontier {
+			linked, err := LoadLinkedObjects(ctx, state, claims, current)
+			if err != nil {
+				return nil, err
+			}
+			for _, link := range linked {
+				for _, traversal := range traversals {
+					if traversal.MaxHops <= hop || !TraversalMatches(link, traversal) {
+						continue
+					}
+					resolved = append(resolved, link)
+					neighborText, ok := jsonString(ResolveObjectSetPath(link, "object.id"))
+					if !ok {
+						continue
+					}
+					neighborID, err := uuid.Parse(neighborText)
+					if err == nil && !seen[neighborID] {
+						seen[neighborID] = true
+						next = append(next, neighborID)
+					}
+				}
+			}
+		}
+		frontier = next
+	}
+	return resolved, nil
+}
 
 // ValidateObjectSetDefinition mirrors `pub fn validate_object_set_definition`.
 // Returns nil on success or the verbatim Rust error string on the

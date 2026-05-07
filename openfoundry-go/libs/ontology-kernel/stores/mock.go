@@ -18,6 +18,7 @@ package stores
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 
@@ -656,14 +657,14 @@ func (m *MockLinkStore) ListIncoming(_ context.Context, tenant storageabstractio
 type MockActionLogStore struct {
 	mu sync.Mutex
 
-	AppendCalls         []storageabstraction.ActionLogEntry
-	appendResp          []error
-	ListRecentCalls     []ListRecentCall
-	listRecentResp      []pagedActionsAndErr
-	ListForObjectCalls  []ListForObjectCall
-	listForObjectResp   []pagedActionsAndErr
-	ListForActionCalls  []ListForActionCall
-	listForActionResp   []pagedActionsAndErr
+	AppendCalls        []storageabstraction.ActionLogEntry
+	appendResp         []error
+	ListRecentCalls    []ListRecentCall
+	listRecentResp     []pagedActionsAndErr
+	ListForObjectCalls []ListForObjectCall
+	listForObjectResp  []pagedActionsAndErr
+	ListForActionCalls []ListForActionCall
+	listForActionResp  []pagedActionsAndErr
 }
 
 // NewMockActionLogStore returns a fresh mock.
@@ -763,4 +764,86 @@ func (m *MockActionLogStore) ListForAction(_ context.Context, tenant storageabst
 	r := m.listForActionResp[0]
 	m.listForActionResp = m.listForActionResp[1:]
 	return r.page, r.err
+}
+
+// ---- InMemoryObjectSetMaterializationStore -------------------------------
+
+type objectSetMaterializationKey struct {
+	tenant storageabstraction.TenantId
+	setID  storageabstraction.ObjectSetId
+}
+
+// InMemoryObjectSetMaterializationStore is a tenant-scoped replacement store
+// for saved object set materializations.
+type InMemoryObjectSetMaterializationStore struct {
+	mu   sync.RWMutex
+	data map[objectSetMaterializationKey]ObjectSetMaterialization
+}
+
+// NewInMemoryObjectSetMaterializationStore returns a fresh empty store.
+func NewInMemoryObjectSetMaterializationStore() *InMemoryObjectSetMaterializationStore {
+	return &InMemoryObjectSetMaterializationStore{data: map[objectSetMaterializationKey]ObjectSetMaterialization{}}
+}
+
+var _ ObjectSetMaterializationStore = (*InMemoryObjectSetMaterializationStore)(nil)
+
+func objectSetMaterializationMetadata(m ObjectSetMaterialization) ObjectSetMaterializationMetadata {
+	return ObjectSetMaterializationMetadata{
+		Tenant:                 m.Tenant,
+		SetID:                  m.SetID,
+		BaseTypeID:             m.BaseTypeID,
+		MaterializationID:      fmt.Sprintf("%d", m.GeneratedAtMs),
+		GeneratedAtMs:          m.GeneratedAtMs,
+		TotalBaseMatches:       m.TotalBaseMatches,
+		TotalRows:              m.TotalRows,
+		StoredRowCount:         uint64(len(m.Rows)),
+		TraversalNeighborCount: m.TraversalNeighborCount,
+	}
+}
+
+func (s *InMemoryObjectSetMaterializationStore) Replace(_ context.Context, m ObjectSetMaterialization) (ObjectSetMaterializationMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := objectSetMaterializationKey{tenant: m.Tenant, setID: m.SetID}
+	copyRows := append([]ObjectSetMaterializedRow(nil), m.Rows...)
+	m.Rows = copyRows
+	s.data[key] = m
+	return objectSetMaterializationMetadata(m), nil
+}
+
+func (s *InMemoryObjectSetMaterializationStore) GetMetadata(_ context.Context, tenant storageabstraction.TenantId, setID storageabstraction.ObjectSetId, _ storageabstraction.ReadConsistency) (*ObjectSetMaterializationMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.data[objectSetMaterializationKey{tenant: tenant, setID: setID}]
+	if !ok {
+		return nil, nil
+	}
+	metadata := objectSetMaterializationMetadata(m)
+	return &metadata, nil
+}
+
+func (s *InMemoryObjectSetMaterializationStore) ListRows(_ context.Context, tenant storageabstraction.TenantId, setID storageabstraction.ObjectSetId, page storageabstraction.Page, _ storageabstraction.ReadConsistency) ([]ObjectSetMaterializedRow, *string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.data[objectSetMaterializationKey{tenant: tenant, setID: setID}]
+	if !ok {
+		return []ObjectSetMaterializedRow{}, nil, nil
+	}
+	items := append([]ObjectSetMaterializedRow(nil), m.Rows...)
+	sort.SliceStable(items, func(i, j int) bool { return items[i].Ordinal < items[j].Ordinal })
+	if limit := pageLimit(page); len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil, nil
+}
+
+func (s *InMemoryObjectSetMaterializationStore) Delete(_ context.Context, tenant storageabstraction.TenantId, setID storageabstraction.ObjectSetId) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := objectSetMaterializationKey{tenant: tenant, setID: setID}
+	if _, ok := s.data[key]; !ok {
+		return false, nil
+	}
+	delete(s.data, key)
+	return true, nil
 }

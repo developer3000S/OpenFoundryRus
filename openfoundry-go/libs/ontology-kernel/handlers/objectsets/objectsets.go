@@ -18,13 +18,8 @@
 // `domain.{Get,List,Create,Update,Delete}ObjectSet` against the
 // DefinitionStore.
 //
-// Two endpoints — `evaluate` and `materialize` — return 501 Not
-// Implemented in this iter: they depend on
-// `domain.evaluate_object_set` (function_runtime port, deferred to
-// iter 7c₅) and `state.stores.object_set_materializations`
-// (ObjectSetMaterializationStore not yet ported in
-// storage-abstraction). The route is mounted so the Mount-coverage
-// assertion in the parity test catches the day they go live.
+// Evaluate and materialize route through the same domain evaluator and
+// object_set_materializations store as the Rust service.
 
 package objectsets
 
@@ -43,6 +38,7 @@ import (
 	ontologykernel "github.com/openfoundry/openfoundry-go/libs/ontology-kernel"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/domain"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/models"
+	kernelstores "github.com/openfoundry/openfoundry-go/libs/ontology-kernel/stores"
 	storage "github.com/openfoundry/openfoundry-go/libs/storage-abstraction"
 )
 
@@ -69,17 +65,15 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func errBody(msg string) map[string]string { return map[string]string{"error": msg} }
 
-func unauthorized(w http.ResponseWriter)         { writeJSON(w, http.StatusUnauthorized, errBody("missing claims")) }
+func unauthorized(w http.ResponseWriter) {
+	writeJSON(w, http.StatusUnauthorized, errBody("missing claims"))
+}
 func badRequest(w http.ResponseWriter, m string) { writeJSON(w, http.StatusBadRequest, errBody(m)) }
 func forbidden(w http.ResponseWriter, m string)  { writeJSON(w, http.StatusForbidden, errBody(m)) }
 func notFound(w http.ResponseWriter, m string)   { writeJSON(w, http.StatusNotFound, errBody(m)) }
 func internalError(w http.ResponseWriter, m string) {
 	writeJSON(w, http.StatusInternalServerError, errBody(m))
 }
-func notImplemented(w http.ResponseWriter, m string) {
-	writeJSON(w, http.StatusNotImplemented, errBody(m))
-}
-
 func pathUUID(r *http.Request, key string) (uuid.UUID, error) {
 	raw := chi.URLParam(r, key)
 	if raw == "" {
@@ -149,12 +143,10 @@ func buildDefinitionFromCreate(ownerID uuid.UUID, req models.CreateObjectSetRequ
 	}
 }
 
-// loadObjectSet mirrors `async fn load_object_set`. Materialization
-// metadata enrichment is skipped — the Go port does not yet ship an
-// ObjectSetMaterializationStore (will land alongside iter 7c₅). The
-// Rust path falls back to "no metadata" silently on store errors, so
-// returning the bare definition is wire-equivalent to the
-// no-materialization branch.
+// loadObjectSet mirrors `async fn load_object_set`. The Rust path enriches
+// materialization metadata when present and otherwise returns the bare
+// definition; the Go handler applies metadata after materialize in the same
+// response path.
 func loadObjectSet(r *http.Request, state *ontologykernel.AppState, id uuid.UUID) (*models.ObjectSetDefinition, error) {
 	return domain.GetObjectSet(r.Context(), state.Stores.Definitions, id)
 }
@@ -162,6 +154,57 @@ func loadObjectSet(r *http.Request, state *ontologykernel.AppState, id uuid.UUID
 // objectTypeExists mirrors `async fn object_type_exists`.
 func objectTypeExists(r *http.Request, state *ontologykernel.AppState, objectTypeID uuid.UUID) (bool, error) {
 	return domain.ObjectTypeExistsInDefinitionStore(r.Context(), state.Stores.Definitions, objectTypeID)
+}
+
+func objectSetMaterializationID(id uuid.UUID) storage.ObjectSetId {
+	return storage.ObjectSetId(id.String())
+}
+
+func rowIDFromValue(row json.RawMessage, ordinal int) string {
+	if raw := domain.ResolveObjectSetPath(row, "base.id"); raw != nil {
+		var id string
+		if err := json.Unmarshal(raw, &id); err == nil && id != "" {
+			return id
+		}
+	}
+	if raw := domain.ResolveObjectSetPath(row, "id"); raw != nil {
+		var id string
+		if err := json.Unmarshal(raw, &id); err == nil && id != "" {
+			return id
+		}
+	}
+	return "row-" + strconv.Itoa(ordinal)
+}
+
+func materializationFromEvaluation(claims *authmw.Claims, definition models.ObjectSetDefinition, evaluation models.ObjectSetEvaluationResponse) kernelstores.ObjectSetMaterialization {
+	rows := make([]kernelstores.ObjectSetMaterializedRow, 0, len(evaluation.Rows))
+	for i, row := range evaluation.Rows {
+		rows = append(rows, kernelstores.ObjectSetMaterializedRow{
+			RowID:   rowIDFromValue(row, i),
+			Ordinal: uint32(i),
+			Payload: row,
+		})
+	}
+	return kernelstores.ObjectSetMaterialization{
+		Tenant:                 domain.TenantFromClaims(claims),
+		SetID:                  objectSetMaterializationID(definition.ID),
+		BaseTypeID:             storage.TypeId(definition.BaseObjectTypeID.String()),
+		GeneratedAtMs:          evaluation.GeneratedAt.UnixMilli(),
+		TotalBaseMatches:       uint64(evaluation.TotalBaseMatches),
+		TotalRows:              uint64(evaluation.TotalRows),
+		TraversalNeighborCount: uint64(evaluation.TraversalNeighborCount),
+		Rows:                   rows,
+	}
+}
+
+func applyMaterializationMetadata(definition *models.ObjectSetDefinition, metadata kernelstores.ObjectSetMaterializationMetadata) {
+	t := time.UnixMilli(metadata.GeneratedAtMs).UTC()
+	definition.MaterializedAt = &t
+	if metadata.TotalRows > uint64(^uint32(0)>>1) {
+		definition.MaterializedRowCount = int32(^uint32(0) >> 1)
+	} else {
+		definition.MaterializedRowCount = int32(metadata.TotalRows)
+	}
 }
 
 // ── Endpoints ────────────────────────────────────────────────────────────
@@ -427,46 +470,117 @@ func DeleteObjectSet(state *ontologykernel.AppState) http.HandlerFunc {
 			notFound(w, "object set not found")
 			return
 		}
-		// Materialization invalidation skipped: store not yet ported.
+		if state.Stores.ObjectSetMaterializations != nil {
+			_, _ = state.Stores.ObjectSetMaterializations.Delete(r.Context(), domain.TenantFromClaims(claims), objectSetMaterializationID(id))
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 // EvaluateObjectSet mirrors `pub async fn evaluate_object_set`.
-//
-// 501 Not Implemented while the function_runtime port (iter 7c₅) is
-// in flight. Once `domain.EvaluateObjectSet` lands the body becomes
-// the same load+evaluate flow as the Rust source.
 func EvaluateObjectSet(state *ontologykernel.AppState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := authmw.FromContext(r.Context()); !ok {
+		claims, ok := authmw.FromContext(r.Context())
+		if !ok {
 			unauthorized(w)
 			return
 		}
-		if _, err := pathUUID(r, "id"); err != nil {
+		id, err := pathUUID(r, "id")
+		if err != nil {
 			badRequest(w, "invalid path id")
 			return
 		}
-		notImplemented(w, "object set evaluation is not implemented in this build")
+		definition, err := loadObjectSet(r, state, id)
+		if err != nil {
+			internalError(w, err.Error())
+			return
+		}
+		if definition == nil {
+			notFound(w, "object set not found")
+			return
+		}
+		var req models.EvaluateObjectSetRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			badRequest(w, "invalid request body")
+			return
+		}
+		limit := 250
+		if req.Limit != nil {
+			limit = *req.Limit
+		}
+		if limit < 1 {
+			limit = 1
+		} else if limit > 2000 {
+			limit = 2000
+		}
+		evaluation, err := domain.EvaluateObjectSet(r.Context(), state, claims, *definition, limit, false)
+		if err != nil {
+			if strings.Contains(err.Error(), "forbidden") {
+				forbidden(w, err.Error())
+			} else {
+				badRequest(w, err.Error())
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, evaluation)
 	}
 }
 
 // MaterializeObjectSet mirrors `pub async fn materialize_object_set`.
-//
-// 501 Not Implemented for the same reason as
-// [EvaluateObjectSet], plus the materialization metadata store
-// (`state.stores.object_set_materializations`) is not yet ported in
-// `storage-abstraction`.
 func MaterializeObjectSet(state *ontologykernel.AppState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := authmw.FromContext(r.Context()); !ok {
+		claims, ok := authmw.FromContext(r.Context())
+		if !ok {
 			unauthorized(w)
 			return
 		}
-		if _, err := pathUUID(r, "id"); err != nil {
+		id, err := pathUUID(r, "id")
+		if err != nil {
 			badRequest(w, "invalid path id")
 			return
 		}
-		notImplemented(w, "object set materialization is not implemented in this build")
+		definition, err := loadObjectSet(r, state, id)
+		if err != nil {
+			internalError(w, err.Error())
+			return
+		}
+		if definition == nil {
+			notFound(w, "object set not found")
+			return
+		}
+		var req models.EvaluateObjectSetRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			badRequest(w, "invalid request body")
+			return
+		}
+		limit := 2000
+		if req.Limit != nil {
+			limit = *req.Limit
+		}
+		if limit < 1 {
+			limit = 1
+		} else if limit > 5000 {
+			limit = 5000
+		}
+		evaluation, err := domain.EvaluateObjectSet(r.Context(), state, claims, *definition, limit, true)
+		if err != nil {
+			if strings.Contains(err.Error(), "forbidden") {
+				forbidden(w, err.Error())
+			} else {
+				badRequest(w, err.Error())
+			}
+			return
+		}
+		if state.Stores.ObjectSetMaterializations == nil {
+			internalError(w, "failed to materialize object set")
+			return
+		}
+		metadata, err := state.Stores.ObjectSetMaterializations.Replace(r.Context(), materializationFromEvaluation(claims, *definition, evaluation))
+		if err != nil {
+			internalError(w, "failed to materialize object set")
+			return
+		}
+		applyMaterializationMetadata(&evaluation.ObjectSet, metadata)
+		writeJSON(w, http.StatusOK, evaluation)
 	}
 }
