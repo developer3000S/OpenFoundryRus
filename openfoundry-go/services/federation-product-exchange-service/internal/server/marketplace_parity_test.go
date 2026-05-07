@@ -95,20 +95,36 @@ func TestMarketplaceV1InstallAliasContract(t *testing.T) {
 func TestDatasetProductsAndSchedulesContracts(t *testing.T) {
 	t.Parallel()
 	srv, token := newMarketplaceTestServer(t)
+
+	productPayload := map[string]any{"name": "Claims Dataset", "include_schema": true, "schema": map[string]any{"claim_id": "string"}, "include_schedules": true, "schedules": []string{"daily"}}
 	var product models.DatasetProduct
-	decodeJSON(t, doJSON(t, "POST", srv.URL+"/v1/products/from-dataset/ri.foundry.main.dataset.source", token, map[string]any{"name": "Claims Dataset", "include_schema": true, "schema": map[string]any{"claim_id": "string"}, "include_schedules": true, "schedules": []string{"daily"}}, 200), &product)
+	decodeJSON(t, doJSON(t, "POST", srv.URL+"/v1/products/from-dataset/ri.foundry.main.dataset.source", token, productPayload, 200), &product)
 	assert.Equal(t, "dataset", product.Manifest.Entity)
 	assert.Equal(t, []string{"daily"}, product.Manifest.Schedules)
+
+	var marketplaceProduct models.DatasetProduct
+	decodeJSON(t, doJSON(t, "POST", srv.URL+"/v1/marketplace/products/from-dataset/ri.foundry.main.dataset.marketplace", token, productPayload, 200), &marketplaceProduct)
+	assert.Equal(t, "ri.foundry.main.dataset.marketplace", marketplaceProduct.SourceDatasetRID)
 
 	var productMirror models.DatasetProduct
 	decodeJSON(t, doJSON(t, "GET", srv.URL+"/v1/marketplace/products/"+product.ID.String(), token, nil, 200), &productMirror)
 	assert.Equal(t, product.ID, productMirror.ID)
 
+	var productRootMirror models.DatasetProduct
+	decodeJSON(t, doJSON(t, "GET", srv.URL+"/v1/products/"+product.ID.String(), token, nil, 200), &productRootMirror)
+	assert.Equal(t, product.ID, productRootMirror.ID)
+
 	projectID := uuid.New()
-	var install models.DatasetProductInstall
-	decodeJSON(t, doJSON(t, "POST", srv.URL+"/v1/marketplace/products/"+product.ID.String()+"/install", token, map[string]any{"target_project_id": projectID.String(), "target_dataset_rid": "ri.foundry.main.dataset.target"}, 200), &install)
-	assert.Equal(t, "pending", install.Status)
-	assert.Contains(t, string(install.Details), "manifest_replay")
+	installPayload := map[string]any{"target_project_id": projectID.String(), "target_dataset_rid": "ri.foundry.main.dataset.target"}
+	var marketplaceInstall models.DatasetProductInstall
+	decodeJSON(t, doJSON(t, "POST", srv.URL+"/v1/marketplace/products/"+product.ID.String()+"/install", token, installPayload, 200), &marketplaceInstall)
+	assert.Equal(t, "pending", marketplaceInstall.Status)
+	assert.Contains(t, string(marketplaceInstall.Details), "manifest_replay")
+
+	var productInstall models.DatasetProductInstall
+	decodeJSON(t, doJSON(t, "POST", srv.URL+"/v1/products/"+product.ID.String()+"/install", token, installPayload, 200), &productInstall)
+	assert.Equal(t, "pending", productInstall.Status)
+	assert.Equal(t, product.ID, productInstall.ProductID)
 
 	versionID := uuid.New()
 	var schedule models.AddScheduleManifestResponse
