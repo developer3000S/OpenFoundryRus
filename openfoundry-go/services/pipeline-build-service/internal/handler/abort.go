@@ -49,14 +49,8 @@ type abortBuildResponse struct {
 // AbortBuild mirrors the Rust v1 abort flow for build rows and extends it with
 // executor cancellation + best-effort open-output transaction aborts.
 func AbortBuild(w http.ResponseWriter, r *http.Request) {
-	ports, ok := currentExecutionPorts()
-	if !ok || ports.Transactions == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "execution_ports_not_configured", "detail": "AbortBuild requires transaction and abort persistence ports"})
-		return
-	}
-	abortRepo, ok := abortRepositoryFromPorts(ports)
+	ports, abortRepo, ok := requireAbortPorts(w)
 	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "abort_ports_not_configured", "detail": "AbortBuild requires an AbortBuildRepository"})
 		return
 	}
 	id := buildIDParam(r)
@@ -95,11 +89,29 @@ func AbortBuild(w http.ResponseWriter, r *http.Request) {
 		_ = abortRepo.MarkBuildAborted(r.Context(), snapshot.ID, "aborted by user")
 	}
 
+	writeAbortBuildResponse(w, abortBuildResponse{RID: snapshot.RID, BuildID: snapshot.ID, State: string(models.BuildAborting), CancelledExecution: cancelled, AbortedTransactions: aborted, TransactionErrors: txErrors})
+}
+
+func requireAbortPorts(w http.ResponseWriter) (ExecutionPorts, AbortBuildRepository, bool) {
+	ports, ok := currentExecutionPorts()
+	if !ok || ports.Transactions == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "execution_ports_not_configured", "detail": "AbortBuild requires transaction and abort persistence ports"})
+		return ExecutionPorts{}, nil, false
+	}
+	abortRepo, ok := abortRepositoryFromPorts(ports)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "abort_ports_not_configured", "detail": "AbortBuild requires an AbortBuildRepository"})
+		return ExecutionPorts{}, nil, false
+	}
+	return ports, abortRepo, true
+}
+
+func writeAbortBuildResponse(w http.ResponseWriter, response abortBuildResponse) {
 	status := http.StatusOK
-	if len(txErrors) > 0 {
+	if len(response.TransactionErrors) > 0 {
 		status = http.StatusBadGateway
 	}
-	writeJSON(w, status, abortBuildResponse{RID: snapshot.RID, BuildID: snapshot.ID, State: string(models.BuildAborting), CancelledExecution: cancelled, AbortedTransactions: aborted, TransactionErrors: txErrors})
+	writeJSON(w, status, response)
 }
 
 func abortRepositoryFromPorts(ports ExecutionPorts) (AbortBuildRepository, bool) {

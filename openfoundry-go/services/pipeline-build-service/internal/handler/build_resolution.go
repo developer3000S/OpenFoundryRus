@@ -52,13 +52,21 @@ func currentBuildLifecyclePorts() (BuildLifecyclePorts, bool) {
 	return slot.ports, true
 }
 
+func requireBuildLifecyclePorts(w http.ResponseWriter, detail string, needBuilds bool) (BuildLifecyclePorts, bool) {
+	ports, ok := currentBuildLifecyclePorts()
+	if !ok || (needBuilds && ports.Builds == nil) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_lifecycle_ports_not_configured", "detail": detail})
+		return BuildLifecyclePorts{}, false
+	}
+	return ports, true
+}
+
 // CreateBuild resolves a Rust-compatible build plan, persists the opened build
 // and job plan through injected ports, and returns the same accepted envelope as
 // the Rust v1 handler.
 func CreateBuild(w http.ResponseWriter, r *http.Request) {
-	ports, ok := currentBuildLifecyclePorts()
-	if !ok || ports.Builds == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_lifecycle_ports_not_configured", "detail": "CreateBuild requires JobSpec, dataset versioning and build persistence ports"})
+	ports, ok := requireBuildLifecyclePorts(w, "CreateBuild requires JobSpec, dataset versioning and build persistence ports", true)
+	if !ok {
 		return
 	}
 
@@ -150,9 +158,8 @@ type dryRunError struct {
 // DryRunResolve uses the resolver's load/validate/branch-resolution steps but
 // intentionally avoids OpenBuild, OpenTransaction, lock acquisition and final persistence.
 func DryRunResolve(w http.ResponseWriter, r *http.Request) {
-	ports, ok := currentBuildLifecyclePorts()
+	ports, ok := requireBuildLifecyclePorts(w, "DryRunResolve requires JobSpec and dataset versioning ports", false)
 	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_lifecycle_ports_not_configured", "detail": "DryRunResolve requires JobSpec and dataset versioning ports"})
 		return
 	}
 	var body dryRunResolveRequest

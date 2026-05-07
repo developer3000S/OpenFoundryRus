@@ -361,6 +361,19 @@ func (r *Repository) ListJobsForBuildID(ctx context.Context, idOrRID string) ([]
 	return r.listJobsForBuild(ctx, buildID)
 }
 
+func (r *Repository) GetJob(ctx context.Context, idOrRID string) (*models.Job, error) {
+	var j models.Job
+	err := r.db.QueryRow(ctx, `SELECT id, rid, build_id, job_spec_rid, state, output_transaction_rids, state_changed_at, attempt, stale_skipped, failure_reason, output_content_hash, created_at
+FROM jobs WHERE id::text=$1 OR rid=$1`, idOrRID).Scan(&j.ID, &j.RID, &j.BuildID, &j.JobSpecRID, &j.State, &j.OutputTransactionRIDs, &j.StateChangedAt, &j.Attempt, &j.StaleSkipped, &j.FailureReason, &j.OutputContentHash, &j.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &j, nil
+}
+
 func (r *Repository) listJobsForBuild(ctx context.Context, buildID uuid.UUID) ([]models.Job, error) {
 	rows, err := r.db.Query(ctx, `SELECT id, rid, build_id, job_spec_rid, state, output_transaction_rids, state_changed_at, attempt, stale_skipped, failure_reason, output_content_hash, created_at FROM jobs WHERE build_id=$1 ORDER BY created_at`, buildID)
 	if err != nil {

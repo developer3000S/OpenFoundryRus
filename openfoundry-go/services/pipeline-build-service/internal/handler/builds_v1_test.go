@@ -126,6 +126,9 @@ func (f *fakeV1Repo) GetBuild(_ context.Context, idOrRID string) (*models.BuildE
 func (f *fakeV1Repo) ListJobsForBuildID(context.Context, string) ([]models.Job, error) {
 	return nil, nil
 }
+func (f *fakeV1Repo) GetJob(context.Context, string) (*models.Job, error) {
+	return nil, nil
+}
 func (f *fakeV1Repo) ListDatasetBuilds(context.Context, string, int64) ([]models.Build, error) {
 	return nil, nil
 }

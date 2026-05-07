@@ -79,6 +79,7 @@ type BuildQueryRepository interface {
 	ListBuilds(ctx context.Context, query models.ListBuildsQuery) ([]models.BuildEnvelope, error)
 	GetBuild(ctx context.Context, idOrRID string) (*models.BuildEnvelope, error)
 	ListJobsForBuildID(ctx context.Context, idOrRID string) ([]models.Job, error)
+	GetJob(ctx context.Context, idOrRID string) (*models.Job, error)
 }
 
 type BuildV1Repository interface {
@@ -164,11 +165,71 @@ func currentBuildQueryRepository() (BuildQueryRepository, bool) {
 	return slot.repo, true
 }
 
-// Builds (v1).
-func ListBuilds(w http.ResponseWriter, r *http.Request) {
+func requireBuildQueryRepository(w http.ResponseWriter, detail string) (BuildQueryRepository, bool) {
 	repo, ok := currentBuildQueryRepository()
 	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_query_repository_not_configured", "detail": "ListBuilds requires DATABASE_URL-backed repository wiring"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_query_repository_not_configured", "detail": detail})
+		return nil, false
+	}
+	return repo, true
+}
+
+func requireBuildV1Repository(w http.ResponseWriter, detail string) (BuildV1Repository, bool) {
+	repo, ok := requireBuildQueryRepository(w, detail)
+	if !ok {
+		return nil, false
+	}
+	v1, ok := repo.(BuildV1Repository)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_v1_repository_not_configured", "detail": detail})
+		return nil, false
+	}
+	return v1, true
+}
+
+func requireJobLogStore(w http.ResponseWriter, detail string) (*livellogs.Service, bool) {
+	service, _ := jobLogService.Load().(*livellogs.Service)
+	if service == nil || service.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live_logs_not_configured", "detail": detail})
+		return nil, false
+	}
+	return service, true
+}
+
+func requireLogAppender(w http.ResponseWriter, detail string) (LogAppendStore, *livellogs.Service, bool) {
+	service, ok := requireJobLogStore(w, detail)
+	if !ok {
+		return nil, nil, false
+	}
+	appender, ok := service.Store.(LogAppendStore)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "log_append_not_configured", "detail": detail})
+		return nil, nil, false
+	}
+	return appender, service, true
+}
+
+func requireJobLogSubscriber(w http.ResponseWriter, detail string) (*livellogs.Service, bool) {
+	service, _ := jobLogService.Load().(*livellogs.Service)
+	if service == nil || service.Subscriber == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live_logs_not_configured", "detail": detail})
+		return nil, false
+	}
+	return service, true
+}
+
+func writeLogStoreUnavailable(w http.ResponseWriter, errorName string, err error) {
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": errorName, "detail": err.Error()})
+}
+
+func writeLogSubscriberUnavailable(w http.ResponseWriter, detail string) {
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live_logs_not_configured", "detail": detail})
+}
+
+// Builds (v1).
+func ListBuilds(w http.ResponseWriter, r *http.Request) {
+	repo, ok := requireBuildQueryRepository(w, "ListBuilds requires DATABASE_URL-backed repository wiring")
+	if !ok {
 		return
 	}
 	limit := int64(50)
@@ -185,9 +246,8 @@ func ListBuilds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": items, "total": len(items)})
 }
 func GetBuild(w http.ResponseWriter, r *http.Request) {
-	repo, ok := currentBuildQueryRepository()
+	repo, ok := requireBuildQueryRepository(w, "GetBuild requires DATABASE_URL-backed repository wiring")
 	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_query_repository_not_configured", "detail": "GetBuild requires DATABASE_URL-backed repository wiring"})
 		return
 	}
 	env, err := repo.GetBuild(r.Context(), buildIDParam(r))
@@ -204,9 +264,8 @@ func GetBuild(w http.ResponseWriter, r *http.Request) {
 
 // Jobs and job logs.
 func ListJobs(w http.ResponseWriter, r *http.Request) {
-	repo, ok := currentBuildQueryRepository()
+	repo, ok := requireBuildQueryRepository(w, "ListJobs requires DATABASE_URL-backed repository wiring")
 	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_query_repository_not_configured", "detail": "ListJobs requires DATABASE_URL-backed repository wiring"})
 		return
 	}
 	items, err := repo.ListJobsForBuildID(r.Context(), buildIDParam(r))
@@ -216,11 +275,25 @@ func ListJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items, "total": len(items)})
 }
-func GetJob(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusNotFound, nil) }
+func GetJob(w http.ResponseWriter, r *http.Request) {
+	repo, ok := requireBuildQueryRepository(w, "GetJob requires DATABASE_URL-backed repository wiring")
+	if !ok {
+		return
+	}
+	job, err := repo.GetJob(r.Context(), jobRIDFromRequest(r))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "get_job_failed", "detail": err.Error()})
+		return
+	}
+	if job == nil {
+		writeJSON(w, http.StatusNotFound, nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
 func ListJobLogs(w http.ResponseWriter, r *http.Request) {
-	service, _ := jobLogService.Load().(*livellogs.Service)
-	if service == nil || service.Store == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live_logs_not_configured", "detail": "ListJobLogs requires DATABASE_URL-backed log store wiring"})
+	service, ok := requireJobLogStore(w, "ListJobLogs requires DATABASE_URL-backed log store wiring")
+	if !ok {
 		return
 	}
 	query, err := parseLogsQuery(r)
@@ -231,7 +304,7 @@ func ListJobLogs(w http.ResponseWriter, r *http.Request) {
 	query.Follow = false
 	items, err := service.Store.History(r.Context(), jobRIDFromRequest(r), query)
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "log_store_unavailable", "detail": err.Error()})
+		writeLogStoreUnavailable(w, "log_store_unavailable", err)
 		return
 	}
 	rows := make([]livellogs.RowDTO, 0, len(items))
@@ -243,9 +316,8 @@ func ListJobLogs(w http.ResponseWriter, r *http.Request) {
 
 // StreamJobLogs streams Rust-compatible Server-Sent Events for job logs.
 func StreamJobLogs(w http.ResponseWriter, r *http.Request) {
-	service, _ := jobLogService.Load().(*livellogs.Service)
-	if service == nil || service.Store == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live_logs_not_configured", "detail": "live logs not configured"})
+	service, ok := requireJobLogStore(w, "live logs not configured")
+	if !ok {
 		return
 	}
 	jobRID := jobRIDFromRequest(r)
@@ -261,7 +333,7 @@ func StreamJobLogs(w http.ResponseWriter, r *http.Request) {
 
 	history, err := service.Store.History(r.Context(), jobRID, query)
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "log_store_unavailable", "detail": err.Error()})
+		writeLogStoreUnavailable(w, "log_store_unavailable", err)
 		return
 	}
 
@@ -269,12 +341,12 @@ func StreamJobLogs(w http.ResponseWriter, r *http.Request) {
 	var unsubscribe func()
 	if query.Follow {
 		if service.Subscriber == nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live_logs_not_configured", "detail": "log subscriber not configured"})
+			writeLogSubscriberUnavailable(w, "log subscriber not configured")
 			return
 		}
 		live, unsubscribe, err = service.Subscriber.Subscribe(r.Context(), jobRID)
 		if err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "log_subscriber_unavailable", "detail": err.Error()})
+			writeLogStoreUnavailable(w, "log_subscriber_unavailable", err)
 			return
 		}
 		defer unsubscribe()
@@ -753,9 +825,8 @@ func (noSparkClient) GetPipelineRunStatus(context.Context, string, string) (*spa
 func CreateBuildV1(w http.ResponseWriter, r *http.Request) { CreateBuild(w, r) }
 
 func ListBuildsV1(w http.ResponseWriter, r *http.Request) {
-	repo, ok := currentBuildQueryRepository()
+	repo, ok := requireBuildQueryRepository(w, "ListBuildsV1 requires DATABASE_URL-backed repository wiring")
 	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_query_repository_not_configured", "detail": "ListBuildsV1 requires DATABASE_URL-backed repository wiring"})
 		return
 	}
 	limit := int64(50)
@@ -790,9 +861,8 @@ func ListBuildsV1(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetBuildV1(w http.ResponseWriter, r *http.Request) {
-	repo, ok := currentBuildQueryRepository()
+	repo, ok := requireBuildQueryRepository(w, "GetBuildV1 requires DATABASE_URL-backed repository wiring")
 	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_query_repository_not_configured", "detail": "GetBuildV1 requires DATABASE_URL-backed repository wiring"})
 		return
 	}
 	env, err := repo.GetBuild(r.Context(), chi.URLParam(r, "rid"))
@@ -817,14 +887,8 @@ func GetBuildV1(w http.ResponseWriter, r *http.Request) {
 func AbortBuildV1(w http.ResponseWriter, r *http.Request) { AbortBuild(w, r) }
 
 func ListDatasetBuildsV1(w http.ResponseWriter, r *http.Request) {
-	repo, ok := currentBuildQueryRepository()
+	v1, ok := requireBuildV1Repository(w, "ListDatasetBuilds requires DATABASE_URL-backed repository wiring")
 	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_query_repository_not_configured", "detail": "ListDatasetBuilds requires DATABASE_URL-backed repository wiring"})
-		return
-	}
-	v1, ok := repo.(BuildV1Repository)
-	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_v1_repository_not_configured"})
 		return
 	}
 	rows, err := v1.ListDatasetBuilds(r.Context(), chi.URLParam(r, "rid"), 100)
@@ -920,14 +984,8 @@ func CreateJobSpecV1(w http.ResponseWriter, r *http.Request) {
 func ListJobLogsV1(w http.ResponseWriter, r *http.Request) { ListJobLogs(w, r) }
 
 func EmitJobLogV1(w http.ResponseWriter, r *http.Request) {
-	service, _ := jobLogService.Load().(*livellogs.Service)
-	if service == nil || service.Store == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live_logs_not_configured", "detail": "EmitJobLog requires DATABASE_URL-backed log store wiring"})
-		return
-	}
-	appender, ok := service.Store.(LogAppendStore)
+	appender, service, ok := requireLogAppender(w, "EmitJobLog requires DATABASE_URL-backed log store wiring")
 	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "log_append_not_configured"})
 		return
 	}
 	var body struct {
@@ -953,9 +1011,8 @@ func EmitJobLogV1(w http.ResponseWriter, r *http.Request) {
 func StreamJobLogsV1(w http.ResponseWriter, r *http.Request) { StreamJobLogs(w, r) }
 
 func WSJobLogsV1(w http.ResponseWriter, r *http.Request) {
-	service, _ := jobLogService.Load().(*livellogs.Service)
-	if service == nil || service.Subscriber == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "live_logs_not_configured", "detail": "websocket logs require a subscriber"})
+	service, ok := requireJobLogSubscriber(w, "websocket logs require a subscriber")
+	if !ok {
 		return
 	}
 	conn, err := websocket.Accept(w, r, nil)
@@ -985,17 +1042,7 @@ func WSJobLogsV1(w http.ResponseWriter, r *http.Request) {
 }
 
 func currentV1Repository(w http.ResponseWriter) (BuildV1Repository, bool) {
-	repo, ok := currentBuildQueryRepository()
-	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_query_repository_not_configured"})
-		return nil, false
-	}
-	v1, ok := repo.(BuildV1Repository)
-	if !ok {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "build_v1_repository_not_configured"})
-		return nil, false
-	}
-	return v1, true
+	return requireBuildV1Repository(w, "v1 build/job routes require DATABASE_URL-backed repository wiring")
 }
 
 func buildETag(env *models.BuildEnvelope) string {
