@@ -106,16 +106,17 @@ func TestValidateSchemaRejectsBadStreamID(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestValidateSchemaRejectsInvalidJSONSchema(t *testing.T) {
+func TestValidateSchemaRejectsMissingSchemaAvro(t *testing.T) {
 	t.Parallel()
 	id := uuid.New()
 	h := &handlers.SchemasHandler{
 		Store:    &fakeSchemaStore{},
 		Registry: handlers.NoopSchemaRegistry{},
 	}
-	// schema_avro is empty/missing → 400.
+	// schema_avro is absent → empty json.RawMessage → 400 before we
+	// even touch the store.
 	req := withClaims(httptest.NewRequest("POST", "/v",
-		strings.NewReader(`{"schema_avro":null}`)))
+		strings.NewReader(`{}`)))
 	req = withChiID(req, id.String())
 	rec := httptest.NewRecorder()
 	h.ValidateSchema(rec, req)
