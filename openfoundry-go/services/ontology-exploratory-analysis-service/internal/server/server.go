@@ -19,10 +19,11 @@ import (
 	"github.com/openfoundry/openfoundry-go/libs/core-models/health"
 	"github.com/openfoundry/openfoundry-go/libs/observability"
 	"github.com/openfoundry/openfoundry-go/services/ontology-exploratory-analysis-service/internal/config"
+	"github.com/openfoundry/openfoundry-go/services/ontology-exploratory-analysis-service/internal/handlers"
 )
 
 func New(cfg *config.Config, m *observability.Metrics) *http.Server {
-	r := buildRouter(cfg, m)
+	r := buildRouter(cfg, m, nil)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return &http.Server{
 		Addr:              addr,
@@ -31,11 +32,23 @@ func New(cfg *config.Config, m *observability.Metrics) *http.Server {
 	}
 }
 
+// BuildRouter returns the substrate-only router (only /health,
+// /readiness, /healthz, /metrics). Mirrors the Rust binary's
+// substrate-only surface.
 func BuildRouter(cfg *config.Config, m *observability.Metrics) http.Handler {
-	return buildRouter(cfg, m)
+	return buildRouter(cfg, m, nil)
 }
 
-func buildRouter(cfg *config.Config, m *observability.Metrics) chi.Router {
+// BuildRouterWithHandlers returns a router with the saved-view /
+// saved-map / writeback domain routes mounted alongside the substrate
+// probes. Callers thread an OEA Handlers value when they want the
+// Rust-equivalent CRUD surface live; the binary main passes nil to
+// preserve the substrate-only contract documented in src/main.rs.
+func BuildRouterWithHandlers(cfg *config.Config, m *observability.Metrics, h *handlers.Handlers) http.Handler {
+	return buildRouter(cfg, m, h)
+}
+
+func buildRouter(cfg *config.Config, m *observability.Metrics, h *handlers.Handlers) chi.Router {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, chimw.Compress(5))
 	r.Use(chimw.Timeout(15 * time.Second))
@@ -51,6 +64,11 @@ func buildRouter(cfg *config.Config, m *observability.Metrics) chi.Router {
 	r.Get("/healthz", healthHandler)
 	if m != nil {
 		r.Method(http.MethodGet, "/metrics", m.Handler())
+	}
+
+	if h != nil {
+		h.MountViews(r)
+		h.MountMaps(r)
 	}
 
 	return r
