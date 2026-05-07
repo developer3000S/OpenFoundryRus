@@ -623,7 +623,21 @@ func extractGoRoutes(repo, service string) []Route {
 	return dedupeRoutes(routes)
 }
 
-func routeKey(r Route) string { return r.Method + " " + comparablePath(r.Path) }
+func routeKey(r Route) string {
+	path := r.Path
+	// connector-management-service mounts most Rust routes under `/api/v1` through
+	// `Router::new().nest("/api/v1", { ... })`. The Rust extractor records the
+	// inner block routes before the dynamic closure prefix, while the chi parser
+	// sees the effective Go path. Canonicalize those Rust-only inner paths so the
+	// audit reflects the externally-mounted HTTP surface.
+	if r.Service == "connector-management-service" && r.Side == "rust" &&
+		!strings.HasPrefix(path, "/api/v1") &&
+		!strings.HasPrefix(path, "/iceberg") &&
+		path != "/health" && path != "/metrics" {
+		path = joinPaths("/api/v1", path)
+	}
+	return r.Method + " " + comparablePath(path)
+}
 
 func reportForService(repo, service string) string {
 	rust, goRoutes := extractRustRoutes(repo, service), extractGoRoutes(repo, service)

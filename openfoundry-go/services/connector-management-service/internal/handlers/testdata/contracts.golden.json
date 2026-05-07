@@ -1,0 +1,1929 @@
+{
+  "connectors": [
+    {
+      "connector_type": "postgresql",
+      "display_name": "PostgreSQL",
+      "template_family": "sql_tabular",
+      "auth": {
+        "strategy": "username_password",
+        "secret_fields": [
+          "user",
+          "password"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": false
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "sql_connector",
+        "reusable_components": [
+          "connection_testing",
+          "schema_introspection",
+          "virtual_tables",
+          "bulk_registration"
+        ],
+        "example_targets": [
+          "postgresql",
+          "mysql"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared SQL connector contract with validation, discovery and virtual tables."
+      ]
+    },
+    {
+      "connector_type": "postgres",
+      "display_name": "PostgreSQL",
+      "template_family": "sql_tabular",
+      "auth": {
+        "strategy": "username_password",
+        "secret_fields": [
+          "user",
+          "password"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": false
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "sql_connector",
+        "reusable_components": [
+          "connection_testing",
+          "schema_introspection",
+          "virtual_tables",
+          "bulk_registration"
+        ],
+        "example_targets": [
+          "postgresql",
+          "mysql"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared SQL connector contract with validation, discovery and virtual tables."
+      ]
+    },
+    {
+      "connector_type": "mysql",
+      "display_name": "MySQL",
+      "template_family": "sql_tabular",
+      "auth": {
+        "strategy": "username_password",
+        "secret_fields": [
+          "user",
+          "password"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": false
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "sql_connector",
+        "reusable_components": [
+          "connection_testing",
+          "schema_introspection",
+          "virtual_tables",
+          "bulk_registration"
+        ],
+        "example_targets": [
+          "postgresql",
+          "mysql"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared SQL connector contract with validation, discovery and virtual tables."
+      ]
+    },
+    {
+      "connector_type": "mssql",
+      "display_name": "Microsoft SQL Server",
+      "template_family": "sql_tabular",
+      "auth": {
+        "strategy": "username_password",
+        "secret_fields": [
+          "user",
+          "password"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": false
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "sql_connector",
+        "reusable_components": [
+          "connection_testing",
+          "schema_introspection",
+          "virtual_tables",
+          "bulk_registration"
+        ],
+        "example_targets": [
+          "postgresql",
+          "mysql"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared SQL connector contract with validation, discovery and virtual tables."
+      ]
+    },
+    {
+      "connector_type": "oracle",
+      "display_name": "Oracle Database",
+      "template_family": "sql_tabular",
+      "auth": {
+        "strategy": "username_password",
+        "secret_fields": [
+          "user",
+          "password"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": false
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "sql_connector",
+        "reusable_components": [
+          "connection_testing",
+          "schema_introspection",
+          "virtual_tables",
+          "bulk_registration"
+        ],
+        "example_targets": [
+          "postgresql",
+          "mysql"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared SQL connector contract with validation, discovery and virtual tables."
+      ]
+    },
+    {
+      "connector_type": "odbc",
+      "display_name": "ODBC",
+      "template_family": "sql_driver_bridge",
+      "auth": {
+        "strategy": "dsn_or_connection_string",
+        "secret_fields": [
+          "username",
+          "password",
+          "connection_string"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "sql_driver_connector",
+        "reusable_components": [
+          "connection_testing",
+          "schema_introspection",
+          "virtual_tables",
+          "private_network_bridge"
+        ],
+        "example_targets": [
+          "odbc",
+          "jdbc"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Standardizes private-network SQL driver connectivity through DSNs, JDBC URLs, and remote bridge catalogs."
+      ]
+    },
+    {
+      "connector_type": "jdbc",
+      "display_name": "JDBC",
+      "template_family": "sql_driver_bridge",
+      "auth": {
+        "strategy": "dsn_or_connection_string",
+        "secret_fields": [
+          "username",
+          "password",
+          "connection_string"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "sql_driver_connector",
+        "reusable_components": [
+          "connection_testing",
+          "schema_introspection",
+          "virtual_tables",
+          "private_network_bridge"
+        ],
+        "example_targets": [
+          "odbc",
+          "jdbc"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Standardizes private-network SQL driver connectivity through DSNs, JDBC URLs, and remote bridge catalogs."
+      ]
+    },
+    {
+      "connector_type": "snowflake",
+      "display_name": "Snowflake",
+      "template_family": "warehouse_zero_copy",
+      "auth": {
+        "strategy": "service_account_or_key_pair",
+        "secret_fields": [
+          "credentials",
+          "private_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "warehouse_connector",
+        "reusable_components": [
+          "connection_testing",
+          "discovery",
+          "schema_introspection",
+          "zero_copy_query"
+        ],
+        "example_targets": [
+          "snowflake",
+          "bigquery"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Optimized for discovery plus virtual-table query flows."
+      ]
+    },
+    {
+      "connector_type": "bigquery",
+      "display_name": "BigQuery",
+      "template_family": "warehouse_zero_copy",
+      "auth": {
+        "strategy": "service_account_or_key_pair",
+        "secret_fields": [
+          "credentials",
+          "private_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "warehouse_connector",
+        "reusable_components": [
+          "connection_testing",
+          "discovery",
+          "schema_introspection",
+          "zero_copy_query"
+        ],
+        "example_targets": [
+          "snowflake",
+          "bigquery"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Optimized for discovery plus virtual-table query flows."
+      ]
+    },
+    {
+      "connector_type": "databricks",
+      "display_name": "Databricks",
+      "template_family": "warehouse_zero_copy",
+      "auth": {
+        "strategy": "service_account_or_key_pair",
+        "secret_fields": [
+          "credentials",
+          "private_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "warehouse_connector",
+        "reusable_components": [
+          "connection_testing",
+          "discovery",
+          "schema_introspection",
+          "zero_copy_query"
+        ],
+        "example_targets": [
+          "snowflake",
+          "bigquery"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Optimized for discovery plus virtual-table query flows."
+      ]
+    },
+    {
+      "connector_type": "s3",
+      "display_name": "Amazon S3",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "azure_blob",
+      "display_name": "Azure Blob",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "adls",
+      "display_name": "Azure Data Lake Storage",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "onelake",
+      "display_name": "Microsoft OneLake",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "gcs",
+      "display_name": "Google Cloud Storage",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "google_cloud_storage",
+      "display_name": "Google Cloud Storage",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "parquet",
+      "display_name": "Parquet file",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "csv",
+      "display_name": "CSV file",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "json",
+      "display_name": "JSON file",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "excel",
+      "display_name": "Excel file",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "sftp",
+      "display_name": "SFTP",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "generic",
+      "display_name": "Generic open-table catalog",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "open_table_catalog",
+      "display_name": "Open Table Catalog",
+      "template_family": "object_storage",
+      "auth": {
+        "strategy": "access_key",
+        "secret_fields": [
+          "access_key",
+          "secret_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "object_storage_connector",
+        "reusable_components": [
+          "path_discovery",
+          "schema_sampling",
+          "artifact_sync"
+        ],
+        "example_targets": [
+          "s3",
+          "parquet"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared object storage template for path discovery and artifact sync."
+      ]
+    },
+    {
+      "connector_type": "kafka",
+      "display_name": "Kafka",
+      "template_family": "event_bus",
+      "auth": {
+        "strategy": "brokers_and_credentials",
+        "secret_fields": [
+          "username",
+          "password"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "streaming",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": true,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "event_bus_connector",
+        "reusable_components": [
+          "topic_discovery",
+          "schema_projection",
+          "stream_materialization"
+        ],
+        "example_targets": [
+          "kafka",
+          "kinesis"
+        ]
+      },
+      "certification": {
+        "level": "certified",
+        "runtime_depth": "streaming_incremental_zero_copy",
+        "auth": "advanced",
+        "observability": "certified",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared event-bus template with topic discovery, zero-copy preview and sync."
+      ]
+    },
+    {
+      "connector_type": "kinesis",
+      "display_name": "Amazon Kinesis",
+      "template_family": "event_bus",
+      "auth": {
+        "strategy": "brokers_and_credentials",
+        "secret_fields": [
+          "username",
+          "password"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "streaming",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": true,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "event_bus_connector",
+        "reusable_components": [
+          "topic_discovery",
+          "schema_projection",
+          "stream_materialization"
+        ],
+        "example_targets": [
+          "kafka",
+          "kinesis"
+        ]
+      },
+      "certification": {
+        "level": "certified",
+        "runtime_depth": "streaming_incremental_zero_copy",
+        "auth": "advanced",
+        "observability": "certified",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared event-bus template with topic discovery, zero-copy preview and sync."
+      ]
+    },
+    {
+      "connector_type": "iot",
+      "display_name": "IoT / IIoT feed",
+      "template_family": "event_bus",
+      "auth": {
+        "strategy": "brokers_and_credentials",
+        "secret_fields": [
+          "username",
+          "password"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "streaming",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": true,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "event_bus_connector",
+        "reusable_components": [
+          "topic_discovery",
+          "schema_projection",
+          "stream_materialization"
+        ],
+        "example_targets": [
+          "kafka",
+          "kinesis"
+        ]
+      },
+      "certification": {
+        "level": "certified",
+        "runtime_depth": "streaming_incremental_zero_copy",
+        "auth": "advanced",
+        "observability": "certified",
+        "schema_evolution": "advanced",
+        "performance_posture": "advanced",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared event-bus template with topic discovery, zero-copy preview and sync."
+      ]
+    },
+    {
+      "connector_type": "salesforce",
+      "display_name": "Salesforce",
+      "template_family": "saas_api",
+      "auth": {
+        "strategy": "oauth_or_api_key",
+        "secret_fields": [
+          "client_id",
+          "client_secret"
+        ],
+        "supports_oauth": true,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "saas_connector",
+        "reusable_components": [
+          "oauth_bootstrap",
+          "discovery",
+          "normalized_sync"
+        ],
+        "example_targets": [
+          "salesforce",
+          "servicenow"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "baseline",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared SaaS adapter contract with discovery and normalized sync flows."
+      ]
+    },
+    {
+      "connector_type": "rest_api",
+      "display_name": "REST API",
+      "template_family": "saas_api",
+      "auth": {
+        "strategy": "oauth_or_api_key",
+        "secret_fields": [
+          "client_id",
+          "client_secret"
+        ],
+        "supports_oauth": true,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "saas_connector",
+        "reusable_components": [
+          "oauth_bootstrap",
+          "discovery",
+          "normalized_sync"
+        ],
+        "example_targets": [
+          "salesforce",
+          "servicenow"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "baseline",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared SaaS adapter contract with discovery and normalized sync flows."
+      ]
+    },
+    {
+      "connector_type": "graphql",
+      "display_name": "GraphQL",
+      "template_family": "saas_api",
+      "auth": {
+        "strategy": "oauth_or_api_key",
+        "secret_fields": [
+          "client_id",
+          "client_secret"
+        ],
+        "supports_oauth": true,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "saas_connector",
+        "reusable_components": [
+          "oauth_bootstrap",
+          "discovery",
+          "normalized_sync"
+        ],
+        "example_targets": [
+          "salesforce",
+          "servicenow"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "baseline",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared SaaS adapter contract with discovery and normalized sync flows."
+      ]
+    },
+    {
+      "connector_type": "ldap",
+      "display_name": "LDAP",
+      "template_family": "saas_api",
+      "auth": {
+        "strategy": "oauth_or_api_key",
+        "secret_fields": [
+          "client_id",
+          "client_secret"
+        ],
+        "supports_oauth": true,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "saas_connector",
+        "reusable_components": [
+          "oauth_bootstrap",
+          "discovery",
+          "normalized_sync"
+        ],
+        "example_targets": [
+          "salesforce",
+          "servicenow"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "baseline",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Shared SaaS adapter contract with discovery and normalized sync flows."
+      ]
+    },
+    {
+      "connector_type": "tableau",
+      "display_name": "Tableau",
+      "template_family": "bi_semantic",
+      "auth": {
+        "strategy": "oauth_bearer_or_service_principal",
+        "secret_fields": [
+          "client_id",
+          "client_secret",
+          "bearer_token"
+        ],
+        "supports_oauth": true,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "bi_connector",
+        "reusable_components": [
+          "workspace_discovery",
+          "semantic_model_projection",
+          "dashboard_extracts"
+        ],
+        "example_targets": [
+          "tableau",
+          "power_bi"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "baseline",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Bridges BI semantic layers into discovery, virtual-table previews, and scheduled extracts."
+      ]
+    },
+    {
+      "connector_type": "power_bi",
+      "display_name": "Power BI",
+      "template_family": "bi_semantic",
+      "auth": {
+        "strategy": "oauth_bearer_or_service_principal",
+        "secret_fields": [
+          "client_id",
+          "client_secret",
+          "bearer_token"
+        ],
+        "supports_oauth": true,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental",
+          "zero_copy"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": true
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "bi_connector",
+        "reusable_components": [
+          "workspace_discovery",
+          "semantic_model_projection",
+          "dashboard_extracts"
+        ],
+        "example_targets": [
+          "tableau",
+          "power_bi"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental_zero_copy",
+        "auth": "certified",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "baseline",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "Bridges BI semantic layers into discovery, virtual-table previews, and scheduled extracts."
+      ]
+    },
+    {
+      "connector_type": "sap",
+      "display_name": "SAP",
+      "template_family": "erp_api",
+      "auth": {
+        "strategy": "service_account_or_basic",
+        "secret_fields": [
+          "username",
+          "password",
+          "api_key"
+        ],
+        "supports_oauth": false,
+        "supports_private_network_agent": true
+      },
+      "testing": {
+        "supports_connection_testing": true,
+        "supports_discovery": true,
+        "supports_schema_introspection": true
+      },
+      "sync": {
+        "modes": [
+          "batch",
+          "incremental"
+        ],
+        "supports_incremental": true,
+        "supports_cdc": false,
+        "supports_zero_copy": false
+      },
+      "observability": {
+        "retries": true,
+        "status_tracking": true,
+        "source_signatures": true
+      },
+      "builder": {
+        "scaffold_kind": "erp_connector",
+        "reusable_components": [
+          "entity_discovery",
+          "odata_projection",
+          "lineage_templates"
+        ],
+        "example_targets": [
+          "sap"
+        ]
+      },
+      "certification": {
+        "level": "advanced",
+        "runtime_depth": "batch_incremental",
+        "auth": "advanced",
+        "observability": "advanced",
+        "schema_evolution": "baseline",
+        "performance_posture": "baseline",
+        "failure_handling": "advanced"
+      },
+      "notes": [
+        "ERP connector contract for entity discovery and normalized operational data sync."
+      ]
+    }
+  ],
+  "certification_summary": {
+    "certified_connectors": 3,
+    "advanced_connectors": 30,
+    "connectors_needing_hardening": 0,
+    "template_families": [
+      "bi_semantic",
+      "erp_api",
+      "event_bus",
+      "object_storage",
+      "saas_api",
+      "sql_driver_bridge",
+      "sql_tabular",
+      "warehouse_zero_copy"
+    ]
+  }
+}

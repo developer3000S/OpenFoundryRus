@@ -1,0 +1,114 @@
+{
+  "agent": {
+    "agent_url": "http://agent:8080",
+    "capabilities": {"jdbc": true},
+    "created_at": "2026-05-07T06:00:00Z",
+    "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "last_heartbeat_at": "2026-05-07T06:01:00Z",
+    "metadata": {"zone": "us-east-1"},
+    "name": "agent-a",
+    "owner_id": "22222222-2222-2222-2222-222222222222",
+    "status": "online",
+    "updated_at": "2026-05-07T06:02:00Z"
+  },
+  "credential": {
+    "created_at": "2026-05-07T06:03:00Z",
+    "fingerprint": "abc123",
+    "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    "kind": "api_key",
+    "source_id": "11111111-1111-1111-1111-111111111111"
+  },
+  "registration": {
+    "auto_sync": true,
+    "connection_id": "11111111-1111-1111-1111-111111111111",
+    "created_at": "2026-05-07T06:04:00Z",
+    "display_name": "Orders",
+    "id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+    "last_dataset_version": 7,
+    "last_source_signature": "sha256:abc",
+    "metadata": {"supports_zero_copy": true},
+    "registration_mode": "zero_copy",
+    "selector": "public.orders",
+    "source_kind": "table",
+    "target_dataset_id": "44444444-4444-4444-4444-444444444444",
+    "update_detection": true,
+    "updated_at": "2026-05-07T06:05:00Z"
+  },
+  "virtual_table_source_link": {
+    "auto_register_enabled": true,
+    "auto_register_interval_seconds": 300,
+    "auto_register_project_rid": "ri.project.main.project.x",
+    "auto_register_tag_filters": ["prod"],
+    "code_imports_enabled": false,
+    "created_at": "2026-05-07T06:06:00Z",
+    "export_controls": {"allowed_markings": ["public"]},
+    "iceberg_catalog_config": {"warehouse": "s3://bucket"},
+    "iceberg_catalog_kind": "object_storage",
+    "provider": "AMAZON_S3",
+    "source_rid": "ri.source.main.source.x",
+    "updated_at": "2026-05-07T06:07:00Z",
+    "virtual_tables_enabled": true
+  },
+  "capabilities": {
+    "append_only_supported": true,
+    "compute_pushdown": "ibis",
+    "foundry_compute": {
+      "pipeline_builder_single_node": false,
+      "pipeline_builder_spark": true,
+      "python_single_node": true,
+      "python_spark": true
+    },
+    "incremental": true,
+    "read": true,
+    "snapshot_supported": true,
+    "versioning": true,
+    "write": false
+  },
+  "auto_register_run": {
+    "added": 4,
+    "errors": [],
+    "finished_at": "2026-05-07T06:09:00Z",
+    "id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+    "orphaned": 0,
+    "source_rid": "ri.source.main.source.x",
+    "started_at": "2026-05-07T06:08:00Z",
+    "status": "completed",
+    "updated": 1
+  },
+  "poll_result": {
+    "change_detected": true,
+    "event_emitted": true,
+    "latency_ms": 42,
+    "observed_version": "42",
+    "outcome": "changed",
+    "previous_version": "41",
+    "virtual_table_rid": "ri.virtual-table.main.table.x"
+  },
+  "iceberg_config": {
+    "defaults": {"warehouse": "openfoundry"},
+    "overrides": {}
+  },
+  "webhook_response": {
+    "output_parameters": {"id": 123},
+    "response": {"ok": true},
+    "status": 200
+  },
+  "dev_auth": {
+    "access_token": "access",
+    "expires_in": 3600,
+    "refresh_token": "refresh",
+    "status": "ok",
+    "token_type": "Bearer"
+  },
+  "outbox_payload": {
+    "aggregate": "connection",
+    "aggregate_id": "11111111-1111-1111-1111-111111111111",
+    "connector_type": "postgresql",
+    "event_type": "connection.changed",
+    "name": "warehouse",
+    "occurred_at": "2026-05-07T06:11:00Z",
+    "payload": {"status": "active"},
+    "status": "active",
+    "version": "1"
+  }
+}

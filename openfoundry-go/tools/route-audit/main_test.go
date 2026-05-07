@@ -123,5 +123,14 @@ func listActions(w http.ResponseWriter, r *http.Request) {}
 	}
 	if routes[0].Path != "/api/v1/ontology/actions" {
 		t.Fatalf("nested helper prefix was not propagated: %#v", routes[0])
+func TestConnectorManagementRustRouteKeyCanonicalizesAPIV1Closure(t *testing.T) {
+	r := Route{Service: "connector-management-service", Side: "rust", Method: "GET", Path: "/data-connection/catalog"}
+	if got := routeKey(r); got != "GET /api/v1/data-connection/catalog" {
+		t.Fatalf("routeKey mismatch: %q", got)
+	}
+
+	health := Route{Service: "connector-management-service", Side: "rust", Method: "GET", Path: "/health"}
+	if got := routeKey(health); got != "GET /health" {
+		t.Fatalf("health routeKey mismatch: %q", got)
 	}
 }

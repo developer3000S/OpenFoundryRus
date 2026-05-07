@@ -6,19 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
-
-	kafka "github.com/segmentio/kafka-go"
 )
-
-// KafkaReader is the kafka-go reader surface used by the indexer
-// consumer. Tests can still inject fakes, while integration tests use
-// a real *kafka.Reader and broker.
-type KafkaReader interface {
-	FetchMessage(ctx context.Context) (kafka.Message, error)
-	CommitMessages(ctx context.Context, msgs ...kafka.Message) error
-	Close() error
-}
 
 // IndexBackend is the side-effect boundary for one ontology indexer
 // event. Production implementations can fan out by topic/event_type to
@@ -27,31 +15,14 @@ type IndexBackend interface {
 	Handle(ctx context.Context, topic string, event json.RawMessage) error
 }
 
-// Consumer reads ontology change events, invokes the backend, and
-// commits offsets only after durable backend processing. Malformed JSON
-// is committed and skipped so one poison event cannot wedge a
-// partition.
+// Consumer reads ontology change events through the package KafkaMessage
+// abstraction, invokes the backend, and commits offsets only after durable
+// backend processing. Malformed JSON is committed and skipped so one poison
+// event cannot wedge a partition.
 type Consumer struct {
 	Reader  KafkaReader
 	Backend IndexBackend
 	Log     *slog.Logger
-}
-
-// NewKafkaReader constructs the concrete kafka-go reader used by the
-// ontology indexer. CommitInterval=0 disables auto commit.
-func NewKafkaReader(brokers []string, groupID string, topics []string) *kafka.Reader {
-	if groupID == "" {
-		groupID = ConsumerGroup
-	}
-	return kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        brokers,
-		GroupID:        groupID,
-		GroupTopics:    topics,
-		CommitInterval: 0,
-		MinBytes:       1,
-		MaxBytes:       10e6,
-		MaxWait:        time.Second,
-	})
 }
 
 // Run consumes until ctx is canceled. Non-cancellation errors return so
