@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -553,4 +554,82 @@ func TestHTTPMediaSetRuntimeDispatchesAcceptedFiles(t *testing.T) {
 	require.Equal(t, uint32(1), report.Stats.Accepted)
 	require.Equal(t, uint32(2), report.Stats.Skipped)
 	require.Equal(t, []string{"/media-sets/ri.foundry.main.media_set.x/items/upload-url"}, seen)
+}
+
+func TestCatalogSurfaceMatchesGoldenFixtures(t *testing.T) {
+	t.Parallel()
+	h := &handlers.Handlers{}
+	cases := []struct {
+		name   string
+		handle http.HandlerFunc
+		golden string
+	}{
+		{name: "catalog", handle: h.GetConnectorCatalog, golden: "testdata/catalog.golden.json"},
+		{name: "contracts", handle: h.GetConnectorContracts, golden: "testdata/contracts.golden.json"},
+		{name: "streaming_sources", handle: h.ListStreamingSources, golden: "testdata/streaming_sources.golden.json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			tc.handle(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+			require.Equal(t, http.StatusOK, rec.Code)
+			assertJSONGolden(t, tc.golden, rec.Body.Bytes())
+		})
+	}
+}
+
+func TestCatalogIncludesAllRustConnectorModules(t *testing.T) {
+	t.Parallel()
+	rec := httptest.NewRecorder()
+	(&handlers.Handlers{}).GetConnectorContracts(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var catalog models.ConnectorContractCatalog
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &catalog))
+	byType := map[string]models.ConnectorContractProfile{}
+	for _, connector := range catalog.Connectors {
+		byType[connector.ConnectorType] = connector
+	}
+	for _, connectorType := range []string{"azure_blob", "bigquery", "csv", "databricks", "excel", "gcs", "generic", "graphql", "iot", "jdbc", "json", "kafka", "kinesis", "ldap", "mssql", "mysql", "odbc", "onelake", "open_table_catalog", "oracle", "parquet", "postgresql", "power_bi", "rest_api", "s3", "salesforce", "sap", "sftp", "snowflake", "tableau"} {
+		require.Contains(t, byType, connectorType)
+	}
+}
+
+func TestConnectionCapabilitiesCombineContractConfigAndPolicy(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	store.connections[0].ConnectorType = "snowflake"
+	store.connections[0].Config = json.RawMessage(`{"account":"acct","private_key":"pk","cursor_field":"updated_at","zero_copy":true}`)
+	h := &handlers.Handlers{Repo: store, Config: handlers.RuntimeConfig{AllowedEgressHosts: []string{"snowflake.example.com"}}}
+
+	r := chi.NewRouter()
+	r.Get("/api/v1/data-connection/sources/{id}/capabilities", h.GetConnectionCapabilities)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/data-connection/sources/"+store.connections[0].ID.String()+"/capabilities", nil)
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got models.ConnectionCapabilityResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, "snowflake", got.ConnectorType)
+	require.Equal(t, "warehouse_zero_copy", got.Contract.TemplateFamily)
+	require.True(t, got.Capabilities.SupportsZeroCopy)
+	require.True(t, got.Capabilities.SupportsIncremental)
+	require.True(t, got.Capabilities.ConfigInferred.HasPrivateKey)
+	require.True(t, got.Capabilities.ConfigInferred.HasIncrementalCursor)
+	require.True(t, got.Capabilities.PrivateNetworkEgressAllowed)
+	require.False(t, got.Capabilities.RequiresPrivateNetworkAgent)
+	require.Contains(t, got.Capabilities.Workers, "agent")
+	require.Contains(t, got.Capabilities.ConfigKeys, "private_key")
+}
+
+func assertJSONGolden(t *testing.T, golden string, got []byte) {
+	t.Helper()
+	want, err := os.ReadFile(golden)
+	require.NoError(t, err)
+	var wantJSON any
+	var gotJSON any
+	require.NoError(t, json.Unmarshal(want, &wantJSON))
+	require.NoError(t, json.Unmarshal(got, &gotJSON))
+	assert.Equal(t, wantJSON, gotJSON)
 }

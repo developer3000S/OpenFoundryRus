@@ -40,9 +40,28 @@ type Store interface {
 	GetVirtualTable(ctx context.Context, rid string, ownerID string) (*models.VirtualTable, error)
 }
 
+type RuntimeConfig struct {
+	DatasetServiceURL            string
+	PipelineServiceURL           string
+	OntologyServiceURL           string
+	IngestionReplicationGRPCURL  string
+	NetworkBoundaryServiceURL    string
+	SyncPollIntervalSecs         uint64
+	AllowPrivateNetworkEgress    bool
+	AllowedEgressHosts           []string
+	AgentStaleAfterSecs          uint64
+	CredentialEncryptionKey      string
+	CredentialKey                [32]byte
+	SecretManagerURL             string
+	OutboxEnabled                bool
+	AutoRegistrationIntervalSecs uint64
+	VendedCredentialsTTLSeconds  int64
+}
+
 type Handlers struct {
 	Repo            Store
 	MediaSetRuntime MediaSetRuntime
+	Config          RuntimeConfig
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -53,6 +72,222 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeJSONErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+type routeError struct {
+	Error   string `json:"error"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func writeRoutePending(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, routeError{Error: code, Code: code, Message: message})
+}
+
+func routeUUIDParam(r *http.Request, names ...string) (uuid.UUID, string, error) {
+	for _, name := range names {
+		if raw := chi.URLParam(r, name); raw != "" {
+			id, err := uuid.Parse(raw)
+			return id, name, err
+		}
+	}
+	return uuid.Nil, names[0], errors.New("missing route parameter")
+}
+
+func (h *Handlers) notImplemented(w http.ResponseWriter, r *http.Request, code string, requireAuth bool) {
+	if requireAuth {
+		if _, ok := requireClaims(w, r); !ok {
+			return
+		}
+	}
+	writeRoutePending(w, http.StatusNotImplemented, code, "route mounted for Rust parity; implementation pending")
+}
+
+func (h *Handlers) GetConnectorCatalog(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, models.BuildGalleryCatalog())
+}
+
+func (h *Handlers) GetConnectorContracts(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, models.BuildConnectorContractCatalog())
+}
+
+func (h *Handlers) ListStreamingSources(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string][]models.StreamingSourceContract{"data": models.StreamingSourceContracts()})
+}
+
+func (h *Handlers) TestConnection(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "connection_test_pending", true)
+}
+
+func (h *Handlers) GetConnectionCapabilities(w http.ResponseWriter, r *http.Request) {
+	id, _, err := routeUUIDParam(r, "id", "source_id")
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if h.Repo == nil {
+		writeRoutePending(w, http.StatusServiceUnavailable, "repository_unavailable", "connection repository is not configured")
+		return
+	}
+	connection, err := h.Repo.GetConnection(r.Context(), id)
+	if err != nil {
+		slog.Error("connection capability lookup failed", "error", err)
+		writeJSONErr(w, http.StatusInternalServerError, "lookup failed")
+		return
+	}
+	if connection == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	contract, ok := models.ConnectorProfile(connection.ConnectorType)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no connector contract available for " + connection.ConnectorType})
+		return
+	}
+	capabilities := h.connectionEffectiveCapabilities(*connection, contract)
+	writeJSON(w, http.StatusOK, models.ConnectionCapabilityResponse{ConnectionID: connection.ID, ConnectorType: connection.ConnectorType, Status: connection.Status, Contract: contract, Capabilities: capabilities})
+}
+
+func (h *Handlers) connectionEffectiveCapabilities(connection models.Connection, contract models.ConnectorContractProfile) models.ConnectionEffectiveCapabilities {
+	configKeys, inferred := models.ConfigKeys(connection.Config)
+	workers := []string{"foundry"}
+	if contract.Auth.SupportsPrivateNetworkAgent {
+		workers = append(workers, "agent")
+	}
+	warnings := []string{}
+	privateAllowed := h.Config.AllowPrivateNetworkEgress
+	if len(h.Config.AllowedEgressHosts) > 0 {
+		privateAllowed = true
+	}
+	requiresAgent := contract.Auth.SupportsPrivateNetworkAgent && !privateAllowed
+	if requiresAgent {
+		warnings = append(warnings, "private network egress is disabled; route through a connector agent or allow egress for this source")
+	}
+	return models.ConnectionEffectiveCapabilities{
+		ConnectionID:                connection.ID,
+		ConnectorType:               connection.ConnectorType,
+		Status:                      connection.Status,
+		Modes:                       append([]string(nil), contract.Sync.Modes...),
+		Workers:                     workers,
+		SupportsConnectionTesting:   contract.Testing.SupportsConnectionTesting,
+		SupportsDiscovery:           contract.Testing.SupportsDiscovery,
+		SupportsSchemaIntrospection: contract.Testing.SupportsSchemaIntrospection,
+		SupportsIncremental:         contract.Sync.SupportsIncremental || inferred.HasIncrementalCursor,
+		SupportsCDC:                 contract.Sync.SupportsCDC && (inferred.HasCDCSelector || connection.ConnectorType == "kafka" || connection.ConnectorType == "kinesis" || connection.ConnectorType == "iot"),
+		SupportsZeroCopy:            contract.Sync.SupportsZeroCopy || inferred.RequestsZeroCopy,
+		SupportsPrivateNetworkAgent: contract.Auth.SupportsPrivateNetworkAgent,
+		RequiresPrivateNetworkAgent: requiresAgent,
+		PrivateNetworkEgressAllowed: privateAllowed,
+		AllowedEgressHosts:          append([]string(nil), h.Config.AllowedEgressHosts...),
+		ConfigKeys:                  configKeys,
+		ConfigInferred:              inferred,
+		PolicyWarnings:              warnings,
+		FoundryCompute:              models.FoundryCompute{PythonSingleNode: true, PythonSpark: true, PipelineBuilderSingleNode: true, PipelineBuilderSpark: true},
+	}
+}
+
+func (h *Handlers) ListCredentials(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "credentials_pending", true)
+}
+
+func (h *Handlers) SetCredential(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "credentials_pending", true)
+}
+
+func (h *Handlers) ListSourcePolicies(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "egress_policies_pending", true)
+}
+
+func (h *Handlers) AttachPolicy(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "egress_policies_pending", true)
+}
+
+func (h *Handlers) DetachPolicy(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "egress_policies_pending", true)
+}
+
+func (h *Handlers) ListRuns(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "sync_runs_pending", true)
+}
+
+func (h *Handlers) ListRegistrations(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "registrations_pending", true)
+}
+
+func (h *Handlers) DiscoverRegistrations(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "registration_discovery_pending", true)
+}
+
+func (h *Handlers) BulkRegister(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "registration_bulk_pending", true)
+}
+
+func (h *Handlers) BulkRegisterPreview(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "registration_bulk_preview_pending", true)
+}
+
+func (h *Handlers) AutoRegister(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "auto_registration_pending", true)
+}
+
+func (h *Handlers) UpdateAutoRegistration(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "auto_registration_pending", true)
+}
+
+func (h *Handlers) AutoRegisterStatus(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "auto_registration_status_pending", true)
+}
+
+func (h *Handlers) DeleteRegistration(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "registration_delete_pending", true)
+}
+
+func (h *Handlers) QueryRegistration(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "registration_query_pending", true)
+}
+
+func (h *Handlers) QueryRegistrationArrow(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "registration_query_arrow_pending", true)
+}
+
+func (h *Handlers) InvokeWebhook(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "webhook_invoke_pending", true)
+}
+
+func (h *Handlers) DevAuthLogin(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "dev_auth_pending", false)
+}
+
+func (h *Handlers) DevAuthRefresh(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "dev_auth_pending", false)
+}
+
+func (h *Handlers) DevAuthBootstrapStatus(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "dev_auth_pending", false)
+}
+
+func (h *Handlers) DevAuthMe(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "dev_auth_me_pending", true)
+}
+
+func (h *Handlers) IcebergGetConfig(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "iceberg_catalog_pending", true)
+}
+
+func (h *Handlers) IcebergListNamespaces(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "iceberg_catalog_pending", true)
+}
+
+func (h *Handlers) IcebergGetNamespace(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "iceberg_catalog_pending", true)
+}
+
+func (h *Handlers) IcebergListTables(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "iceberg_catalog_pending", true)
+}
+
+func (h *Handlers) IcebergLoadTable(w http.ResponseWriter, r *http.Request) {
+	h.notImplemented(w, r, "iceberg_catalog_pending", true)
 }
 
 func (h *Handlers) ListConnections(w http.ResponseWriter, r *http.Request) {
@@ -214,9 +449,9 @@ func (h *Handlers) GetSyncJob(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, err := uuid.Parse(chi.URLParam(r, "sync_id"))
+	id, param, err := routeUUIDParam(r, "sync_id", "id")
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid sync_id")
+		writeJSONErr(w, http.StatusBadRequest, "invalid "+param)
 		return
 	}
 	v, err := h.Repo.GetSyncJob(r.Context(), id, claims.Sub)
@@ -263,9 +498,9 @@ func (h *Handlers) UpdateSyncJob(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, err := uuid.Parse(chi.URLParam(r, "sync_id"))
+	id, param, err := routeUUIDParam(r, "sync_id", "id")
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid sync_id")
+		writeJSONErr(w, http.StatusBadRequest, "invalid "+param)
 		return
 	}
 	var body models.UpdateSyncJobRequest
@@ -290,9 +525,9 @@ func (h *Handlers) RunSyncJob(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, err := uuid.Parse(chi.URLParam(r, "sync_id"))
+	id, param, err := routeUUIDParam(r, "sync_id", "id")
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid sync_id")
+		writeJSONErr(w, http.StatusBadRequest, "invalid "+param)
 		return
 	}
 	v, err := h.Repo.RunSyncJob(r.Context(), id, claims.Sub)
@@ -430,9 +665,9 @@ func (h *Handlers) GetMediaSetSync(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, err := uuid.Parse(chi.URLParam(r, "sync_id"))
+	id, param, err := routeUUIDParam(r, "sync_id", "id")
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid sync_id")
+		writeJSONErr(w, http.StatusBadRequest, "invalid "+param)
 		return
 	}
 	v, err := h.Repo.GetMediaSetSync(r.Context(), id, claims.Sub)
@@ -484,9 +719,9 @@ func (h *Handlers) UpdateMediaSetSync(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, err := uuid.Parse(chi.URLParam(r, "sync_id"))
+	id, param, err := routeUUIDParam(r, "sync_id", "id")
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid sync_id")
+		writeJSONErr(w, http.StatusBadRequest, "invalid "+param)
 		return
 	}
 	var body models.UpdateMediaSetSyncRequest
@@ -519,9 +754,9 @@ func (h *Handlers) RunMediaSetSync(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, err := uuid.Parse(chi.URLParam(r, "sync_id"))
+	id, param, err := routeUUIDParam(r, "sync_id", "id")
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid sync_id")
+		writeJSONErr(w, http.StatusBadRequest, "invalid "+param)
 		return
 	}
 	var body models.RunMediaSetSyncRequest

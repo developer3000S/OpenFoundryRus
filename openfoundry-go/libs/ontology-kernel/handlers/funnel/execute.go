@@ -73,7 +73,7 @@ func executeSourceRun(
 	source *models.OntologyFunnelSource,
 	body *models.TriggerOntologyFunnelRunRequest,
 ) (funnelExecutionOutcome, error) {
-	objectType, err := domain.LoadObjectType(ctx, state.DB, source.ObjectTypeID)
+	objectType, err := loadFunnelObjectType(ctx, state, source.ObjectTypeID)
 	if err != nil {
 		return funnelExecutionOutcome{}, fmt.Errorf("failed to load object type: %w", err)
 	}
@@ -85,7 +85,7 @@ func executeSourceRun(
 	}
 	primaryKeyProperty := *objectType.PrimaryKeyProperty
 
-	defs, err := domain.LoadEffectiveProperties(ctx, state.DB, source.ObjectTypeID)
+	defs, err := loadFunnelEffectiveProperties(ctx, state, source.ObjectTypeID)
 	if err != nil {
 		return funnelExecutionOutcome{}, fmt.Errorf("failed to load object type properties: %w", err)
 	}

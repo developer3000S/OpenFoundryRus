@@ -1,0 +1,482 @@
+{
+  "connectors": [
+    {
+      "type": "postgresql",
+      "name": "PostgreSQL",
+      "description": "Shared SQL connector contract with validation, discovery and virtual tables.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry"
+      ],
+      "available": true
+    },
+    {
+      "type": "postgres",
+      "name": "PostgreSQL",
+      "description": "Shared SQL connector contract with validation, discovery and virtual tables.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry"
+      ],
+      "available": false
+    },
+    {
+      "type": "mysql",
+      "name": "MySQL",
+      "description": "Shared SQL connector contract with validation, discovery and virtual tables.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry"
+      ],
+      "available": true
+    },
+    {
+      "type": "mssql",
+      "name": "Microsoft SQL Server",
+      "description": "Shared SQL connector contract with validation, discovery and virtual tables.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry"
+      ],
+      "available": false
+    },
+    {
+      "type": "oracle",
+      "name": "Oracle Database",
+      "description": "Shared SQL connector contract with validation, discovery and virtual tables.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry"
+      ],
+      "available": false
+    },
+    {
+      "type": "odbc",
+      "name": "ODBC",
+      "description": "Standardizes private-network SQL driver connectivity through DSNs, JDBC URLs, and remote bridge catalogs.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": false
+    },
+    {
+      "type": "jdbc",
+      "name": "JDBC",
+      "description": "Standardizes private-network SQL driver connectivity through DSNs, JDBC URLs, and remote bridge catalogs.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": false
+    },
+    {
+      "type": "snowflake",
+      "name": "Snowflake",
+      "description": "Optimized for discovery plus virtual-table query flows.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "bigquery",
+      "name": "BigQuery",
+      "description": "Optimized for discovery plus virtual-table query flows.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "databricks",
+      "name": "Databricks",
+      "description": "Optimized for discovery plus virtual-table query flows.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "s3",
+      "name": "Amazon S3",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "azure_blob",
+      "name": "Azure Blob",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "adls",
+      "name": "Azure Data Lake Storage",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "onelake",
+      "name": "Microsoft OneLake",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "gcs",
+      "name": "Google Cloud Storage",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "google_cloud_storage",
+      "name": "Google Cloud Storage",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "parquet",
+      "name": "Parquet file",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "csv",
+      "name": "CSV file",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "json",
+      "name": "JSON file",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "excel",
+      "name": "Excel file",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": false
+    },
+    {
+      "type": "sftp",
+      "name": "SFTP",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": false
+    },
+    {
+      "type": "generic",
+      "name": "Generic open-table catalog",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "open_table_catalog",
+      "name": "Open Table Catalog",
+      "description": "Shared object storage template for path discovery and artifact sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": false
+    },
+    {
+      "type": "kafka",
+      "name": "Kafka",
+      "description": "Shared event-bus template with topic discovery, zero-copy preview and sync.",
+      "capabilities": [
+        "batch_sync",
+        "cdc_sync",
+        "exploration",
+        "streaming_sync",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "kinesis",
+      "name": "Amazon Kinesis",
+      "description": "Shared event-bus template with topic discovery, zero-copy preview and sync.",
+      "capabilities": [
+        "batch_sync",
+        "cdc_sync",
+        "exploration",
+        "streaming_sync",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "iot",
+      "name": "IoT / IIoT feed",
+      "description": "Shared event-bus template with topic discovery, zero-copy preview and sync.",
+      "capabilities": [
+        "batch_sync",
+        "cdc_sync",
+        "exploration",
+        "streaming_sync",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "salesforce",
+      "name": "Salesforce",
+      "description": "Shared SaaS adapter contract with discovery and normalized sync flows.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": false
+    },
+    {
+      "type": "rest_api",
+      "name": "REST API",
+      "description": "Shared SaaS adapter contract with discovery and normalized sync flows.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    },
+    {
+      "type": "graphql",
+      "name": "GraphQL",
+      "description": "Shared SaaS adapter contract with discovery and normalized sync flows.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": false
+    },
+    {
+      "type": "ldap",
+      "name": "LDAP",
+      "description": "Shared SaaS adapter contract with discovery and normalized sync flows.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": false
+    },
+    {
+      "type": "tableau",
+      "name": "Tableau",
+      "description": "Bridges BI semantic layers into discovery, virtual-table previews, and scheduled extracts.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": false
+    },
+    {
+      "type": "power_bi",
+      "name": "Power BI",
+      "description": "Bridges BI semantic layers into discovery, virtual-table previews, and scheduled extracts.",
+      "capabilities": [
+        "batch_sync",
+        "exploration",
+        "virtual_table"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": false
+    },
+    {
+      "type": "sap",
+      "name": "SAP",
+      "description": "ERP connector contract for entity discovery and normalized operational data sync.",
+      "capabilities": [
+        "batch_sync",
+        "exploration"
+      ],
+      "workers": [
+        "foundry",
+        "agent"
+      ],
+      "available": true
+    }
+  ]
+}

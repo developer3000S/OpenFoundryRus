@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -190,10 +191,101 @@ func TestSimulateFunctionPackageRuntimeMissingRecordsFailure(t *testing.T) {
 	rec := httptest.NewRecorder()
 	SimulateFunctionPackageWithDeps(state, functionPackageSimulationDeps{Loader: fakeFunctionPackageLoader{pkg: pkg}, Recorder: recorder}).ServeHTTP(rec, simulateRequest(t, pkg.ID, uuid.New()))
 
-	if rec.Code != http.StatusNotImplemented || !strings.Contains(rec.Body.String(), "python_runtime_not_wired") {
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "python_runtime_not_wired") {
 		t.Fatalf("unexpected missing-runtime response: status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	if len(recorder.runs) != 1 || recorder.runs[0].status != "failure" || recorder.runs[0].errorMessage == nil || !strings.Contains(*recorder.runs[0].errorMessage, "python runtime not wired") {
 		t.Fatalf("missing-runtime failure run not recorded correctly: %+v", recorder.runs)
 	}
+}
+
+func TestFunctionAuthoringSurfaceFixture(t *testing.T) {
+	rec := httptest.NewRecorder()
+	GetFunctionAuthoringSurface().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/functions/authoring-surface", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"templates", "sdk_packages", "cli_commands", "python"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("authoring surface missing %q: %s", want, rec.Body.String())
+		}
+	}
+}
+
+func TestFunctionPackageCRUDValidateRunsMetricsWithInMemoryStores(t *testing.T) {
+	state := testFunctionState(&fakePythonInlineRuntime{result: []byte(`{"ok":true}`)})
+	owner := uuid.New()
+	createBody := `{"name":"score_case","runtime":"python","source":"result = {'ok': True}","capabilities":{"allow_ontology_read":true,"timeout_seconds":7,"max_source_bytes":1024}}`
+	createRec := httptest.NewRecorder()
+	CreateFunctionPackage(state).ServeHTTP(createRec, functionRequest(http.MethodPost, "/functions", createBody, nil, owner))
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRec.Code, createRec.Body.String())
+	}
+	var pkg models.FunctionPackage
+	if err := json.Unmarshal(createRec.Body.Bytes(), &pkg); err != nil {
+		t.Fatalf("created package json: %v", err)
+	}
+
+	listRec := httptest.NewRecorder()
+	ListFunctionPackages(state).ServeHTTP(listRec, functionRequest(http.MethodGet, "/functions?runtime=python", ``, nil, owner))
+	if listRec.Code != http.StatusOK || !strings.Contains(listRec.Body.String(), `"total":1`) {
+		t.Fatalf("list status=%d body=%s", listRec.Code, listRec.Body.String())
+	}
+
+	validateRec := httptest.NewRecorder()
+	ValidateFunctionPackage(state).ServeHTTP(validateRec, functionRequest(http.MethodPost, "/functions/"+pkg.ID.String()+"/validate", `{"parameters":{"x":1}}`, map[string]string{"id": pkg.ID.String()}, owner))
+	if validateRec.Code != http.StatusOK || !strings.Contains(validateRec.Body.String(), `"valid":true`) {
+		t.Fatalf("validate status=%d body=%s", validateRec.Code, validateRec.Body.String())
+	}
+
+	missingValidate := httptest.NewRecorder()
+	ValidateFunctionPackage(state).ServeHTTP(missingValidate, functionRequest(http.MethodPost, "/functions/"+uuid.New().String()+"/validate", `{}`, map[string]string{"id": uuid.New().String()}, owner))
+	if missingValidate.Code != http.StatusNotFound {
+		t.Fatalf("missing validate status=%d body=%s", missingValidate.Code, missingValidate.Body.String())
+	}
+
+	simRec := httptest.NewRecorder()
+	objectTypeID := uuid.New()
+	SimulateFunctionPackage(state).ServeHTTP(simRec, functionRequest(http.MethodPost, "/functions/"+pkg.ID.String()+"/simulate", fmt.Sprintf(`{"object_type_id":"%s","parameters":{"x":1}}`, objectTypeID), map[string]string{"id": pkg.ID.String()}, owner))
+	if simRec.Code != http.StatusOK || !strings.Contains(simRec.Body.String(), `"ok":true`) {
+		t.Fatalf("simulate status=%d body=%s", simRec.Code, simRec.Body.String())
+	}
+
+	runsRec := httptest.NewRecorder()
+	ListFunctionPackageRuns(state).ServeHTTP(runsRec, functionRequest(http.MethodGet, "/functions/"+pkg.ID.String()+"/runs", ``, map[string]string{"id": pkg.ID.String()}, owner))
+	if runsRec.Code != http.StatusOK || !strings.Contains(runsRec.Body.String(), `"total":1`) {
+		t.Fatalf("runs status=%d body=%s", runsRec.Code, runsRec.Body.String())
+	}
+
+	metricsRec := httptest.NewRecorder()
+	GetFunctionPackageMetrics(state).ServeHTTP(metricsRec, functionRequest(http.MethodGet, "/functions/"+pkg.ID.String()+"/metrics", ``, map[string]string{"id": pkg.ID.String()}, owner))
+	if metricsRec.Code != http.StatusOK || !strings.Contains(metricsRec.Body.String(), `"total_runs":1`) || !strings.Contains(metricsRec.Body.String(), `"successful_runs":1`) {
+		t.Fatalf("metrics status=%d body=%s", metricsRec.Code, metricsRec.Body.String())
+	}
+
+	deleteRec := httptest.NewRecorder()
+	DeleteFunctionPackage(state).ServeHTTP(deleteRec, functionRequest(http.MethodDelete, "/functions/"+pkg.ID.String(), ``, map[string]string{"id": pkg.ID.String()}, owner))
+	if deleteRec.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+}
+
+func TestCreateFunctionPackageValidationFailure(t *testing.T) {
+	state := testFunctionState(nil)
+	rec := httptest.NewRecorder()
+	CreateFunctionPackage(state).ServeHTTP(rec, functionRequest(http.MethodPost, "/functions", `{"name":"bad","runtime":"python","source":""}`, nil, uuid.New()))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "requires a non-empty source") {
+		t.Fatalf("validation failure status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func functionRequest(method, path, body string, params map[string]string, sub uuid.UUID) *http.Request {
+	rctx := chi.NewRouteContext()
+	for k, v := range params {
+		rctx.URLParams.Add(k, v)
+	}
+	claims := &authmw.Claims{Sub: sub, Email: "fn@example.com", Roles: []string{"admin"}}
+	ctx := authmw.ContextWithClaims(context.Background(), claims)
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
+	return httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
 }

@@ -70,9 +70,9 @@ func FailureTypeFromHTTPStatus(status int) FailureType {
 
 // ActionMetrics mirrors `struct ActionMetrics`.
 type ActionMetrics struct {
-	ExecutionsTotal           *prometheus.CounterVec
-	ExecutionDurationSeconds  *prometheus.HistogramVec
-	FailuresTotal             *prometheus.CounterVec
+	ExecutionsTotal          *prometheus.CounterVec
+	ExecutionDurationSeconds *prometheus.HistogramVec
+	FailuresTotal            *prometheus.CounterVec
 }
 
 // RecordSuccess mirrors `ActionMetrics::record_success`.
@@ -123,7 +123,7 @@ func newActionMetrics() *ActionMetrics {
 			prometheus.CounterOpts{
 				Name: "action_failures_total",
 				Help: "Failed ontology action executions, partitioned by failure_type",
-				},
+			},
 			[]string{"action_id", "failure_type"},
 		),
 	}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -19,6 +20,7 @@ import (
 	ontologykernel "github.com/openfoundry/openfoundry-go/libs/ontology-kernel"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/domain"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/models"
+	storage "github.com/openfoundry/openfoundry-go/libs/storage-abstraction"
 )
 
 func TestSplitActionConfigLegacyConfig(t *testing.T) {
@@ -237,5 +239,177 @@ func newTestAction() models.ActionType {
 		ID:            uuid.New(),
 		Name:          "Approve",
 		OperationKind: "update_object",
+	}
+}
+
+func TestEmitActionAuditEventReturnsHTTPAndTimeoutErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+	}{
+		{name: "4xx", status: http.StatusBadRequest},
+		{name: "5xx", status: http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(`nope`))
+			}))
+			defer srv.Close()
+			state := &ontologykernel.AppState{JWTConfig: authmw.NewJWTConfig("test-secret"), AuditServiceURL: srv.URL, HTTPClient: srv.Client()}
+			err := emitActionAuditEvent(context.Background(), state, &authmw.Claims{Sub: uuid.New()}, newTestAction(), nil, nil, "failure", "high", "bad", nil, nil, nil, nil)
+			if err == nil || !strings.Contains(err.Error(), "audit service returned") {
+				t.Fatalf("expected audit status error, got %v", err)
+			}
+		})
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(50 * time.Millisecond):
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	state := &ontologykernel.AppState{JWTConfig: authmw.NewJWTConfig("test-secret"), AuditServiceURL: srv.URL, HTTPClient: &http.Client{Timeout: 5 * time.Millisecond}}
+	err := emitActionAuditEvent(context.Background(), state, &authmw.Claims{Sub: uuid.New()}, newTestAction(), nil, nil, "failure", "high", "slow", nil, nil, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "failed to send audit event") {
+		t.Fatalf("expected audit timeout error, got %v", err)
+	}
+}
+
+func TestSendNotificationRequestSuccessHTTPAndTimeoutErrors(t *testing.T) {
+	var seenAuth string
+	success := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("authorization")
+		if r.URL.Path != "/internal/notifications" {
+			t.Fatalf("path drift: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer success.Close()
+	state := &ontologykernel.AppState{NotificationServiceURL: success.URL, HTTPClient: success.Client()}
+	if err := sendNotificationRequest(context.Background(), state, internalSendNotificationRequest{Title: "hi", Body: "there"}); err != nil {
+		t.Fatalf("success notification returned error: %v", err)
+	}
+	if seenAuth != "" {
+		t.Fatalf("Rust parity drift: internal notification requests must not set auth header, got %q", seenAuth)
+	}
+
+	statusSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`down`))
+	}))
+	defer statusSrv.Close()
+	state = &ontologykernel.AppState{NotificationServiceURL: statusSrv.URL, HTTPClient: statusSrv.Client()}
+	if err := sendNotificationRequest(context.Background(), state, internalSendNotificationRequest{Title: "hi", Body: "there"}); err == nil || !strings.Contains(err.Error(), "notification service returned") {
+		t.Fatalf("expected notification status error, got %v", err)
+	}
+
+	timeoutSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(50 * time.Millisecond):
+		case <-r.Context().Done():
+		}
+	}))
+	defer timeoutSrv.Close()
+	state = &ontologykernel.AppState{NotificationServiceURL: timeoutSrv.URL, HTTPClient: &http.Client{Timeout: 5 * time.Millisecond}}
+	if err := sendNotificationRequest(context.Background(), state, internalSendNotificationRequest{Title: "hi", Body: "there"}); err == nil || !strings.Contains(err.Error(), "failed to send action notification") {
+		t.Fatalf("expected notification timeout error, got %v", err)
+	}
+}
+
+func TestRunWebhookSideEffectsPersistsBestEffortRows(t *testing.T) {
+	ctx := context.Background()
+	state := newTestState(t)
+	claims := &authmw.Claims{Sub: uuid.New()}
+	actionID := uuid.New()
+	targetID := uuid.New()
+	webhookID := uuid.New()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		if r.URL.Path != "/api/v1/webhooks/"+webhookID.String()+"/invoke" {
+			t.Fatalf("path drift: %s", r.URL.Path)
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"output_parameters":{"ok":true}}`))
+	}))
+	defer srv.Close()
+	state.ConnectorManagementServiceURL = srv.URL
+	state.HTTPClient = srv.Client()
+
+	runWebhookSideEffects(ctx, state, claims, claims.Sub, actionID, &targetID, []webhookCallConfig{{WebhookID: webhookID}}, json.RawMessage(`{"x":1}`))
+	if atomic.LoadInt32(&hits) != 1 {
+		t.Fatalf("expected one webhook hit, got %d", hits)
+	}
+	entries, err := state.Stores.Actions.ListRecent(ctx, "default", storage.Page{Size: 10}, storage.Strong())
+	if err != nil {
+		t.Fatalf("list side effects: %v", err)
+	}
+	if !hasSideEffect(entries.Items, actionID.String(), "success") {
+		t.Fatalf("missing success side-effect row: %+v", entries.Items)
+	}
+
+	state.ConnectorManagementServiceURL = "http://127.0.0.1:1"
+	runWebhookSideEffects(ctx, state, claims, claims.Sub, actionID, &targetID, []webhookCallConfig{{WebhookID: uuid.New()}}, json.RawMessage(`{"x":1}`))
+	entries, err = state.Stores.Actions.ListRecent(ctx, "default", storage.Page{Size: 10}, storage.Strong())
+	if err != nil {
+		t.Fatalf("list side effects after failure: %v", err)
+	}
+	if !hasSideEffect(entries.Items, actionID.String(), "failure") {
+		t.Fatalf("missing failure side-effect row: %+v", entries.Items)
+	}
+}
+
+func hasSideEffect(entries []storage.ActionLogEntry, actionID, status string) bool {
+	for _, entry := range entries {
+		if entry.Kind != "side_effect" || entry.ActionID != actionID {
+			continue
+		}
+		var payload map[string]any
+		_ = json.Unmarshal(entry.Payload, &payload)
+		if payload["status"] == status {
+			return true
+		}
+	}
+	return false
+}
+
+func TestInvokeRegisteredWebhookHTTPAndTimeoutErrors(t *testing.T) {
+	webhookID := uuid.New()
+	for _, tc := range []struct {
+		name   string
+		status int
+	}{
+		{name: "4xx", status: http.StatusBadRequest},
+		{name: "5xx", status: http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(`bad webhook`))
+			}))
+			defer srv.Close()
+			state := &ontologykernel.AppState{ConnectorManagementServiceURL: srv.URL, HTTPClient: srv.Client()}
+			_, err := invokeRegisteredWebhook(context.Background(), state, &webhookCallConfig{WebhookID: webhookID}, json.RawMessage(`{"x":1}`))
+			if err == nil || !strings.Contains(err.Error(), "webhook returned") {
+				t.Fatalf("expected webhook status error, got %v", err)
+			}
+		})
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(50 * time.Millisecond):
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	state := &ontologykernel.AppState{ConnectorManagementServiceURL: srv.URL, HTTPClient: &http.Client{Timeout: 5 * time.Millisecond}}
+	_, err := invokeRegisteredWebhook(context.Background(), state, &webhookCallConfig{WebhookID: webhookID}, json.RawMessage(`{"x":1}`))
+	if err == nil || !strings.Contains(err.Error(), "webhook invocation failed") {
+		t.Fatalf("expected webhook timeout error, got %v", err)
 	}
 }

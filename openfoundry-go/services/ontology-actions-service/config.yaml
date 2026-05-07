@@ -23,8 +23,25 @@ downstream:
 
 cassandra:
   contact_points: ""
+  keyspace: ""
+  username: ""
+  password: ""
   local_dc: "dc1"
+
+search:
+  backend: ""
+  endpoint: ""
+  auth_header: ""
 
 telemetry:
   otlp_endpoint: "localhost:4317"
   log_format: "plain"
+
+python_sidecar:
+  # Production cutover: set enabled true when Python function packages may be created/executed.
+  # PYTHON_SIDECAR_BINARY then becomes startup-required unless OF_DEV_STUB_MODE=true.
+  enabled: false
+  binary: ""
+  args: []
+  env: []
+  timeout: 15s

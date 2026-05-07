@@ -1,37 +1,12 @@
 // Package actions ports `libs/ontology-kernel/src/handlers/actions.rs`.
 //
-// The Rust file is the largest single handler in the kernel
-// (5,618 LOC) — it covers action-type CRUD, validate, execute,
-// inline-edit (single + batch), what-if branches, attachment upload
-// and metrics. This Go port lands across three sub-phases:
-//
-//   - **Phase 5A**: action-type CRUD, `list_applicable_actions`,
-//     `get_action_metrics`, `upload_action_attachment`, what-if list
-//   - delete + a simulation-free CreateWhatIfBranch.
-//   - **Phase 5B**: `validate_action`, `execute_action` for
-//     `update_object` + `delete_object`. Routes through the
-//     writeback substrate shared with rules + funnel.
-//   - **Phase 5C** (this file + siblings, current): `create_link`,
-//     `invoke_webhook`, `invoke_function` (HTTP) variants of
-//     `plan_action` + `execute_plan`, `execute_action_batch` (per-
-//     target loop + batched function invocation), and
-//     `execute_inline_edit` (+ batch). Scale limits, `failure_type`
-//     classification, and the `inline_edit_config` lookup are
-//     byte-identical to the Rust source.
-//
-// Deferred to a follow-up:
-//
-//   - Interface-typed operations (`create_interface`, `modify_interface`,
-//     `delete_interface`, `create_interface_link`, `delete_interface_link`):
-//     surface a `not_yet_executable` validation error pending
-//     interface_id → object_type resolution.
-//   - Inline function execution now dispatches through the injectable
-//     ActionFunctionRuntime; Python reaches python-sidecar when the
-//     host service wires AppState.PythonRuntime.
-//   - The deeper audit pipeline (Prometheus counters + structured
-//     audit-service POSTs + notification fan-out + webhook
-//     side-effects). The Go port emits the slimmest `action_attempt`
-//     entry the metrics endpoint reads.
+// The Rust file is the largest single handler in the kernel (5,618 LOC): it
+// covers action-type CRUD, validate, execute, inline-edit (single + batch),
+// what-if branches, attachment upload, and metrics. The Go port executes the
+// concrete object/link/function operations plus the interface-typed action
+// operations (`create_interface`, `modify_interface`, `delete_interface`,
+// `create_interface_link`, `delete_interface_link`) by resolving interface IDs
+// to concrete implementing object types at plan time.
 package actions
 
 import (
@@ -408,14 +383,14 @@ func validateActionDefinition(
 			}
 		}
 	}
-	_ = authorizationPolicy // shape-validated at JSON decode; deeper checks in Phase 5B
+	_ = authorizationPolicy // shape-validated at JSON decode; plan-time checks enforce target policy.
 	return nil
 }
 
 // parseOperationKind mirrors `fn parse_operation_kind`. Mirrors the
 // `ActionOperationKind` enum exactly — every variant from the Rust
-// source is accepted here so downstream switches can route them to
-// the proper handler (or to a "not yet executable" deferral).
+// source is accepted here so downstream switches can route concrete
+// operations and preserve Rust's interface-resolution gate.
 func parseOperationKind(raw string) (string, error) {
 	switch raw {
 	case "update_object", "create_link", "delete_object",

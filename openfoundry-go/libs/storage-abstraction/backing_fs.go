@@ -4,8 +4,12 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -76,7 +80,11 @@ type BackingFS interface {
 // VerifyLocalSignature before streaming bytes from storage.
 type LocalBackingFS struct {
 	BaseURL string
+	// BaseDir is the stable object-key prefix included in physical_uri values.
 	BaseDir string
+	// RootDir is the local filesystem root used by the development proxy.
+	// When empty, the current working directory is used.
+	RootDir string
 	Secret  []byte
 	Now     func() time.Time
 }
@@ -104,10 +112,10 @@ func (l *LocalBackingFS) PresignedURL(location PhysicalLocation, ttl time.Durati
 	expires := expiresAt.Unix()
 	sig := l.SignLocalKey(key, expires)
 	values := url.Values{}
-	values.Set("expires", time.Unix(expires, 0).UTC().Format(time.RFC3339))
+	values.Set("expires", strconv.FormatInt(expires, 10))
 	values.Set("sig", sig)
 	return PresignedURL{
-		URL:       l.BaseURL + "/api/v1/_internal/local-fs/" + path.Clean("/" + key)[1:] + "?" + values.Encode(),
+		URL:       l.BaseURL + "/v1/_internal/local-fs/" + path.Clean("/" + key)[1:] + "?" + values.Encode(),
 		ExpiresAt: expiresAt,
 		Method:    "GET",
 	}, nil
@@ -122,7 +130,11 @@ func (l *LocalBackingFS) SignLocalKey(key string, expires int64) string {
 }
 
 func (l *LocalBackingFS) VerifyLocalSignature(key string, expires time.Time, sig string) bool {
-	if time.Now().UTC().After(expires.UTC()) {
+	now := time.Now
+	if l.Now != nil {
+		now = l.Now
+	}
+	if now().UTC().After(expires.UTC()) {
 		return false
 	}
 	expected := l.SignLocalKey(key, expires.Unix())
@@ -132,6 +144,62 @@ func (l *LocalBackingFS) VerifyLocalSignature(key string, expires time.Time, sig
 	}
 	want, _ := hex.DecodeString(expected)
 	return hmac.Equal(got, want)
+}
+
+// ReadLocalObject returns bytes for a previously signed local object key after
+// enforcing path traversal safety relative to RootDir.
+func (l *LocalBackingFS) ReadLocalObject(key string) ([]byte, error) {
+	path, err := l.localPath(key)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
+// WriteLocalObject stores bytes at a stable local object key after enforcing
+// path traversal safety relative to RootDir.
+func (l *LocalBackingFS) WriteLocalObject(key string, data []byte) error {
+	path, err := l.localPath(key)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func (l *LocalBackingFS) localPath(key string) (string, error) {
+	cleanKey := path.Clean("/" + strings.TrimSpace(key))[1:]
+	if cleanKey == "." || cleanKey == "" || cleanKey != strings.Trim(key, "/") || hasDotDot(cleanKey) {
+		return "", errors.New("invalid local object key")
+	}
+	root := l.RootDir
+	if root == "" {
+		root = "."
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	absPath := filepath.Join(absRoot, filepath.FromSlash(cleanKey))
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return "", errors.New("local object key escapes root")
+	}
+	return absPath, nil
+}
+
+func hasDotDot(key string) bool {
+	for _, part := range strings.Split(key, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func joinObjectKey(parts ...string) string {

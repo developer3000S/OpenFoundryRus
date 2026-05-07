@@ -118,20 +118,38 @@ func TestTransformExternalReturnsNotImplementedEnvelope(t *testing.T) {
 	assert.Contains(t, out["reason"], "tesseract")
 }
 
-func TestTransformNotImplementedReturnsReason(t *testing.T) {
+func TestTransformRustNotImplementedEntriesReturnParityEnvelope(t *testing.T) {
 	srv := newTestServer(t)
 	t.Cleanup(srv.Close)
 
-	// "geo_tile" is NotImplemented in both Rust and Go.
-	body := `{"kind":"geo_tile","mime_type":"image/png","schema":"IMAGE","bytes_base64":""}`
-	resp, err := http.Post(srv.URL+"/transform", "application/json", strings.NewReader(body))
-	require.NoError(t, err)
-	defer resp.Body.Close()
+	cases := map[string]string{
+		"geo_tile":        "Geo tile pyramids land in the geospatial-intelligence-service follow-up.",
+		"embedding":       "Image embeddings depend on libs/ai-kernel which is not yet wired.",
+		"transcription":   "Transcription depends on libs/ai-kernel (Whisper / VLM) which is not yet wired.",
+		"layout_aware_v2": "Layout-aware extraction depends on libs/ai-kernel which is not yet wired.",
+		"vlm_extract":     "VLM extraction depends on libs/ai-kernel which is not yet wired.",
+		"render_sheet":    "Spreadsheet rendering depends on the spreadsheet-computation domain absorbed into notebook-runtime-service (S8 / ADR-0030); runtime not yet wired.",
+	}
+	for kind, wantReason := range cases {
+		kind, wantReason := kind, wantReason
+		t.Run(kind, func(t *testing.T) {
+			body := `{"kind":"` + kind + `","mime_type":"application/octet-stream","schema":"IMAGE","bytes_base64":""}`
+			resp, err := http.Post(srv.URL+"/transform", "application/json", strings.NewReader(body))
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var out map[string]any
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
-	assert.Equal(t, "NOT_IMPLEMENTED", out["status"])
-	assert.Contains(t, out["reason"], "geospatial-intelligence-service follow-up")
+			var out map[string]any
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+			assert.Equal(t, "NOT_IMPLEMENTED", out["status"])
+			assert.Equal(t, kind, out["kind"])
+			assert.Equal(t, "application/octet-stream", out["output_mime_type"])
+			assert.Equal(t, float64(0), out["compute_seconds"])
+			assert.Equal(t, wantReason, out["reason"])
+			assert.NotContains(t, out, "output_bytes_base64")
+			assert.NotContains(t, out, "output_json")
+		})
+	}
 }
 
 func TestTransformThumbnailRoundTripsPNG(t *testing.T) {

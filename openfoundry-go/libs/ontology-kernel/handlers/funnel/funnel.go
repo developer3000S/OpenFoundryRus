@@ -2,14 +2,10 @@
 // 1:1: the 10 endpoints that drive ontology funnel CRUD, run-ledger
 // reads and health metrics under `/api/v1/ontology/funnel/*`.
 //
-// One sub-phase deferral: TriggerFunnelRun composes
-// `apply_object_write` + `append_object_revision` (writeback path)
-// inside `executeSourceRun`. While the writeback bounded context is
-// not yet ported the handler still issues the start event into the
-// action log, fans out the dataset preview into the row-level
-// validator, and surfaces a typed `executeSourceRunDeferred` error
-// mapped to HTTP 501 — the rest of the funnel surface (sources CRUD,
-// health, runs read) is fully functional.
+// The Go port now drives the full source lifecycle and run lifecycle:
+// source CRUD/health, run ledger reads, pipeline trigger, dataset
+// preview, row validation, object writeback/upsert, revisions, and
+// storage insights all route through real repositories/stores.
 package funnel
 
 import (
@@ -65,7 +61,7 @@ func ListFunnelSources(state *ontologykernel.AppState) http.HandlerFunc {
 		statusFilter := strDeref(query.Status)
 		isAdmin := claims.HasRole("admin")
 
-		data, err := domain.ListSources(r.Context(), state.DB, domain.ListSourcesParams{
+		data, err := listFunnelSources(r.Context(), state, domain.ListSourcesParams{
 			ObjectTypeID: query.ObjectTypeID,
 			StatusFilter: statusFilter,
 			IsAdmin:      isAdmin,
@@ -77,7 +73,7 @@ func ListFunnelSources(state *ontologykernel.AppState) http.HandlerFunc {
 			dbError(w, "failed to list ontology funnel sources: "+err.Error())
 			return
 		}
-		total, err := domain.CountSources(r.Context(), state.DB, query.ObjectTypeID, statusFilter, isAdmin, claims.Sub)
+		total, err := countFunnelSources(r.Context(), state, query.ObjectTypeID, statusFilter, isAdmin, claims.Sub)
 		if err != nil {
 			dbError(w, "failed to count ontology funnel sources: "+err.Error())
 			return
@@ -100,7 +96,7 @@ func GetFunnelHealth(state *ontologykernel.AppState) http.HandlerFunc {
 		query := parseListHealthQuery(r)
 		staleAfterHours := models.NormalizeStaleAfterHours(query.StaleAfterHours)
 
-		sources, err := domain.ListSourcesForHealth(r.Context(), state.DB, domain.HealthSourcesParams{
+		sources, err := listFunnelSourcesForHealth(r.Context(), state, domain.HealthSourcesParams{
 			ObjectTypeID: query.ObjectTypeID,
 			IsAdmin:      claims.HasRole("admin"),
 			ActorID:      claims.Sub,
@@ -156,7 +152,7 @@ func GetFunnelSourceHealth(state *ontologykernel.AppState) http.HandlerFunc {
 			notFound(w, "ontology funnel source not found")
 			return
 		}
-		src, err := domain.LoadSource(r.Context(), state.DB, id)
+		src, err := loadFunnelSource(r.Context(), state, id)
 		if err != nil {
 			dbError(w, err.Error())
 			return
@@ -201,7 +197,7 @@ func CreateFunnelSource(state *ontologykernel.AppState) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		exists, err := domain.ObjectTypeExists(ctx, state.DB, body.ObjectTypeID)
+		exists, err := funnelObjectTypeExists(ctx, state, body.ObjectTypeID)
 		if err != nil {
 			invalid(w, "object_type_id does not exist")
 			return
@@ -210,13 +206,13 @@ func CreateFunnelSource(state *ontologykernel.AppState) http.HandlerFunc {
 			invalid(w, "object_type_id does not exist")
 			return
 		}
-		ok, err = domain.DatasetExists(ctx, state.DB, body.DatasetID)
+		ok, err = funnelDatasetExists(ctx, state, body.DatasetID)
 		if err != nil || !ok {
 			invalid(w, "dataset_id does not exist")
 			return
 		}
 		if body.PipelineID != nil {
-			ok, err := domain.PipelineExists(ctx, state.DB, *body.PipelineID)
+			ok, err := funnelPipelineExists(ctx, state, *body.PipelineID)
 			if err != nil || !ok {
 				invalid(w, "pipeline_id does not exist")
 				return
@@ -250,7 +246,7 @@ func CreateFunnelSource(state *ontologykernel.AppState) http.HandlerFunc {
 			dbError(w, "failed to allocate funnel source id: "+err.Error())
 			return
 		}
-		out, err := domain.CreateSource(ctx, state.DB, domain.CreateSourceInput{
+		out, err := createFunnelSource(ctx, state, domain.CreateSourceInput{
 			ID:               sourceID,
 			Name:             strings.TrimSpace(body.Name),
 			Description:      desc,
@@ -287,7 +283,7 @@ func GetFunnelSource(state *ontologykernel.AppState) http.HandlerFunc {
 			notFound(w, "ontology funnel source not found")
 			return
 		}
-		src, err := domain.LoadSource(r.Context(), state.DB, id)
+		src, err := loadFunnelSource(r.Context(), state, id)
 		if err != nil {
 			dbError(w, err.Error())
 			return
@@ -323,7 +319,7 @@ func UpdateFunnelSource(state *ontologykernel.AppState) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		existing, err := domain.LoadSource(ctx, state.DB, id)
+		existing, err := loadFunnelSource(ctx, state, id)
 		if err != nil {
 			dbError(w, err.Error())
 			return
@@ -353,7 +349,7 @@ func UpdateFunnelSource(state *ontologykernel.AppState) http.HandlerFunc {
 			version = body.DatasetVersion.Value
 		}
 		if pipelineID != nil {
-			ok, err := domain.PipelineExists(ctx, state.DB, *pipelineID)
+			ok, err := funnelPipelineExists(ctx, state, *pipelineID)
 			if err != nil || !ok {
 				invalid(w, "pipeline_id does not exist")
 				return
@@ -390,7 +386,7 @@ func UpdateFunnelSource(state *ontologykernel.AppState) http.HandlerFunc {
 			trimmedName = &t
 		}
 
-		out, err := domain.UpdateSource(ctx, state.DB, domain.UpdateSourceInput{
+		out, err := updateFunnelSource(ctx, state, domain.UpdateSourceInput{
 			ID:               id,
 			Name:             trimmedName,
 			Description:      body.Description,
@@ -428,7 +424,7 @@ func DeleteFunnelSource(state *ontologykernel.AppState) http.HandlerFunc {
 			notFound(w, "ontology funnel source not found")
 			return
 		}
-		src, err := domain.LoadSource(r.Context(), state.DB, id)
+		src, err := loadFunnelSource(r.Context(), state, id)
 		if err != nil {
 			dbError(w, err.Error())
 			return
@@ -441,7 +437,7 @@ func DeleteFunnelSource(state *ontologykernel.AppState) http.HandlerFunc {
 			forbidden(w, err.Error())
 			return
 		}
-		ok2, err := domain.DeleteSource(r.Context(), state.DB, id)
+		ok2, err := deleteFunnelSource(r.Context(), state, id)
 		if err != nil {
 			dbError(w, "failed to delete ontology funnel source: "+err.Error())
 			return
@@ -463,11 +459,10 @@ func DeleteFunnelSource(state *ontologykernel.AppState) http.HandlerFunc {
 //  4. Upserts the object via writeback (apply_object_write +
 //     append_object_revision).
 //
-// Step 4 depends on the writeback bounded context which has not yet
-// been ported. The handler still appends the start event into the
-// action log so the run is observable on the dashboard, then surfaces
-// HTTP 501 carrying the run id and the reason. Once writeback lands
-// `executeSourceRun` will be wired up here.
+// The Go port executes the full path: it appends the start event,
+// triggers optional pipeline work, reads the dataset preview, validates
+// rows, upserts objects through the writeback substrate, appends the
+// terminal run event, and updates source last_run_at.
 func TriggerFunnelRun(state *ontologykernel.AppState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := authmw.FromContext(r.Context())
@@ -489,7 +484,7 @@ func TriggerFunnelRun(state *ontologykernel.AppState) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		src, err := domain.LoadSource(ctx, state.DB, id)
+		src, err := loadFunnelSource(ctx, state, id)
 		if err != nil {
 			dbError(w, err.Error())
 			return
@@ -558,7 +553,7 @@ func TriggerFunnelRun(state *ontologykernel.AppState) http.HandlerFunc {
 			ErrorMessage:  outcome.errorMessage,
 			FinishedAt:    finishedAt,
 		})
-		_ = domain.MarkSourceRan(ctx, state.DB, src.ID, finishedAt)
+		_ = markFunnelSourceRan(ctx, state, src.ID, finishedAt)
 
 		// Reload the freshly-completed run so the response carries
 		// the canonical ledger row (mirrors the Rust impl's tail).
@@ -589,7 +584,7 @@ func ListFunnelRuns(state *ontologykernel.AppState) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		src, err := domain.LoadSource(ctx, state.DB, id)
+		src, err := loadFunnelSource(ctx, state, id)
 		if err != nil {
 			dbError(w, err.Error())
 			return
@@ -642,7 +637,7 @@ func GetFunnelRun(state *ontologykernel.AppState) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		src, err := domain.LoadSource(ctx, state.DB, sourceID)
+		src, err := loadFunnelSource(ctx, state, sourceID)
 		if err != nil {
 			dbError(w, err.Error())
 			return

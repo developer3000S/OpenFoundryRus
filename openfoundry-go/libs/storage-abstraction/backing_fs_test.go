@@ -17,7 +17,7 @@ func TestLocalBackingFSPresignedURLRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "GET", signed.Method)
 	require.Equal(t, fixed.Add(time.Minute), signed.ExpiresAt)
-	require.True(t, strings.HasPrefix(signed.URL, "http://files.local/api/v1/_internal/local-fs/datasets/sales/part.parquet?"))
+	require.True(t, strings.HasPrefix(signed.URL, "http://files.local/v1/_internal/local-fs/datasets/sales/part.parquet?"))
 }
 
 func TestParsePhysicalURI(t *testing.T) {

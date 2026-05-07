@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -38,6 +39,47 @@ type Store interface {
 	ListFiles(ctx context.Context, datasetID uuid.UUID, branch string, prefix string) ([]models.DatasetFile, error)
 	GetFile(ctx context.Context, datasetID uuid.UUID, fileID uuid.UUID) (*models.DatasetFile, error)
 	GetTransactionStatus(ctx context.Context, datasetID uuid.UUID, transactionID uuid.UUID) (string, bool, error)
+	ResolveDatasetID(ctx context.Context, raw string) (uuid.UUID, error)
+	DatasetExists(ctx context.Context, datasetID uuid.UUID) (bool, error)
+	DatasetViewBelongsToDataset(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID) (bool, error)
+	GetCatalogDataset(ctx context.Context, datasetID uuid.UUID) (*models.CatalogDataset, error)
+	GetDatasetRichModel(ctx context.Context, datasetID uuid.UUID) (*models.DatasetRichModel, error)
+	PatchDatasetMetadata(ctx context.Context, datasetID uuid.UUID, body *models.DatasetMetadataPatch) (*models.CatalogDataset, error)
+	ListDatasetMarkings(ctx context.Context, datasetID uuid.UUID) ([]models.EffectiveMarking, error)
+	ReplaceDatasetMarkings(ctx context.Context, datasetID uuid.UUID, markings []uuid.UUID, appliedBy uuid.UUID) error
+	ListDatasetPermissions(ctx context.Context, datasetID uuid.UUID) ([]models.DatasetPermissionEdge, error)
+	ReplaceDatasetPermissions(ctx context.Context, datasetID uuid.UUID, permissions []models.PutDatasetPermissionEdge) error
+	ListDatasetLineageLinks(ctx context.Context, datasetID uuid.UUID) ([]models.DatasetLineageLink, error)
+	ReplaceDatasetLineageLinks(ctx context.Context, datasetID uuid.UUID, links []models.PutDatasetLineageLink) error
+	ListDatasetFileIndex(ctx context.Context, datasetID uuid.UUID) ([]models.DatasetFileIndexEntry, error)
+	ReplaceDatasetFileIndex(ctx context.Context, datasetID uuid.UUID, files []models.PutDatasetFileIndexEntry) error
+	ListActiveRuntimeBranches(ctx context.Context, datasetID uuid.UUID) ([]models.RuntimeBranch, error)
+	CreateRuntimeBranch(ctx context.Context, datasetID uuid.UUID, body *models.CreateBranchBody, actor uuid.UUID) (*models.RuntimeBranch, error)
+	GetRuntimeBranch(ctx context.Context, datasetID uuid.UUID, branch string) (*models.RuntimeBranch, error)
+	PreviewDeleteBranch(ctx context.Context, datasetID uuid.UUID, branch string) (*models.BranchDeletePreview, error)
+	DeleteRuntimeBranch(ctx context.Context, datasetID uuid.UUID, branch string) (*models.BranchDeleteResponse, error)
+	ReparentRuntimeBranch(ctx context.Context, datasetID uuid.UUID, branch string, newParent *string) (*models.RuntimeBranch, error)
+	BranchAncestry(ctx context.Context, datasetID uuid.UUID, branch string) ([]models.RuntimeBranch, error)
+	UpdateBranchRetention(ctx context.Context, datasetID uuid.UUID, branch string, policy models.RetentionPolicy, ttlDays *int32) (*models.RuntimeBranch, error)
+	RestoreBranch(ctx context.Context, datasetID uuid.UUID, branch string) (*models.RuntimeBranch, error)
+	ListBranchMarkings(ctx context.Context, branchID uuid.UUID) ([]models.BranchMarking, error)
+	CompareBranches(ctx context.Context, datasetID uuid.UUID, base string, compare string) (*models.BranchCompareResponse, error)
+	RollbackBranch(ctx context.Context, datasetID uuid.UUID, branch string, body *models.RollbackBody, actor uuid.UUID) (map[string]any, error)
+	ListFallbacks(ctx context.Context, branchID uuid.UUID) ([]models.RuntimeFallbackEntry, error)
+	ReplaceFallbacks(ctx context.Context, branchID uuid.UUID, fallbackNames []string) error
+	ListViews(ctx context.Context, datasetID uuid.UUID) ([]models.DatasetView, error)
+	CreateView(ctx context.Context, datasetID uuid.UUID, body *models.CreateDatasetViewRequest) (*models.DatasetView, error)
+	GetDatasetView(ctx context.Context, datasetID uuid.UUID, viewOrName string) (*models.DatasetView, error)
+	RefreshDatasetView(ctx context.Context, datasetID uuid.UUID, viewOrName string) (*models.DatasetView, error)
+	GetCurrentView(ctx context.Context, datasetID uuid.UUID, branch string) (*models.ViewOut, error)
+	GetViewAt(ctx context.Context, datasetID uuid.UUID, branch string, at *time.Time, transactionID *uuid.UUID) (*models.ViewOut, error)
+	ListViewFiles(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID) ([]models.RuntimeViewFile, error)
+	GetViewSchema(ctx context.Context, viewID uuid.UUID) (*models.SchemaResponse, error)
+	PutViewSchema(ctx context.Context, viewID uuid.UUID, datasetID uuid.UUID, branch *string, schema models.DatasetSchema, contentHash string) (*models.SchemaResponse, error)
+	GetCurrentSchema(ctx context.Context, datasetID uuid.UUID, branch string) (*models.SchemaResponse, error)
+	PreviewData(ctx context.Context, datasetID uuid.UUID, viewID *uuid.UUID, q models.PreviewQuery) (*models.PreviewDataResponse, error)
+	ValidateSchema(ctx context.Context, datasetID uuid.UUID, schema models.DatasetSchema) (*models.ValidateResponse, error)
+	StorageDetails(ctx context.Context, datasetID uuid.UUID, fsID string, driver string, baseDir string, ttlSeconds uint64) (*models.StorageDetailsOut, error)
 }
 
 type Handlers struct {
@@ -54,6 +96,20 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeJSONErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func datasetIDParam(r *http.Request) string {
+	if id := chi.URLParam(r, "id"); id != "" {
+		return id
+	}
+	return chi.URLParam(r, "rid")
+}
+
+func transactionIDParam(r *http.Request) string {
+	if id := chi.URLParam(r, "txn"); id != "" {
+		return id
+	}
+	return chi.URLParam(r, "txn_id")
 }
 
 func (h *Handlers) ListDatasets(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +146,7 @@ func (h *Handlers) GetDataset(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := uuid.Parse(datasetIDParam(r))
 	if err != nil {
 		writeJSONErr(w, http.StatusBadRequest, "invalid id")
 		return
@@ -136,7 +192,7 @@ func (h *Handlers) UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := uuid.Parse(datasetIDParam(r))
 	if err != nil {
 		writeJSONErr(w, http.StatusBadRequest, "invalid id")
 		return
@@ -163,7 +219,7 @@ func (h *Handlers) DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := uuid.Parse(datasetIDParam(r))
 	if err != nil {
 		writeJSONErr(w, http.StatusBadRequest, "invalid id")
 		return
@@ -215,7 +271,7 @@ func (h *Handlers) ownedDataset(w http.ResponseWriter, r *http.Request) (*authmw
 		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
 		return nil, nil, false
 	}
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := uuid.Parse(datasetIDParam(r))
 	if err != nil {
 		writeJSONErr(w, http.StatusBadRequest, "invalid id")
 		return nil, nil, false
@@ -311,6 +367,34 @@ func (h *Handlers) CreateVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) ListBranches(w http.ResponseWriter, r *http.Request) {
+	raw := datasetIDParam(r)
+	if _, err := uuid.Parse(raw); err != nil {
+		datasetID, ok := h.resolveDatasetForCatalog(w, r)
+		if !ok {
+			return
+		}
+		branches, err := h.Repo.ListActiveRuntimeBranches(r.Context(), datasetID)
+		if err != nil {
+			writeJSONErr(w, http.StatusInternalServerError, "failed to list branches")
+			return
+		}
+		offset, limit := parsePage(r)
+		if offset > len(branches) {
+			offset = len(branches)
+		}
+		end := offset + limit
+		if end > len(branches) {
+			end = len(branches)
+		}
+		hasMore := end < len(branches)
+		var next *string
+		if hasMore {
+			v := encodeCursor(offset + limit)
+			next = &v
+		}
+		writeJSON(w, http.StatusOK, models.Page[models.RuntimeBranch]{Data: branches[offset:end], NextCursor: next, HasMore: hasMore})
+		return
+	}
 	_, dataset, ok := h.ownedDataset(w, r)
 	if !ok {
 		return
@@ -330,11 +414,29 @@ func (h *Handlers) ListBranches(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) GetBranch(w http.ResponseWriter, r *http.Request) {
+	raw := datasetIDParam(r)
+	name := chi.URLParam(r, "branch")
+	if _, err := uuid.Parse(raw); err != nil {
+		datasetID, ok := h.resolveDatasetForCatalog(w, r)
+		if !ok {
+			return
+		}
+		v, err := h.Repo.GetRuntimeBranch(r.Context(), datasetID, name)
+		if err != nil {
+			if errors.Is(err, repo.ErrNotFound) {
+				writeJSONErr(w, http.StatusNotFound, "branch not found")
+				return
+			}
+			writeJSONErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, v)
+		return
+	}
 	_, dataset, ok := h.ownedDataset(w, r)
 	if !ok {
 		return
 	}
-	name := chi.URLParam(r, "branch")
 	v, err := h.Repo.GetBranch(r.Context(), dataset.ID, name)
 	if err != nil {
 		writeJSONErr(w, http.StatusInternalServerError, err.Error())
@@ -348,6 +450,29 @@ func (h *Handlers) GetBranch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) CreateBranch(w http.ResponseWriter, r *http.Request) {
+	raw := datasetIDParam(r)
+	if _, err := uuid.Parse(raw); err != nil {
+		datasetID, ok := h.resolveDatasetForCatalog(w, r)
+		if !ok {
+			return
+		}
+		claims, ok := h.requireDatasetWrite(w, r, datasetID)
+		if !ok {
+			return
+		}
+		var body models.CreateBranchBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, "invalid body")
+			return
+		}
+		v, err := h.Repo.CreateRuntimeBranch(r.Context(), datasetID, &body, claims.Sub)
+		if err != nil {
+			writeBranchError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, v)
+		return
+	}
 	_, dataset, ok := h.ownedDataset(w, r)
 	if !ok {
 		return
@@ -380,6 +505,30 @@ func (h *Handlers) CreateBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, v)
+}
+
+func writeBranchError(w http.ResponseWriter, err error) {
+	if errors.Is(err, repo.ErrNotFound) {
+		writeJSONErr(w, http.StatusNotFound, "branch not found")
+		return
+	}
+	if errors.Is(err, repo.ErrConflict) || repo.IsConflict(err) {
+		writeJSONErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, repo.ErrPreconditionFailed) {
+		writeJSONErr(w, http.StatusPreconditionFailed, err.Error())
+		return
+	}
+	if errors.Is(err, repo.ErrValidation) {
+		writeJSONErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, repo.ErrInvalidTransition) {
+		writeJSONErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSONErr(w, http.StatusInternalServerError, err.Error())
 }
 
 func (h *Handlers) ListFiles(w http.ResponseWriter, r *http.Request) {
@@ -439,7 +588,9 @@ func (h *Handlers) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusInternalServerError, "failed to presign file")
 		return
 	}
-	writeJSON(w, http.StatusOK, models.DownloadDatasetFileResponse{URL: signed.URL, ExpiresAt: signed.ExpiresAt, Method: signed.Method})
+	w.Header().Set("Location", signed.URL)
+	w.Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
+	w.WriteHeader(http.StatusFound)
 }
 
 func (h *Handlers) CreateFileUploadURL(w http.ResponseWriter, r *http.Request) {
@@ -447,7 +598,7 @@ func (h *Handlers) CreateFileUploadURL(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	txnID, err := uuid.Parse(chi.URLParam(r, "txn"))
+	txnID, err := uuid.Parse(transactionIDParam(r))
 	if err != nil {
 		writeJSONErr(w, http.StatusBadRequest, "invalid transaction id")
 		return

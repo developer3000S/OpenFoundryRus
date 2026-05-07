@@ -51,23 +51,23 @@ type StorageSearchKindMetric struct {
 // OntologyStorageInsightsResponse mirrors the Rust struct of the same
 // name. Field names + JSON tags + ordering match verbatim.
 type OntologyStorageInsightsResponse struct {
-	DatabaseBackend           string                              `json:"database_backend"`
-	AccessDriver              string                              `json:"access_driver"`
-	GraphProjection           string                              `json:"graph_projection"`
-	SearchProjection          string                              `json:"search_projection"`
-	FunnelRuntime             string                              `json:"funnel_runtime"`
-	TableMetrics              []StorageTableMetric                `json:"table_metrics"`
-	IndexDefinitions          []domain.StorageIndexDefinition     `json:"index_definitions"`
-	ObjectTypeDistribution    []StorageDistributionMetric         `json:"object_type_distribution"`
-	LinkTypeDistribution      []StorageDistributionMetric         `json:"link_type_distribution"`
-	SearchDocumentsTotal      int64                               `json:"search_documents_total"`
-	SearchDocumentsByKind     []StorageSearchKindMetric           `json:"search_documents_by_kind"`
+	DatabaseBackend        string                          `json:"database_backend"`
+	AccessDriver           string                          `json:"access_driver"`
+	GraphProjection        string                          `json:"graph_projection"`
+	SearchProjection       string                          `json:"search_projection"`
+	FunnelRuntime          string                          `json:"funnel_runtime"`
+	TableMetrics           []StorageTableMetric            `json:"table_metrics"`
+	IndexDefinitions       []domain.StorageIndexDefinition `json:"index_definitions"`
+	ObjectTypeDistribution []StorageDistributionMetric     `json:"object_type_distribution"`
+	LinkTypeDistribution   []StorageDistributionMetric     `json:"link_type_distribution"`
+	SearchDocumentsTotal   int64                           `json:"search_documents_total"`
+	SearchDocumentsByKind  []StorageSearchKindMetric       `json:"search_documents_by_kind"`
 	// Rust `Option<DateTime<Utc>>` carries no skip_serializing_if, so
 	// None serialises to `"latest_*_at":null`. Dropping `omitempty`
 	// keeps the Go output byte-identical when no metrics exist yet.
-	LatestObjectWriteAt       *time.Time                          `json:"latest_object_write_at"`
-	LatestLinkWriteAt         *time.Time                          `json:"latest_link_write_at"`
-	LatestFunnelRunAt         *time.Time                          `json:"latest_funnel_run_at"`
+	LatestObjectWriteAt *time.Time `json:"latest_object_write_at"`
+	LatestLinkWriteAt   *time.Time `json:"latest_link_write_at"`
+	LatestFunnelRunAt   *time.Time `json:"latest_funnel_run_at"`
 }
 
 // objectRuntimeMetrics / linkRuntimeMetrics / funnelRuntimeMetrics
@@ -170,7 +170,7 @@ func loadObjectRuntimeMetrics(
 	ctx context.Context, state *ontologykernel.AppState, claims *authmw.Claims,
 ) (objectRuntimeMetrics, error) {
 	tenant := domain.TenantFromClaims(claims)
-	objectTypes, err := domain.LoadObjectTypesAll(ctx, state.DB)
+	objectTypes, err := loadObjectTypesForStorage(ctx, state)
 	if err != nil {
 		return objectRuntimeMetrics{}, fmt.Errorf("failed to load object type metadata: %w", err)
 	}
@@ -234,7 +234,7 @@ func loadLinkRuntimeMetrics(
 	ctx context.Context, state *ontologykernel.AppState, claims *authmw.Claims,
 ) (linkRuntimeMetrics, error) {
 	tenant := domain.TenantFromClaims(claims)
-	linkTypes, err := domain.LoadLinkTypesAll(ctx, state.DB)
+	linkTypes, err := loadLinkTypesForStorage(ctx, state)
 	if err != nil {
 		return linkRuntimeMetrics{}, fmt.Errorf("failed to load link type metadata: %w", err)
 	}
@@ -309,7 +309,7 @@ func loadTableMetrics(
 	ctx context.Context, state *ontologykernel.AppState,
 	objectRuntimeTotal, linkRuntimeTotal, funnelRuntimeTotal int64,
 ) ([]StorageTableMetric, error) {
-	counts, err := domain.LoadDefinitionCounts(ctx, state.DB)
+	counts, err := loadDefinitionCountsForStorage(ctx, state)
 	if err != nil {
 		return nil, err
 	}
@@ -334,9 +334,13 @@ func loadTableMetrics(
 func loadIndexDefinitions(
 	ctx context.Context, state *ontologykernel.AppState,
 ) ([]domain.StorageIndexDefinition, error) {
-	pgDefs, err := domain.LoadPGIndexDefinitions(ctx, state.DB)
-	if err != nil {
-		return nil, err
+	pgDefs := []domain.StorageIndexDefinition{}
+	if state.DB != nil {
+		var err error
+		pgDefs, err = domain.LoadPGIndexDefinitions(ctx, state.DB)
+		if err != nil {
+			return nil, err
+		}
 	}
 	combined := append(pgDefs, domain.CassandraIndexDefinitions()...)
 	sort.Slice(combined, func(i, j int) bool {
@@ -351,6 +355,16 @@ func loadIndexDefinitions(
 func loadSearchDocumentMetrics(
 	ctx context.Context, state *ontologykernel.AppState, claims *authmw.Claims,
 ) (int64, []StorageSearchKindMetric, error) {
+	if state.DB == nil {
+		objectRuntime, err := loadObjectRuntimeMetrics(ctx, state, claims)
+		if err != nil {
+			return 0, nil, err
+		}
+		if objectRuntime.total == 0 {
+			return 0, []StorageSearchKindMetric{}, nil
+		}
+		return objectRuntime.total, []StorageSearchKindMetric{{Kind: "object", Count: objectRuntime.total}}, nil
+	}
 	docs, err := domain.BuildSearchDocuments(ctx, state, claims, nil, nil)
 	if err != nil {
 		return 0, nil, err
@@ -391,3 +405,70 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // domain in the link-instance helper, but Go re-exports through
 // types so the import is real).
 var _ = models.LinkType{}
+
+func loadObjectTypesForStorage(ctx context.Context, state *ontologykernel.AppState) ([]models.ObjectType, error) {
+	if state.DB != nil {
+		return domain.LoadObjectTypesAll(ctx, state.DB)
+	}
+	page, err := state.Stores.Definitions.List(ctx, storage.DefinitionQuery{Kind: storage.DefinitionKind(domain.ActionRepoObjectKind), Page: storage.Page{Size: 10_000}}, storage.Strong())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.ObjectType, 0, len(page.Items))
+	for _, rec := range page.Items {
+		var item models.ObjectType
+		if err := json.Unmarshal(rec.Payload, &item); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func loadLinkTypesForStorage(ctx context.Context, state *ontologykernel.AppState) ([]models.LinkType, error) {
+	if state.DB != nil {
+		return domain.LoadLinkTypesAll(ctx, state.DB)
+	}
+	page, err := state.Stores.Definitions.List(ctx, storage.DefinitionQuery{Kind: storage.DefinitionKind(domain.ActionRepoLinkTypeKind), Page: storage.Page{Size: 10_000}}, storage.Strong())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.LinkType, 0, len(page.Items))
+	for _, rec := range page.Items {
+		var item models.LinkType
+		if err := json.Unmarshal(rec.Payload, &item); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func loadDefinitionCountsForStorage(ctx context.Context, state *ontologykernel.AppState) (domain.DefinitionCounts, error) {
+	if state.DB != nil {
+		return domain.LoadDefinitionCounts(ctx, state.DB)
+	}
+	count := func(kind storage.DefinitionKind) (int64, error) {
+		n, err := state.Stores.Definitions.Count(ctx, storage.DefinitionQuery{Kind: kind, Page: storage.Page{Size: 10_000}}, storage.Strong())
+		return int64(n), err
+	}
+	var out domain.DefinitionCounts
+	pairs := []struct {
+		dst  *int64
+		kind storage.DefinitionKind
+	}{
+		{&out.ObjectTypes, storage.DefinitionKind(domain.ActionRepoObjectKind)},
+		{&out.Properties, storage.DefinitionKind(domain.ActionRepoPropertyKind)},
+		{&out.LinkTypes, storage.DefinitionKind(domain.ActionRepoLinkTypeKind)},
+		{&out.ActionTypes, storage.DefinitionKind(domain.ActionTypeKind)},
+		{&out.FunnelSources, storage.DefinitionKind("funnel_source")},
+	}
+	for _, pair := range pairs {
+		n, err := count(pair.kind)
+		if err != nil {
+			return domain.DefinitionCounts{}, err
+		}
+		*pair.dst = n
+	}
+	return out, nil
+}

@@ -84,7 +84,7 @@ func IsNotFound(err error) bool {
 }
 
 // Runtime is what the binary wires against
-// media-transform-runtime-service and what tests stub. Implementations
+// media-transform-runtime-service and what tests emulate. Implementations
 // must be safe for concurrent use across goroutines.
 type Runtime interface {
 	ReadRaw(ctx context.Context, item ItemHandle) ([]byte, error)

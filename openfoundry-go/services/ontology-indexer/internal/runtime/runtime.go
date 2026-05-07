@@ -58,6 +58,9 @@ type kafkaGoReader struct {
 }
 
 func NewKafkaReader(brokers []string, groupID string, log *slog.Logger) KafkaReader {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &kafkaGoReader{brokers: brokers, groupID: groupID, log: log}
 }
 

@@ -6,9 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
-
-	kafka "github.com/segmentio/kafka-go"
 )
 
 // KafkaReader is the kafka-go reader surface used by the indexer
@@ -27,10 +24,10 @@ type IndexBackend interface {
 	Handle(ctx context.Context, topic string, event json.RawMessage) error
 }
 
-// Consumer reads ontology change events, invokes the backend, and
-// commits offsets only after durable backend processing. Malformed JSON
-// is committed and skipped so one poison event cannot wedge a
-// partition.
+// Consumer reads ontology change events through the package KafkaMessage
+// abstraction, invokes the backend, and commits offsets only after durable
+// backend processing. Malformed JSON is committed and skipped so one poison
+// event cannot wedge a partition.
 type Consumer struct {
 	Reader  ConsumerKafkaReader
 	Backend IndexBackend

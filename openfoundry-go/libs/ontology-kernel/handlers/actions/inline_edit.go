@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -400,6 +401,7 @@ func executeLoadedAction(
 	action models.ActionType,
 	body models.ExecuteActionRequest,
 ) {
+	startedAt := time.Now()
 	writeback, sideEffects, err := splitWebhookConfigs(action.Config)
 	if err != nil {
 		invalid(w, err.Error())
@@ -411,10 +413,14 @@ func executeLoadedAction(
 			body.Justification, body.Parameters, nil, nil); auditErr != nil {
 			logAuditFailure(action.ID, auditErr)
 		}
+		failureType := "authentication"
+		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 		forbidden(w, err.Error())
 		return
 	}
 	if err := ensureConfirmationJustification(action, body.Justification); err != nil {
+		failureType := "invalid_parameter"
+		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 		invalid(w, err.Error())
 		return
 	}
@@ -422,6 +428,8 @@ func executeLoadedAction(
 	params := body.Parameters
 	if writeback != nil {
 		if err := runWebhookWriteback(ctx, state, writeback, &params); err != nil {
+			failureType := "invalid_parameter"
+			_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 			dbError(w, "webhook writeback failed: "+err.Error())
 			return
 		}
@@ -443,6 +451,11 @@ func executeLoadedAction(
 			body.Justification, params, nil, map[string]any{"details": errs}); auditErr != nil {
 			logAuditFailure(action.ID, auditErr)
 		}
+		failureType := "invalid_parameter"
+		if status == http.StatusForbidden {
+			failureType = "authentication"
+		}
+		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 		writeJSON(w, status, map[string]any{
 			"error":   "action validation failed",
 			"details": errs,
@@ -456,6 +469,8 @@ func executeLoadedAction(
 			body.Justification, params, nil, nil); auditErr != nil {
 			logAuditFailure(action.ID, auditErr)
 		}
+		failureType := classifyExecutePlanError(err).AsStr()
+		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 		dbError(w, err.Error())
 		return
 	}
@@ -476,6 +491,7 @@ func executeLoadedAction(
 	}
 	runWebhookSideEffects(ctx, state, claims, claims.Sub, action.ID,
 		executed.targetObjectID, sideEffects, params)
+	_ = emitActionAttemptEvent(ctx, state, claims, action, executed.targetObjectID, params, "success", time.Since(startedAt).Milliseconds(), nil)
 	writeJSON(w, http.StatusOK, models.ExecuteActionResponse{
 		Action:         action,
 		TargetObjectID: executed.targetObjectID,
@@ -497,22 +513,65 @@ func executeLoadedActionInline(
 	action models.ActionType,
 	body models.ExecuteActionRequest,
 ) error {
+	startedAt := time.Now()
+	writeback, sideEffects, err := splitWebhookConfigs(action.Config)
+	if err != nil {
+		return err
+	}
 	if err := ensureActionActorPermission(claims, action); err != nil {
+		failureType := "authentication"
+		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 		return err
 	}
 	if err := ensureConfirmationJustification(action, body.Justification); err != nil {
+		failureType := "invalid_parameter"
+		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 		return err
+	}
+	params := body.Parameters
+	if writeback != nil {
+		if err := runWebhookWriteback(ctx, state, writeback, &params); err != nil {
+			failureType := "invalid_parameter"
+			_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+			return fmt.Errorf("webhook writeback failed: %w", err)
+		}
 	}
 	plan, errs := planAction(ctx, state, claims, action, &models.ValidateActionRequest{
 		TargetObjectID: body.TargetObjectID,
-		Parameters:     body.Parameters,
+		Parameters:     params,
 	})
 	if len(errs) > 0 {
+		failureType := "invalid_parameter"
+		if allForbidden(errs) {
+			failureType = "authentication"
+		}
+		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 		return fmt.Errorf("%s", joinErrs(errs))
 	}
-	if _, err := executePlan(ctx, state, claims, action, plan); err != nil {
+	executed, err := executePlan(ctx, state, claims, action, plan)
+	if err != nil {
+		failureType := classifyExecutePlanError(err).AsStr()
+		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 		return err
 	}
+	auditResult := map[string]any{
+		"deleted": executed.deleted,
+		"object":  jsonAsAny(executed.object),
+		"link":    jsonAsAny(executed.link),
+		"result":  jsonAsAny(executed.result),
+	}
+	if auditErr := emitActionAuditEvent(ctx, state, claims, action, plan.target,
+		executed.targetObjectID, "success", "low", "",
+		body.Justification, params, executed.preview, auditResult); auditErr != nil {
+		logAuditFailure(action.ID, auditErr)
+	}
+	if notifErr := emitActionNotifications(ctx, state, claims, action, plan.target,
+		params, body.Justification, executed); notifErr != nil {
+		logNotificationFailure(action.ID, notifErr)
+	}
+	runWebhookSideEffects(ctx, state, claims, claims.Sub, action.ID,
+		executed.targetObjectID, sideEffects, params)
+	_ = emitActionAttemptEvent(ctx, state, claims, action, executed.targetObjectID, params, "success", time.Since(startedAt).Milliseconds(), nil)
 	return nil
 }
 

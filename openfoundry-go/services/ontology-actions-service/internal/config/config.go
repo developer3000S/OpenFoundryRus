@@ -26,6 +26,11 @@ type Config struct {
 	DatabaseURL string
 	JWTSecret   string
 
+	// DevMode permits explicit local/test startup without DATABASE_URL by
+	// wiring an in-memory AppState. It is disabled by default and is enabled
+	// only by OF_DEV_STUB_MODE=true (or the legacy ALLOW_SUBSTRATE_STUBS=true).
+	DevMode bool
+
 	AuditServiceURL               string
 	DatasetServiceURL             string
 	OntologyServiceURL            string
@@ -37,7 +42,14 @@ type Config struct {
 	ConnectorManagementServiceURL string
 
 	CassandraContactPoints string
+	CassandraKeyspace      string
+	CassandraUsername      string
+	CassandraPassword      string
 	CassandraLocalDC       string
+
+	SearchBackend    string
+	SearchEndpoint   string
+	SearchAuthHeader string
 
 	// PythonSidecarBinary is the absolute path to the openfoundry-pyruntime
 	// executable. When empty, inline Python functions explicitly return
@@ -59,6 +71,11 @@ type Config struct {
 	// PythonSidecarTimeout caps sidecar startup and manager hard-call timeout.
 	// Configure with PYTHON_SIDECAR_TIMEOUT (Go duration like 15s or seconds).
 	PythonSidecarTimeout time.Duration
+
+	// PythonPackagesEnabled gates production startup for inline Python packages.
+	// When true outside OF_DEV_STUB_MODE, PYTHON_SIDECAR_BINARY is required so
+	// python_runtime_not_wired is caught as a deployment config error.
+	PythonPackagesEnabled bool
 }
 
 func FromEnv() (*Config, error) {
@@ -69,6 +86,7 @@ func FromEnv() (*Config, error) {
 	c.Server.Port = parseUint16(os.Getenv("PORT"), 50106)
 	c.DatabaseURL = os.Getenv("DATABASE_URL")
 	c.JWTSecret = os.Getenv("JWT_SECRET")
+	c.DevMode = parseBool(os.Getenv("OF_DEV_STUB_MODE")) || parseBool(os.Getenv("ALLOW_SUBSTRATE_STUBS"))
 	c.AuditServiceURL = defaultStr(os.Getenv("AUDIT_SERVICE_URL"), "http://localhost:50115")
 	c.DatasetServiceURL = defaultStr(os.Getenv("DATASET_SERVICE_URL"), "http://localhost:50079")
 	c.OntologyServiceURL = defaultStr(os.Getenv("ONTOLOGY_SERVICE_URL"), "http://localhost:50103")
@@ -79,12 +97,19 @@ func FromEnv() (*Config, error) {
 	c.NodeRuntimeCommand = defaultStr(os.Getenv("NODE_RUNTIME_COMMAND"), "node")
 	c.ConnectorManagementServiceURL = defaultStr(os.Getenv("CONNECTOR_MANAGEMENT_SERVICE_URL"), "http://localhost:50130")
 	c.CassandraContactPoints = os.Getenv("CASSANDRA_CONTACT_POINTS")
+	c.CassandraKeyspace = os.Getenv("CASSANDRA_KEYSPACE")
+	c.CassandraUsername = os.Getenv("CASSANDRA_USERNAME")
+	c.CassandraPassword = os.Getenv("CASSANDRA_PASSWORD")
 	c.CassandraLocalDC = defaultStr(os.Getenv("CASSANDRA_LOCAL_DC"), "dc1")
+	c.SearchBackend = os.Getenv("SEARCH_BACKEND")
+	c.SearchEndpoint = os.Getenv("SEARCH_ENDPOINT")
+	c.SearchAuthHeader = defaultStr(os.Getenv("SEARCH_AUTH_HEADER"), bearerAuthHeader(os.Getenv("SEARCH_API_KEY")))
 	c.PythonSidecarBinary = os.Getenv("PYTHON_SIDECAR_BINARY")
 	c.PythonSidecarBinary = defaultStr(os.Getenv("PYTHON_SIDECAR_BINARY"), os.Getenv("PYTHON_SIDECAR_BIN"))
 	c.PythonSidecarArgs = splitFields(os.Getenv("PYTHON_SIDECAR_ARGS"))
 	c.PythonSidecarEnv = splitEnvList(os.Getenv("PYTHON_SIDECAR_ENV"))
 	c.PythonSidecarTimeout = parseDuration(os.Getenv("PYTHON_SIDECAR_TIMEOUT"), 15*time.Second)
+	c.PythonPackagesEnabled = parseBool(defaultStr(os.Getenv("PYTHON_PACKAGES_ENABLED"), os.Getenv("ENABLE_PYTHON_PACKAGES")))
 	return c, nil
 }
 
@@ -138,4 +163,21 @@ func parseDuration(v string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func parseBool(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "t", "true", "y", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func bearerAuthHeader(apiKey string) string {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return ""
+	}
+	return "Bearer " + apiKey
 }

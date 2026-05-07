@@ -59,10 +59,30 @@ func main() {
 	}
 
 	jwt := authmw.NewJWTConfig(cfg.JWTSecret)
-	h := &handlers.Handlers{Repo: &repo.Repo{Pool: pool}, MediaSetRuntime: &handlers.HTTPMediaSetRuntime{MediaSetsBaseURL: os.Getenv("MEDIA_SETS_SERVICE_URL")}}
+	h := &handlers.Handlers{
+		Repo:            &repo.Repo{Pool: pool},
+		MediaSetRuntime: &handlers.HTTPMediaSetRuntime{MediaSetsBaseURL: cfg.MediaSetsServiceURL},
+		Config: handlers.RuntimeConfig{
+			DatasetServiceURL:            cfg.DatasetServiceURL,
+			PipelineServiceURL:           cfg.PipelineServiceURL,
+			OntologyServiceURL:           cfg.OntologyServiceURL,
+			IngestionReplicationGRPCURL:  cfg.IngestionReplicationGRPCURL,
+			NetworkBoundaryServiceURL:    cfg.NetworkBoundaryServiceURL,
+			SyncPollIntervalSecs:         cfg.SyncPollIntervalSecs,
+			AllowPrivateNetworkEgress:    cfg.AllowPrivateNetworkEgress,
+			AllowedEgressHosts:           cfg.AllowedEgressHosts,
+			AgentStaleAfterSecs:          cfg.AgentStaleAfterSecs,
+			CredentialEncryptionKey:      cfg.CredentialEncryptionKey,
+			CredentialKey:                cfg.CredentialKey,
+			SecretManagerURL:             cfg.SecretManagerURL,
+			OutboxEnabled:                cfg.OutboxEnabled,
+			AutoRegistrationIntervalSecs: cfg.AutoRegistrationIntervalSecs,
+			VendedCredentialsTTLSeconds:  cfg.VendedCredentialsTTLSeconds,
+		},
+	}
 	metrics := observability.NewMetrics()
 
-	srv := server.New(cfg, jwt, h, metrics)
+	srv := server.New(cfg, jwt, h, metrics, pool.Ping)
 	if err := server.Run(ctx, srv, log); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("server exited with error", slog.String("error", err.Error()))
 		os.Exit(1)

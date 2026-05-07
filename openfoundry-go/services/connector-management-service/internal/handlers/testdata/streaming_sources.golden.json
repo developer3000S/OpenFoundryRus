@@ -1,0 +1,190 @@
+{
+  "data": [
+    {
+      "kind": "streaming_kafka",
+      "display_name": "Apache Kafka",
+      "description": "Pull records from a Kafka topic via consumer-group offsets.",
+      "requires_agent": false,
+      "config_fields": [
+        {
+          "name": "bootstrap_servers",
+          "kind": "string",
+          "required": true,
+          "description": "Comma-separated host:port list."
+        },
+        {
+          "name": "topic",
+          "kind": "string",
+          "required": true,
+          "description": "Topic the sync subscribes to."
+        },
+        {
+          "name": "consumer_group",
+          "kind": "string",
+          "required": true,
+          "description": "Kafka consumer group id."
+        },
+        {
+          "name": "auto_offset_reset",
+          "kind": "string",
+          "required": false,
+          "description": "earliest / latest."
+        }
+      ]
+    },
+    {
+      "kind": "streaming_kinesis",
+      "display_name": "Amazon Kinesis",
+      "description": "Pull records from a Kinesis stream shard.",
+      "requires_agent": false,
+      "config_fields": [
+        {
+          "name": "stream_name",
+          "kind": "string",
+          "required": true,
+          "description": "Kinesis stream name."
+        },
+        {
+          "name": "region",
+          "kind": "string",
+          "required": true,
+          "description": "AWS region."
+        },
+        {
+          "name": "shard_iterator_type",
+          "kind": "string",
+          "required": false,
+          "description": "LATEST / TRIM_HORIZON."
+        },
+        {
+          "name": "max_records_per_shard",
+          "kind": "int",
+          "required": false,
+          "description": "Soft cap per pull."
+        }
+      ]
+    },
+    {
+      "kind": "streaming_sqs",
+      "display_name": "Amazon SQS",
+      "description": "Long-poll an SQS queue with explicit per-message ack.",
+      "requires_agent": false,
+      "config_fields": [
+        {
+          "name": "queue_url",
+          "kind": "string",
+          "required": true,
+          "description": "Full queue URL."
+        },
+        {
+          "name": "region",
+          "kind": "string",
+          "required": true,
+          "description": "AWS region."
+        },
+        {
+          "name": "wait_time_seconds",
+          "kind": "int",
+          "required": false,
+          "description": "Long-poll seconds (0..=20)."
+        },
+        {
+          "name": "visibility_timeout_seconds",
+          "kind": "int",
+          "required": false,
+          "description": "Per-message visibility timeout."
+        }
+      ]
+    },
+    {
+      "kind": "streaming_pubsub",
+      "display_name": "Google Cloud Pub/Sub",
+      "description": "REST-based pull + ack against a subscription.",
+      "requires_agent": false,
+      "config_fields": [
+        {
+          "name": "project_id",
+          "kind": "string",
+          "required": true,
+          "description": "GCP project id."
+        },
+        {
+          "name": "subscription_id",
+          "kind": "string",
+          "required": true,
+          "description": "Subscription id."
+        },
+        {
+          "name": "max_messages",
+          "kind": "int",
+          "required": false,
+          "description": "Soft cap per pull."
+        },
+        {
+          "name": "ack_deadline_seconds",
+          "kind": "int",
+          "required": false,
+          "description": "Per-pull ack-deadline override."
+        }
+      ]
+    },
+    {
+      "kind": "streaming_aveva_pi",
+      "display_name": "Aveva PI",
+      "description": "Poll the PI Web API for observation deltas.",
+      "requires_agent": false,
+      "config_fields": [
+        {
+          "name": "base_url",
+          "kind": "string",
+          "required": true,
+          "description": "PI Web API base URL."
+        },
+        {
+          "name": "event_stream_web_id",
+          "kind": "string",
+          "required": true,
+          "description": "WebID of the event stream."
+        },
+        {
+          "name": "poll_interval_ms",
+          "kind": "int",
+          "required": false,
+          "description": "Polling cadence."
+        },
+        {
+          "name": "auth_header",
+          "kind": "secret",
+          "required": false,
+          "description": "Authorization header (Bearer / Basic)."
+        }
+      ]
+    },
+    {
+      "kind": "streaming_external",
+      "display_name": "External transform (Magritte)",
+      "description": "Generic webhook hook for sources without a dedicated connector (ActiveMQ, Amazon SNS, IBM MQ, RabbitMQ, MQTT, Solace …).",
+      "requires_agent": true,
+      "config_fields": [
+        {
+          "name": "agent_label",
+          "kind": "string",
+          "required": true,
+          "description": "Free-form label for the catalogue."
+        },
+        {
+          "name": "agent_token",
+          "kind": "secret",
+          "required": true,
+          "description": "Bearer token the agent uses to push records."
+        },
+        {
+          "name": "protocol",
+          "kind": "string",
+          "required": true,
+          "description": "activemq | rabbitmq | mqtt | sns | ibm_mq | solace."
+        }
+      ]
+    }
+  ]
+}

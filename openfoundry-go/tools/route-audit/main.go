@@ -362,22 +362,95 @@ func extractRustRoutes(repo, service string) []Route {
 	return dedupeRoutes(routes)
 }
 
-func extractGoFunctionBodies(root string) map[string][]string {
+type goFuncDef struct {
+	Name          string
+	Package       string
+	File          string
+	Body          string
+	BodyLine      int
+	RouterParams  map[string]bool
+	ImportAliases map[string]string
+}
+
+func goPackageName(text string) string {
+	if m := regexp.MustCompile(`(?m)^\s*package\s+(\w+)`).FindStringSubmatch(text); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+func goImportAliases(text string) map[string]string {
+	aliases := map[string]string{}
+	add := func(alias, path string) {
+		name := alias
+		if name == "" {
+			name = filepath.Base(path)
+		}
+		if name != "." && name != "_" {
+			aliases[name] = filepath.Base(path)
+		}
+	}
+	blockRe := regexp.MustCompile(`(?s)import\s*\((.*?)\)`)
+	for _, bm := range blockRe.FindAllStringSubmatch(text, -1) {
+		lineRe := regexp.MustCompile(`(?m)^\s*(?:(\w+)\s+)?"([^"]+)"`)
+		for _, lm := range lineRe.FindAllStringSubmatch(bm[1], -1) {
+			add(lm[1], lm[2])
+		}
+	}
+	singleRe := regexp.MustCompile(`(?m)^\s*import\s+(?:(\w+)\s+)?"([^"]+)"`)
+	for _, m := range singleRe.FindAllStringSubmatch(text, -1) {
+		add(m[1], m[2])
+	}
+	return aliases
+}
+
+func goSearchRoots(repo, service string) []string {
+	roots := []string{filepath.Join(repo, "openfoundry-go", "services", service)}
+	if service == "ontology-actions-service" {
+		roots = append(roots, filepath.Join(repo, "openfoundry-go", "libs", "ontology-kernel", "handlers"))
+	}
+	return roots
+}
+
+func extractGoFunctionDefs(repo, service string) map[string][]goFuncDef {
+	defs := map[string][]goFuncDef{}
+	fnRe := regexp.MustCompile(`func\s+(?:\([^\)]*\)\s*)?(\w+)\s*\(([^)]*)\)`)
+	for _, root := range goSearchRoots(repo, service) {
+		for _, file := range iterFiles(root, ".go") {
+			data, _ := os.ReadFile(file)
+			text := string(data)
+			pkg := goPackageName(text)
+			imports := goImportAliases(text)
+			for _, m := range fnRe.FindAllStringSubmatchIndex(text, -1) {
+				brace := strings.IndexByte(text[m[1]:], '{')
+				if brace < 0 {
+					continue
+				}
+				brace += m[1]
+				close := findMatching(text, brace, '{', '}')
+				if close == -1 {
+					continue
+				}
+				name := text[m[2]:m[3]]
+				params := text[m[4]:m[5]]
+				routerParams := map[string]bool{}
+				for _, pm := range regexp.MustCompile(`(\w+)\s+chi\.Router`).FindAllStringSubmatch(params, -1) {
+					routerParams[pm[1]] = true
+				}
+				def := goFuncDef{Name: name, Package: pkg, File: file, Body: text[brace+1 : close], BodyLine: lineNo(text, brace+1), RouterParams: routerParams, ImportAliases: imports}
+				defs[pkg+"."+name] = append(defs[pkg+"."+name], def)
+				defs[name] = append(defs[name], def)
+			}
+		}
+	}
+	return defs
+}
+
+func extractGoFunctionBodies(repo, service string) map[string][]string {
 	bodies := map[string][]string{}
-	fnRe := regexp.MustCompile(`func\s+(?:\([^\)]*\)\s*)?(\w+)\s*\(`)
-	for _, file := range iterFiles(root, ".go") {
-		data, _ := os.ReadFile(file)
-		text := string(data)
-		for _, m := range fnRe.FindAllStringSubmatchIndex(text, -1) {
-			brace := strings.IndexByte(text[m[1]:], '{')
-			if brace < 0 {
-				continue
-			}
-			brace += m[1]
-			close := findMatching(text, brace, '{', '}')
-			if close != -1 {
-				bodies[text[m[2]:m[3]]] = append(bodies[text[m[2]:m[3]]], text[brace+1:close])
-			}
+	for _, defs := range extractGoFunctionDefs(repo, service) {
+		for _, def := range defs {
+			bodies[def.Name] = append(bodies[def.Name], def.Body)
 		}
 	}
 	return bodies
@@ -413,43 +486,136 @@ func classifyGoHandler(handler string, bodies map[string][]string) string {
 }
 
 func extractGoRoutes(repo, service string) []Route {
-	root := filepath.Join(repo, "openfoundry-go", "services", service)
-	bodies := extractGoFunctionBodies(root)
-	var routes []Route
-	routeStart := regexp.MustCompile(`(\w+)\.Route\s*\(\s*"([^"]+)"\s*,\s*func\s*\(\s*(\w+)\s+chi\.Router\s*\)`)
-	direct := regexp.MustCompile(`(\w+)\.(Get|Post|Put|Patch|Delete|Head|Options)\s*\(\s*"([^"]+)"\s*,\s*([^\)\s,]+)`)
-	methodCall := regexp.MustCompile(`(\w+)\.Method\s*\(\s*http\.Method(\w+)\s*,\s*"([^"]+)"\s*,\s*([^\)\s,]+)`)
-	type frame struct {
-		child string
-		depth int
+	defs := extractGoFunctionDefs(repo, service)
+	bodies := map[string][]string{}
+	for _, group := range defs {
+		for _, def := range group {
+			bodies[def.Name] = append(bodies[def.Name], def.Body)
+		}
 	}
-	for _, file := range iterFiles(root, ".go") {
-		data, _ := os.ReadFile(file)
-		text := string(data)
-		prefix := map[string]string{"r": ""}
-		var stack []frame
-		for no, line := range strings.Split(text, "\n") {
-			lineNo := no + 1
+	var routes []Route
+	direct := regexp.MustCompile(`(\w+)\.(Get|Post|Put|Patch|Delete|Head|Options)\s*\(\s*"([^"]+)"\s*,\s*([^\n]+?)\s*\)`)
+	methodCall := regexp.MustCompile(`(\w+)\.Method\s*\(\s*http\.Method(\w+)\s*,\s*"([^"]+)"\s*,\s*([^\n]+?)\s*\)`)
+	routeStart := regexp.MustCompile(`(\w+)\.Route\s*\(\s*"([^"]+)"\s*,\s*func\s*\(\s*(\w+)\s+chi\.Router\s*\)`)
+	callRe := regexp.MustCompile(`(?:^|[^\.\w])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(`)
+	reserved := map[string]bool{"if": true, "for": true, "switch": true, "return": true, "func": true, "append": true, "make": true, "new": true, "len": true, "cap": true, "panic": true}
+	visited := map[string]bool{}
+	var walk func(def goFuncDef, prefixes map[string]string)
+	copyPrefixes := func(in map[string]string) map[string]string {
+		out := map[string]string{}
+		for k, v := range in {
+			out[k] = v
+		}
+		return out
+	}
+	resolve := func(def goFuncDef, name string) []goFuncDef {
+		if strings.Contains(name, ".") {
+			parts := strings.SplitN(name, ".", 2)
+			pkg := parts[0]
+			if mapped := def.ImportAliases[pkg]; mapped != "" {
+				pkg = mapped
+			}
+			return defs[pkg+"."+parts[1]]
+		}
+		if ds := defs[def.Package+"."+name]; len(ds) > 0 {
+			return ds
+		}
+		return defs[name]
+	}
+	walk = func(def goFuncDef, prefixes map[string]string) {
+		key := def.File + ":" + def.Package + "." + def.Name + fmt.Sprintf("%v", prefixes)
+		if visited[key] {
+			return
+		}
+		visited[key] = true
+		lines := strings.Split(def.Body, "\n")
+		skipUntilLine := 0
+		for no, line := range lines {
+			lineNo := def.BodyLine + no
+			if lineNo < skipUntilLine {
+				continue
+			}
 			if m := routeStart.FindStringSubmatch(line); m != nil {
-				prefix[m[3]] = joinPaths(prefix[m[1]], m[2])
-				stack = append(stack, frame{m[3], strings.Count(line, "{") - strings.Count(line, "}")})
+				childPrefixes := copyPrefixes(prefixes)
+				childPrefixes[m[3]] = joinPaths(prefixes[m[1]], m[2])
+				openRel := strings.Index(def.Body, line)
+				if openRel >= 0 {
+					brace := strings.IndexByte(def.Body[openRel:], '{')
+					if brace >= 0 {
+						brace += openRel
+						close := findMatching(def.Body, brace, '{', '}')
+						if close != -1 {
+							inline := goFuncDef{Name: def.Name + "$route", Package: def.Package, File: def.File, Body: def.Body[brace+1 : close], BodyLine: def.BodyLine + strings.Count(def.Body[:brace+1], "\n"), RouterParams: map[string]bool{m[3]: true}, ImportAliases: def.ImportAliases}
+							walk(inline, childPrefixes)
+							skipUntilLine = def.BodyLine + strings.Count(def.Body[:close+1], "\n")
+						}
+					}
+				}
 			}
 			for _, m := range direct.FindAllStringSubmatch(line, -1) {
-				full := joinPaths(prefix[m[1]], m[3])
-				h := m[4]
-				routes = append(routes, Route{service, "go", goMethods[m[2]], full, h, rel(file, repo), lineNo, classifyGoHandler(h, bodies)})
+				full := joinPaths(prefixes[m[1]], m[3])
+				h := strings.TrimSpace(m[4])
+				routes = append(routes, Route{service, "go", goMethods[m[2]], full, h, rel(def.File, repo), lineNo, classifyGoHandler(h, bodies)})
 			}
 			if m := methodCall.FindStringSubmatch(line); m != nil {
-				full := joinPaths(prefix[m[1]], m[3])
-				h := m[4]
-				routes = append(routes, Route{service, "go", strings.ToUpper(m[2]), full, h, rel(file, repo), lineNo, classifyGoHandler(h, bodies)})
+				full := joinPaths(prefixes[m[1]], m[3])
+				h := strings.TrimSpace(m[4])
+				routes = append(routes, Route{service, "go", strings.ToUpper(m[2]), full, h, rel(def.File, repo), lineNo, classifyGoHandler(h, bodies)})
 			}
-			if len(stack) > 0 {
-				top := &stack[len(stack)-1]
-				top.depth += strings.Count(line, "{") - strings.Count(line, "}")
-				if top.depth <= 0 {
-					delete(prefix, top.child)
-					stack = stack[:len(stack)-1]
+			for _, cm := range callRe.FindAllStringSubmatchIndex(line, -1) {
+				name := line[cm[2]:cm[3]]
+				if reserved[name] || strings.HasPrefix(name, "http.") || strings.HasPrefix(name, "json.") {
+					continue
+				}
+				open := strings.IndexByte(line[cm[3]:], '(')
+				if open < 0 {
+					continue
+				}
+				open += cm[3]
+				close := findMatching(line, open, '(', ')')
+				if close == -1 {
+					continue
+				}
+				args := splitTopLevelArgs(line[open+1 : close])
+				if len(args) == 0 {
+					continue
+				}
+				arg0 := strings.TrimSpace(args[0])
+				pfx, ok := prefixes[arg0]
+				if !ok {
+					continue
+				}
+				for _, child := range resolve(def, name) {
+					for rp := range child.RouterParams {
+						childPrefixes := map[string]string{rp: pfx}
+						walk(child, childPrefixes)
+					}
+				}
+			}
+		}
+	}
+	seeded := map[string]bool{}
+	for _, group := range defs {
+		for _, def := range group {
+			seedKey := def.File + ":" + def.Package + "." + def.Name
+			if seeded[seedKey] {
+				continue
+			}
+			seeded[seedKey] = true
+			if def.Package == "server" && (def.Name == "BuildRouter" || def.Name == "Build") {
+				walk(def, map[string]string{"r": ""})
+			}
+		}
+	}
+	if len(routes) == 0 {
+		for _, group := range defs {
+			for _, def := range group {
+				prefixes := map[string]string{}
+				for rp := range def.RouterParams {
+					prefixes[rp] = ""
+				}
+				if len(prefixes) > 0 {
+					walk(def, prefixes)
 				}
 			}
 		}
@@ -457,7 +623,21 @@ func extractGoRoutes(repo, service string) []Route {
 	return dedupeRoutes(routes)
 }
 
-func routeKey(r Route) string { return r.Method + " " + comparablePath(r.Path) }
+func routeKey(r Route) string {
+	path := r.Path
+	// connector-management-service mounts most Rust routes under `/api/v1` through
+	// `Router::new().nest("/api/v1", { ... })`. The Rust extractor records the
+	// inner block routes before the dynamic closure prefix, while the chi parser
+	// sees the effective Go path. Canonicalize those Rust-only inner paths so the
+	// audit reflects the externally-mounted HTTP surface.
+	if r.Service == "connector-management-service" && r.Side == "rust" &&
+		!strings.HasPrefix(path, "/api/v1") &&
+		!strings.HasPrefix(path, "/iceberg") &&
+		path != "/health" && path != "/metrics" {
+		path = joinPaths("/api/v1", path)
+	}
+	return r.Method + " " + comparablePath(path)
+}
 
 func reportForService(repo, service string) string {
 	rust, goRoutes := extractRustRoutes(repo, service), extractGoRoutes(repo, service)

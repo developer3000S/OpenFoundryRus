@@ -5,12 +5,17 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
+	"github.com/openfoundry/openfoundry-go/libs/observability"
+	ontologykernel "github.com/openfoundry/openfoundry-go/libs/ontology-kernel"
+	ontologymetrics "github.com/openfoundry/openfoundry-go/libs/ontology-kernel/metrics"
+	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/stores"
 	"github.com/openfoundry/openfoundry-go/services/ontology-actions-service/internal/config"
 	"github.com/openfoundry/openfoundry-go/services/ontology-actions-service/internal/server"
 )
@@ -23,7 +28,22 @@ func newTestRouter(t *testing.T) http.Handler {
 	cfg.Service.Name = "ontology-actions-service"
 	cfg.Service.Version = "test"
 	cfg.JWTSecret = testJWTSecret
-	return server.BuildRouter(cfg, nil, nil)
+	state := &ontologykernel.AppState{Stores: stores.NewInMemory()}
+	return server.BuildRouter(cfg, state, nil)
+}
+
+func TestBuildRouterRequiresAppState(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Service.Name = "ontology-actions-service"
+	cfg.Service.Version = "test"
+	cfg.JWTSecret = testJWTSecret
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected BuildRouter to panic without AppState")
+		}
+	}()
+	_ = server.BuildRouter(cfg, nil, nil)
 }
 
 func devToken(t *testing.T) string {
@@ -113,5 +133,28 @@ func TestHealthIsPublic(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Errorf("%s: expected 200, got %d", path, rec.Code)
 		}
+	}
+}
+
+func TestMetricsEndpointRegistersActionCollectors(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Service.Name = "ontology-actions-service"
+	cfg.Service.Version = "test"
+	cfg.JWTSecret = testJWTSecret
+	state := &ontologykernel.AppState{Stores: stores.NewInMemory()}
+	m := observability.NewMetrics()
+	router := server.BuildRouter(cfg, state, m)
+	if actionMetrics := ontologymetrics.ActionMetricsSingleton(); actionMetrics != nil {
+		actionMetrics.RecordSuccess("metrics-smoke", 0.001)
+		actionMetrics.RecordFailure("metrics-smoke", ontologymetrics.FailureTypeInvalidParameter, 0.002)
+	}
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "action_executions_total") || !strings.Contains(rec.Body.String(), "action_execution_duration_seconds") || !strings.Contains(rec.Body.String(), "action_failures_total") {
+		t.Fatalf("missing action metrics collectors in /metrics output: %s", rec.Body.String())
 	}
 }

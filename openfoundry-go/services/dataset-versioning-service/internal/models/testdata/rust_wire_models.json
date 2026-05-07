@@ -1,0 +1,364 @@
+{
+  "branch_compare": {
+    "a_only_transactions": [
+      {
+        "branch": "feature",
+        "committed_at": "2026-05-07T06:10:00Z",
+        "files_changed": 2,
+        "status": "COMMITTED",
+        "transaction_id": "44444444-4444-4444-4444-444444444444",
+        "transaction_rid": "ri.foundry.main.transaction.44444444-4444-4444-4444-444444444444",
+        "tx_type": "APPEND"
+      }
+    ],
+    "b_only_transactions": [],
+    "base_branch": "master",
+    "compare_branch": "feature",
+    "conflicting_files": [
+      {
+        "a_transaction_rid": "ri.foundry.main.transaction.44444444-4444-4444-4444-444444444444",
+        "b_transaction_rid": "ri.foundry.main.transaction.55555555-5555-5555-5555-555555555555",
+        "content_hash_a": "sha-a",
+        "content_hash_b": "sha-b",
+        "logical_path": "daily/part-000.parquet"
+      }
+    ],
+    "lca_branch_rid": "ri.foundry.main.branch.33333333-3333-3333-3333-333333333333"
+  },
+  "branch_markings": {
+    "effective": [
+      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    ],
+    "explicit": [
+      "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    ],
+    "inherited_from_parent": [
+      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    ]
+  },
+  "branch_source": {
+    "as_root": null,
+    "from_branch": "master",
+    "from_transaction_rid": null
+  },
+  "catalog_dataset": {
+    "active_branch": "master",
+    "created_at": "2026-05-07T06:00:00Z",
+    "current_version": 3,
+    "current_view_id": "77777777-7777-7777-7777-777777777777",
+    "description": "Order facts",
+    "format": "parquet",
+    "health_status": "HEALTHY",
+    "id": "11111111-1111-1111-1111-111111111111",
+    "metadata": {
+      "owner_team": "data"
+    },
+    "name": "orders",
+    "owner_id": "22222222-2222-2222-2222-222222222222",
+    "row_count": 789,
+    "size_bytes": 123456,
+    "storage_path": "s3://lake/orders",
+    "tags": [
+      "gold",
+      "pii"
+    ],
+    "updated_at": "2026-05-07T06:30:00Z"
+  },
+  "catalog_facets": {
+    "owners": [
+      {
+        "count": 2,
+        "owner_id": "22222222-2222-2222-2222-222222222222"
+      }
+    ],
+    "tags": [
+      {
+        "count": 3,
+        "value": "gold"
+      }
+    ]
+  },
+  "dataset_health": {
+    "col_count": 3,
+    "dataset_id": "11111111-1111-1111-1111-111111111111",
+    "dataset_rid": "ri.foundry.main.dataset.orders",
+    "extras": {
+      "failure_breakdown_24h": {
+        "APPEND": 1
+      }
+    },
+    "freshness_seconds": 90,
+    "last_build_status": "SUCCESS",
+    "last_commit_at": "2026-05-07T06:20:00Z",
+    "last_computed_at": "2026-05-07T06:21:00Z",
+    "null_pct_by_column": {
+      "order_id": 0,
+      "total": 0.1
+    },
+    "row_count": 789,
+    "schema_drift_flag": false,
+    "txn_failure_rate_24h": 0.05
+  },
+  "dataset_model": {
+    "branches": [],
+    "created_at": "2026-05-07T06:00:00Z",
+    "current_version": 3,
+    "current_view": null,
+    "description": "Order facts",
+    "files": [],
+    "format": "parquet",
+    "health": {
+      "active_alert_count": 1,
+      "lint_finding_count": 2,
+      "lint_posture": "WARN",
+      "profile_generated_at": "2026-05-07T06:21:00Z",
+      "quality_score": 0.98,
+      "status": "HEALTHY"
+    },
+    "id": "11111111-1111-1111-1111-111111111111",
+    "lineage_links": [],
+    "markings": [
+      {
+        "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "source": {
+          "kind": "direct"
+        }
+      }
+    ],
+    "name": "orders",
+    "owner_id": "22222222-2222-2222-2222-222222222222",
+    "permissions": [],
+    "row_count": 789,
+    "schema": null,
+    "size_bytes": 123456,
+    "storage_path": "s3://lake/orders",
+    "tags": [
+      "gold",
+      "pii"
+    ],
+    "updated_at": "2026-05-07T06:30:00Z",
+    "versions": []
+  },
+  "file_listing": {
+    "branch": "master",
+    "files": [
+      {
+        "created_at": "2026-05-07T06:03:00Z",
+        "dataset_id": "11111111-1111-1111-1111-111111111111",
+        "id": "66666666-6666-6666-6666-666666666666",
+        "logical_path": "daily/part-000.parquet",
+        "modified_at": "2026-05-07T06:04:00Z",
+        "physical_uri": "local:///daily/part-000.parquet",
+        "sha256": "abc123",
+        "size_bytes": 42,
+        "status": "active",
+        "transaction_id": "44444444-4444-4444-4444-444444444444"
+      }
+    ],
+    "total": 1,
+    "view_id": "77777777-7777-7777-7777-777777777777"
+  },
+  "mutation_request": {
+    "branch_name": "master",
+    "message": "append daily",
+    "metadata": {
+      "source": "job"
+    },
+    "row_delta": 10,
+    "size_delta_bytes": 2048
+  },
+  "quality": {
+    "alerts": [],
+    "history": [],
+    "profile": {
+      "column_count": 1,
+      "columns": [
+        {
+          "average_value": null,
+          "distinct_count": 789,
+          "field_type": "STRING",
+          "max_value": "z",
+          "min_value": "a",
+          "name": "order_id",
+          "null_count": 0,
+          "null_rate": 0,
+          "nullable": false,
+          "sample_values": [
+            {
+              "count": 1,
+              "value": "A001"
+            }
+          ],
+          "uniqueness_rate": 1
+        }
+      ],
+      "completeness_ratio": 1,
+      "duplicate_rows": 0,
+      "generated_at": "2026-05-07T06:21:00Z",
+      "row_count": 789,
+      "rule_results": [],
+      "uniqueness_ratio": 1
+    },
+    "profiled_at": "2026-05-07T06:21:00Z",
+    "rules": [],
+    "score": 0.98
+  },
+  "retention": {
+    "policy": "TTL_DAYS",
+    "source_branch_id": "33333333-3333-3333-3333-333333333333",
+    "ttl_days": 30
+  },
+  "schema_response": {
+    "branch": "master",
+    "content_hash": "hash-1",
+    "created_at": "2026-05-07T06:22:00Z",
+    "dataset_id": "11111111-1111-1111-1111-111111111111",
+    "schema": {
+      "custom_metadata": {
+        "csv": {
+          "charset": "UTF-8",
+          "dateFormat": "yyyy-MM-dd",
+          "delimiter": ",",
+          "escape": "\\",
+          "header": true,
+          "nullValue": "",
+          "quote": "\"",
+          "timestampFormat": "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        }
+      },
+      "fields": [
+        {
+          "description": "identifier",
+          "name": "order_id",
+          "nullable": false,
+          "type": "STRING"
+        },
+        {
+          "name": "items",
+          "nullable": true,
+          "subSchemas": [
+            {
+              "name": "sku",
+              "nullable": false,
+              "type": "STRING"
+            }
+          ],
+          "type": "STRUCT"
+        }
+      ],
+      "file_format": "TEXT"
+    },
+    "unchanged": true,
+    "view_id": "77777777-7777-7777-7777-777777777777"
+  },
+  "snapshot_request": {
+    "message": "snapshot daily"
+  },
+  "storage_details": {
+    "base_directory": "/tmp/openfoundry",
+    "driver": "local",
+    "fs_id": "local-dev",
+    "presign_ttl_seconds": 900,
+    "total_active_bytes": 42,
+    "total_active_files": 1,
+    "total_deleted_bytes": 0,
+    "total_deleted_files": 0
+  },
+  "transaction": {
+    "aborted_at": null,
+    "branch_id": "33333333-3333-3333-3333-333333333333",
+    "branch_name": "master",
+    "committed_at": null,
+    "dataset_id": "11111111-1111-1111-1111-111111111111",
+    "id": "44444444-4444-4444-4444-444444444444",
+    "metadata": {
+      "schema": "v1"
+    },
+    "providence": {
+      "job": "daily"
+    },
+    "started_at": "2026-05-07T06:05:00Z",
+    "started_by": "22222222-2222-2222-2222-222222222222",
+    "status": "OPEN",
+    "summary": "daily load",
+    "tx_type": "SNAPSHOT"
+  },
+  "transaction_batch": [
+    {
+      "data": {
+        "aborted_at": null,
+        "branch_id": "33333333-3333-3333-3333-333333333333",
+        "branch_name": "master",
+        "committed_at": null,
+        "dataset_id": "11111111-1111-1111-1111-111111111111",
+        "id": "44444444-4444-4444-4444-444444444444",
+        "metadata": {
+          "schema": "v1"
+        },
+        "providence": {
+          "job": "daily"
+        },
+        "started_at": "2026-05-07T06:05:00Z",
+        "started_by": "22222222-2222-2222-2222-222222222222",
+        "status": "OPEN",
+        "summary": "daily load",
+        "tx_type": "SNAPSHOT"
+      },
+      "id": "44444444-4444-4444-4444-444444444444",
+      "status": 200
+    },
+    {
+      "error": "transaction not found",
+      "id": "99999999-9999-9999-9999-999999999999",
+      "status": 404
+    }
+  ],
+  "upload_url": {
+    "expires_at": "2026-05-07T06:20:00Z",
+    "method": "PUT",
+    "physical_uri": "local:///transactions/444/daily/part-000.parquet",
+    "url": "http://localhost/upload"
+  },
+  "validate_response": {
+    "conforms": false,
+    "files": [
+      {
+        "conforms": false,
+        "errors": [
+          {
+            "field": "total",
+            "kind": "missing",
+            "message": "missing field"
+          }
+        ],
+        "format": "PARQUET",
+        "path": "daily/part-000.parquet",
+        "size_bytes": 42
+      }
+    ],
+    "schema_errors": []
+  },
+  "view": {
+    "branch_id": "33333333-3333-3333-3333-333333333333",
+    "computed_at": "2026-05-07T06:22:00Z",
+    "dataset_id": "11111111-1111-1111-1111-111111111111",
+    "fallback_chain": [
+      "master"
+    ],
+    "file_count": 1,
+    "files": [
+      {
+        "introduced_by": "44444444-4444-4444-4444-444444444444",
+        "logical_path": "daily/part-000.parquet",
+        "physical_path": "local:///daily/part-000.parquet",
+        "size_bytes": 42
+      }
+    ],
+    "head_transaction_id": "44444444-4444-4444-4444-444444444444",
+    "id": "77777777-7777-7777-7777-777777777777",
+    "requested_branch": "master",
+    "resolved_branch": "master",
+    "size_bytes": 42
+  }
+}

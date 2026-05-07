@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -142,14 +143,18 @@ func ExecuteActionBatchHandler(state *ontologykernel.AppState) http.HandlerFunc 
 
 		// ── Batched function-invocation path (function-backed only) ──
 		if batched && functionBacked {
+			startedAt := time.Now()
 			value, err := executeBatchedFunctionInvocation(
 				r.Context(), state, claims, action,
 				body.TargetObjectIDs, body.Parameters, body.Justification,
 			)
 			if err != nil {
+				failureType := classifyExecutePlanError(err).AsStr()
+				_ = emitActionAttemptEvent(r.Context(), state, claims, action, nil, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 				dbError(w, err.Error())
 				return
 			}
+			_ = emitActionAttemptEvent(r.Context(), state, claims, action, nil, body.Parameters, "success", time.Since(startedAt).Milliseconds(), nil)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"total":     total,
 				"succeeded": total,
@@ -163,6 +168,7 @@ func ExecuteActionBatchHandler(state *ontologykernel.AppState) http.HandlerFunc 
 		// ── Per-target loop ─────────────────────────────────────────
 		_, sideEffects, _ := splitWebhookConfigs(action.Config)
 		for _, targetID := range body.TargetObjectIDs {
+			startedAt := time.Now()
 			tid := targetID
 			validationReq := models.ValidateActionRequest{
 				TargetObjectID: &tid,
@@ -182,6 +188,11 @@ func ExecuteActionBatchHandler(state *ontologykernel.AppState) http.HandlerFunc 
 					map[string]any{"details": errs, "batch": true}); auditErr != nil {
 					logAuditFailure(action.ID, auditErr)
 				}
+				ft := "invalid_parameter"
+				if status == "denied" {
+					ft = "authentication"
+				}
+				_ = emitActionAttemptEvent(r.Context(), state, claims, action, &tid, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &ft)
 				results = append(results, mustJSON(map[string]any{
 					"target_object_id": tid,
 					"status":           status,
@@ -197,6 +208,8 @@ func ExecuteActionBatchHandler(state *ontologykernel.AppState) http.HandlerFunc 
 					map[string]any{"batch": true}); auditErr != nil {
 					logAuditFailure(action.ID, auditErr)
 				}
+				failureType := classifyExecutePlanError(err).AsStr()
+				_ = emitActionAttemptEvent(r.Context(), state, claims, action, &tid, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
 				results = append(results, mustJSON(map[string]any{
 					"target_object_id": tid,
 					"status":           "failed",
@@ -223,6 +236,7 @@ func ExecuteActionBatchHandler(state *ontologykernel.AppState) http.HandlerFunc 
 			}
 			runWebhookSideEffects(r.Context(), state, claims, claims.Sub, action.ID,
 				executed.targetObjectID, sideEffects, body.Parameters)
+			_ = emitActionAttemptEvent(r.Context(), state, claims, action, executed.targetObjectID, body.Parameters, "success", time.Since(startedAt).Milliseconds(), nil)
 			results = append(results, mustJSON(map[string]any{
 				"target_object_id": tid,
 				"status":           "succeeded",

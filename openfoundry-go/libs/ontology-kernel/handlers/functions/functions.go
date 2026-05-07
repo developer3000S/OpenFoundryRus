@@ -68,7 +68,7 @@ type FunctionPackageRunRecorder interface {
 type defaultFunctionPackageRunRecorder struct{}
 
 func (defaultFunctionPackageRunRecorder) RecordFunctionPackageRun(ctx context.Context, state *ontologykernel.AppState, pkg models.FunctionPackageSummary, runCtx domain.FunctionPackageRunContext, startedAt time.Time, completedAt time.Time, durationMs int64, status string, errorMessage *string) error {
-	return domain.RecordFunctionPackageRun(ctx, state.DB, pkg, runCtx, startedAt, completedAt, durationMs, status, errorMessage)
+	return recordFunctionPackageRun(ctx, state, pkg, runCtx, startedAt, completedAt, durationMs, status, errorMessage)
 }
 
 type functionPackageSimulationDeps struct {
@@ -131,33 +131,10 @@ func ListFunctionPackages(state *ontologykernel.AppState) http.HandlerFunc {
 		search := strDeref(q.Search)
 		runtime := strDeref(q.Runtime)
 
-		rows, err := state.DB.Query(r.Context(), `
-			SELECT id, name, version, display_name, description, runtime, source, entrypoint,
-			       capabilities, owner_id, created_at, updated_at
-			FROM ontology_function_packages
-			WHERE ($1 = '' OR runtime = $1)
-			  AND ($2 = '' OR name ILIKE '%' || $2 || '%' OR display_name ILIKE '%' || $2 || '%')
-			ORDER BY name ASC, created_at DESC`,
-			runtime, search,
-		)
+		packages, err := listFunctionPackages(r.Context(), state, runtime, search)
 		if err != nil {
 			dbError(w, "failed to list function packages: "+err.Error())
 			return
-		}
-		defer rows.Close()
-
-		packages := []models.FunctionPackage{}
-		for rows.Next() {
-			var row models.FunctionPackageRow
-			if err := rows.Scan(
-				&row.ID, &row.Name, &row.Version, &row.DisplayName, &row.Description,
-				&row.Runtime, &row.Source, &row.Entrypoint, &row.Capabilities,
-				&row.OwnerID, &row.CreatedAt, &row.UpdatedAt,
-			); err != nil {
-				dbError(w, "failed to decode function packages: "+err.Error())
-				return
-			}
-			packages = append(packages, row.IntoPackage())
 		}
 
 		// Stable order: name ASC, then version DESC (semver ordering),
@@ -228,8 +205,6 @@ func CreateFunctionPackage(state *ontologykernel.AppState) http.HandlerFunc {
 			return
 		}
 
-		caps, _ := json.Marshal(capabilities)
-		var row models.FunctionPackageRow
 		// Rust uses Uuid::now_v7() so package IDs sort by time —
 		// drives stable ordering on the listing endpoint.
 		pkgID, err := uuid.NewV7()
@@ -237,25 +212,13 @@ func CreateFunctionPackage(state *ontologykernel.AppState) http.HandlerFunc {
 			http.Error(w, fmt.Sprintf("failed to allocate function package id: %s", err), http.StatusInternalServerError)
 			return
 		}
-		err = state.DB.QueryRow(r.Context(), `
-			INSERT INTO ontology_function_packages (
-				id, name, version, display_name, description, runtime, source, entrypoint, capabilities, owner_id
-			)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
-			RETURNING id, name, version, display_name, description, runtime, source, entrypoint,
-			          capabilities, owner_id, created_at, updated_at`,
-			pkgID, strings.TrimSpace(body.Name), version, displayName, description,
-			body.Runtime, body.Source, entrypoint, caps, claims.Sub,
-		).Scan(
-			&row.ID, &row.Name, &row.Version, &row.DisplayName, &row.Description,
-			&row.Runtime, &row.Source, &row.Entrypoint, &row.Capabilities,
-			&row.OwnerID, &row.CreatedAt, &row.UpdatedAt,
-		)
+		pkg := models.FunctionPackage{ID: pkgID, Name: strings.TrimSpace(body.Name), Version: version, DisplayName: displayName, Description: description, Runtime: body.Runtime, Source: body.Source, Entrypoint: entrypoint, Capabilities: capabilities, OwnerID: claims.Sub}
+		out, err := createFunctionPackage(r.Context(), state, pkg)
 		if err != nil {
 			dbError(w, "failed to create function package: "+err.Error())
 			return
 		}
-		writeJSON(w, http.StatusCreated, row.IntoPackage())
+		writeJSON(w, http.StatusCreated, out)
 	}
 }
 
@@ -323,35 +286,16 @@ func UpdateFunctionPackage(state *ontologykernel.AppState) http.HandlerFunc {
 			return
 		}
 
-		caps, _ := json.Marshal(capabilities)
-		var row models.FunctionPackageRow
-		err = state.DB.QueryRow(r.Context(), `
-			UPDATE ontology_function_packages
-			SET display_name = COALESCE($2, display_name),
-			    description  = COALESCE($3, description),
-			    runtime      = $4,
-			    source       = $5,
-			    entrypoint   = $6,
-			    capabilities = $7::jsonb,
-			    updated_at   = NOW()
-			WHERE id = $1
-			RETURNING id, name, version, display_name, description, runtime, source, entrypoint,
-			          capabilities, owner_id, created_at, updated_at`,
-			id, body.DisplayName, body.Description, runtime, source, entrypoint, caps,
-		).Scan(
-			&row.ID, &row.Name, &row.Version, &row.DisplayName, &row.Description,
-			&row.Runtime, &row.Source, &row.Entrypoint, &row.Capabilities,
-			&row.OwnerID, &row.CreatedAt, &row.UpdatedAt,
-		)
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, nil)
-			return
-		}
+		existing.Runtime = runtime
+		existing.Source = source
+		existing.Entrypoint = entrypoint
+		existing.Capabilities = capabilities
+		out, err := updateFunctionPackage(r.Context(), state, *existing, body)
 		if err != nil {
 			dbError(w, "failed to update function package: "+err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, row.IntoPackage())
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 
@@ -363,12 +307,12 @@ func DeleteFunctionPackage(state *ontologykernel.AppState) http.HandlerFunc {
 			writeJSON(w, http.StatusNotFound, nil)
 			return
 		}
-		ct, err := state.DB.Exec(r.Context(), "DELETE FROM ontology_function_packages WHERE id = $1", id)
+		deleted, err := deleteFunctionPackage(r.Context(), state, id)
 		if err != nil {
 			dbError(w, "failed to delete function package: "+err.Error())
 			return
 		}
-		if ct.RowsAffected() == 0 {
+		if !deleted {
 			writeJSON(w, http.StatusNotFound, nil)
 			return
 		}
@@ -513,9 +457,9 @@ func SimulateFunctionPackageWithDeps(state *ontologykernel.AppState, deps functi
 		errMessage := execErr.Error()
 		_ = deps.Recorder.RecordFunctionPackageRun(ctx, state, summary, runCtx,
 			startedAt, completedAt, durationMs, "failure", &errMessage)
-		// Python sentinel surfaces 501; everything else is 500.
+		// Missing Python runtime is a config-gated dependency; everything else is 500.
 		if errors.Is(execErr, domain.ErrPythonRuntimeNotWired) {
-			writeJSON(w, http.StatusNotImplemented, map[string]any{
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 				"error":   "python_runtime_not_wired",
 				"detail":  errMessage,
 				"package": summary,
@@ -551,56 +495,12 @@ func ListFunctionPackageRuns(state *ontologykernel.AppState) http.HandlerFunc {
 		}
 		page := defaultPage(query.Page)
 		perPage := defaultPerPage(query.PerPage)
-		status := strDeref(query.Status)
-		invocationKind := strDeref(query.InvocationKind)
-
-		var total int64
-		if err := state.DB.QueryRow(r.Context(), `
-			SELECT COUNT(*) FROM ontology_function_package_runs
-			WHERE function_package_id = $1
-			  AND ($2 = '' OR status = $2)
-			  AND ($3 = '' OR invocation_kind = $3)`,
-			id, status, invocationKind,
-		).Scan(&total); err != nil {
-			dbError(w, "failed to count function package runs: "+err.Error())
-			return
-		}
-
-		offset := (page - 1) * perPage
-		rows, err := state.DB.Query(r.Context(), `
-			SELECT id, function_package_id, function_package_name, function_package_version,
-			       runtime, status, invocation_kind, action_id, action_name, object_type_id,
-			       target_object_id, actor_id, duration_ms, error_message, started_at, completed_at
-			FROM ontology_function_package_runs
-			WHERE function_package_id = $1
-			  AND ($2 = '' OR status = $2)
-			  AND ($3 = '' OR invocation_kind = $3)
-			ORDER BY completed_at DESC
-			OFFSET $4 LIMIT $5`,
-			id, status, invocationKind, offset, perPage,
-		)
+		data, total, err := listFunctionPackageRuns(r.Context(), state, id, strDeref(query.Status), strDeref(query.InvocationKind), page, perPage)
 		if err != nil {
 			dbError(w, "failed to load function package runs: "+err.Error())
 			return
 		}
-		defer rows.Close()
-		data := []models.FunctionPackageRun{}
-		for rows.Next() {
-			var run models.FunctionPackageRun
-			if err := rows.Scan(
-				&run.ID, &run.FunctionPackageID, &run.FunctionPackageName, &run.FunctionPackageVersion,
-				&run.Runtime, &run.Status, &run.InvocationKind, &run.ActionID, &run.ActionName,
-				&run.ObjectTypeID, &run.TargetObjectID, &run.ActorID, &run.DurationMs,
-				&run.ErrorMessage, &run.StartedAt, &run.CompletedAt,
-			); err != nil {
-				dbError(w, "failed to load function package runs: "+err.Error())
-				return
-			}
-			data = append(data, run)
-		}
-		writeJSON(w, http.StatusOK, models.ListFunctionPackageRunsResponse{
-			Data: data, Total: total, Page: page, PerPage: perPage,
-		})
+		writeJSON(w, http.StatusOK, models.ListFunctionPackageRunsResponse{Data: data, Total: total, Page: page, PerPage: perPage})
 	}
 }
 
@@ -621,28 +521,7 @@ func GetFunctionPackageMetrics(state *ontologykernel.AppState) http.HandlerFunc 
 			writeJSON(w, http.StatusNotFound, nil)
 			return
 		}
-
-		var row models.FunctionPackageMetricsRow
-		err = state.DB.QueryRow(r.Context(), `
-			SELECT
-			    COUNT(*)::bigint AS total_runs,
-			    COUNT(*) FILTER (WHERE status = 'success')::bigint AS successful_runs,
-			    COUNT(*) FILTER (WHERE status = 'failure')::bigint AS failed_runs,
-			    COUNT(*) FILTER (WHERE invocation_kind = 'simulation')::bigint AS simulation_runs,
-			    COUNT(*) FILTER (WHERE invocation_kind = 'action')::bigint AS action_runs,
-			    AVG(duration_ms)::double precision AS avg_duration_ms,
-			    percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)::double precision AS p95_duration_ms,
-			    MAX(duration_ms)::bigint AS max_duration_ms,
-			    MAX(completed_at) AS last_run_at,
-			    MAX(completed_at) FILTER (WHERE status = 'success') AS last_success_at,
-			    MAX(completed_at) FILTER (WHERE status = 'failure') AS last_failure_at
-			FROM ontology_function_package_runs
-			WHERE function_package_id = $1`, id,
-		).Scan(
-			&row.TotalRuns, &row.SuccessfulRuns, &row.FailedRuns, &row.SimulationRuns, &row.ActionRuns,
-			&row.AvgDurationMs, &row.P95DurationMs, &row.MaxDurationMs,
-			&row.LastRunAt, &row.LastSuccessAt, &row.LastFailureAt,
-		)
+		row, err := functionPackageMetrics(r.Context(), state, id)
 		if err != nil {
 			dbError(w, "failed to load function package metrics: "+err.Error())
 			return
@@ -651,21 +530,7 @@ func GetFunctionPackageMetrics(state *ontologykernel.AppState) http.HandlerFunc 
 		if row.TotalRuns > 0 {
 			successRate = float64(row.SuccessfulRuns) / float64(row.TotalRuns)
 		}
-		writeJSON(w, http.StatusOK, models.FunctionPackageMetricsResponse{
-			Package:        pkg.Summary(),
-			TotalRuns:      row.TotalRuns,
-			SuccessfulRuns: row.SuccessfulRuns,
-			FailedRuns:     row.FailedRuns,
-			SimulationRuns: row.SimulationRuns,
-			ActionRuns:     row.ActionRuns,
-			SuccessRate:    successRate,
-			AvgDurationMs:  row.AvgDurationMs,
-			P95DurationMs:  row.P95DurationMs,
-			MaxDurationMs:  row.MaxDurationMs,
-			LastRunAt:      row.LastRunAt,
-			LastSuccessAt:  row.LastSuccessAt,
-			LastFailureAt:  row.LastFailureAt,
-		})
+		writeJSON(w, http.StatusOK, models.FunctionPackageMetricsResponse{Package: pkg.Summary(), TotalRuns: row.TotalRuns, SuccessfulRuns: row.SuccessfulRuns, FailedRuns: row.FailedRuns, SimulationRuns: row.SimulationRuns, ActionRuns: row.ActionRuns, SuccessRate: successRate, AvgDurationMs: row.AvgDurationMs, P95DurationMs: row.P95DurationMs, MaxDurationMs: row.MaxDurationMs, LastRunAt: row.LastRunAt, LastSuccessAt: row.LastSuccessAt, LastFailureAt: row.LastFailureAt})
 	}
 }
 
@@ -699,7 +564,7 @@ func loadPackage(r *http.Request, state *ontologykernel.AppState, id uuid.UUID) 
 	return loadPackageByID(r.Context(), state, id)
 }
 
-func loadPackageByID(ctx context.Context, state *ontologykernel.AppState, id uuid.UUID) (*models.FunctionPackage, error) {
+func loadPackageByIDPG(ctx context.Context, state *ontologykernel.AppState, id uuid.UUID) (*models.FunctionPackage, error) {
 	var row models.FunctionPackageRow
 	err := state.DB.QueryRow(ctx, `
 		SELECT id, name, version, display_name, description, runtime, source, entrypoint,
