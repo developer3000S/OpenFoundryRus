@@ -1,5 +1,5 @@
 // Command ontology-indexer hosts the worker that consumes
-// `ontology.object.changed.v1` / `ontology.link.changed.v1` and
+// `ontology.objects.changed.v1` / `ontology.links.changed.v1` and
 // projects ontology objects + links into the configured search
 // backend (Vespa / OpenSearch).
 //
