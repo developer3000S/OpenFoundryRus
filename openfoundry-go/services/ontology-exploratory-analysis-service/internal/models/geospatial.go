@@ -584,3 +584,110 @@ type ClusterResponse struct {
 	Clusters  []ClusterSummary `json:"clusters"`
 	Outliers  int              `json:"outliers"`
 }
+
+// TileHexBin mirrors the Rust struct emitted by `hex_aggregate`. It
+// is the per-cell row of a vector-tile aggregation.
+type TileHexBin struct {
+	CellID    string     `json:"cell_id"`
+	Centroid  Coordinate `json:"centroid"`
+	Count     int        `json:"count"`
+	Intensity float64    `json:"intensity"`
+}
+
+// VectorTileResponse mirrors the Rust struct returned by
+// `tile_server::vector_tile`. ZoomRange uses [2]uint8 — Rust emits
+// `[u8; 2]` and clients rely on the array shape.
+type VectorTileResponse struct {
+	LayerID          uuid.UUID    `json:"layer_id"`
+	LayerName        string       `json:"layer_name"`
+	TileURLTemplate  string       `json:"tile_url_template"`
+	Format           string       `json:"format"`
+	ZoomRange        [2]uint8     `json:"zoom_range"`
+	H3Bins           []TileHexBin `json:"h3_bins"`
+	FeatureCount     int          `json:"feature_count"`
+}
+
+// GeocodeRequest mirrors the Rust DTO.
+type GeocodeRequest struct {
+	Address string `json:"address"`
+}
+
+// ReverseGeocodeRequest mirrors the Rust DTO.
+type ReverseGeocodeRequest struct {
+	Coordinate Coordinate `json:"coordinate"`
+}
+
+// GeocodeResponse mirrors the Rust struct emitted by both forward and
+// reverse geocoding paths.
+type GeocodeResponse struct {
+	Address    string     `json:"address"`
+	Coordinate Coordinate `json:"coordinate"`
+	Confidence float64    `json:"confidence"`
+	Source     string     `json:"source"`
+}
+
+// RouteMode mirrors the Rust enum (snake_case wire form).
+type RouteMode string
+
+const (
+	RouteModeDrive RouteMode = "drive"
+	RouteModeBike  RouteMode = "bike"
+	RouteModeWalk  RouteMode = "walk"
+)
+
+func (m RouteMode) String() string { return string(m) }
+
+func (m RouteMode) Valid() bool {
+	switch m {
+	case RouteModeDrive, RouteModeBike, RouteModeWalk:
+		return true
+	default:
+		return false
+	}
+}
+
+func ParseRouteMode(s string) (RouteMode, error) {
+	m := RouteMode(s)
+	if !m.Valid() {
+		return "", fmt.Errorf("unsupported route mode: %s", s)
+	}
+	return m, nil
+}
+
+func (m *RouteMode) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	parsed, err := ParseRouteMode(s)
+	if err != nil {
+		return err
+	}
+	*m = parsed
+	return nil
+}
+
+// RouteRequest mirrors the Rust DTO. `MaxMinutes` is a pointer so the
+// handler can detect "field omitted" matching `#[serde(default)]`.
+type RouteRequest struct {
+	Origin      Coordinate `json:"origin"`
+	Destination Coordinate `json:"destination"`
+	Mode        RouteMode  `json:"mode"`
+	MaxMinutes  *uint32    `json:"max_minutes,omitempty"`
+}
+
+// IsochronePoint mirrors the Rust struct.
+type IsochronePoint struct {
+	Label      string     `json:"label"`
+	Coordinate Coordinate `json:"coordinate"`
+	EtaMinutes uint32     `json:"eta_minutes"`
+}
+
+// RouteResponse mirrors the Rust struct.
+type RouteResponse struct {
+	Mode       RouteMode        `json:"mode"`
+	DistanceKm float64          `json:"distance_km"`
+	DurationMin uint32          `json:"duration_min"`
+	Polyline   []Coordinate     `json:"polyline"`
+	Isochrone  []IsochronePoint `json:"isochrone"`
+}
