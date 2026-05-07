@@ -22,7 +22,7 @@ import (
 )
 
 // New builds the http.Server for the foundation slice + workspace surface.
-func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, ws *workspace.Handlers, m *observability.Metrics) *http.Server {
+func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, ph *handlers.ProjectsHandlers, ws *workspace.Handlers, m *observability.Metrics) *http.Server {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, chimw.Compress(5))
 	r.Use(chimw.Timeout(30 * time.Second))
@@ -45,6 +45,20 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, ws *wo
 		api.Get("/organizations/{id}/enrollments", h.ListEnrollments)
 		api.Post("/enrollments", h.CreateEnrollment)
 		api.Delete("/enrollments/{id}", h.DeleteEnrollment)
+
+		api.Get("/projects", ph.ListProjects)
+		api.Post("/projects", ph.CreateProject)
+		api.Get("/projects/{id}", ph.GetProject)
+		api.Patch("/projects/{id}", ph.UpdateProject)
+		api.Delete("/projects/{id}", ph.DeleteProject)
+		api.Get("/projects/{id}/memberships", ph.ListProjectMemberships)
+		api.Put("/projects/{id}/memberships", ph.UpsertProjectMembership)
+		api.Delete("/projects/{id}/memberships/{user_id}", ph.DeleteProjectMembership)
+		api.Get("/projects/{id}/folders", ph.ListProjectFolders)
+		api.Post("/projects/{id}/folders", ph.CreateProjectFolder)
+		api.Get("/projects/{id}/resources", ph.ListProjectResources)
+		api.Post("/projects/{id}/resources", ph.BindProjectResource)
+		api.Delete("/projects/{id}/resources/{kind}/{resource_id}", ph.UnbindProjectResource)
 
 		api.Route("/workspace", func(wr chi.Router) {
 			wr.Get("/favorites", ws.ListFavorites)

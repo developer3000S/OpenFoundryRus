@@ -192,11 +192,17 @@ func (s *CassandraScanner) indexByType(
 	iter := q.Iter()
 	out := make([]indexRow, 0, pageSize)
 	var objectID gocql.UUID
-	for iter.Scan(&objectID) {
+	// gocql auto-paginates within a single Iter — to surface the
+	// server's paging-state cursor we stop after pageSize rows so the
+	// driver does not silently fetch page N+1. Same trick as the
+	// Rust impl, which consumes exactly `result.rows` and then calls
+	// `result.paging_state.clone()`.
+	for i := 0; i < pageSize; i++ {
+		if !iter.Scan(&objectID) {
+			break
+		}
 		out = append(out, indexRow{objectID: objectID, typeHint: typeID})
 	}
-	// gocql requires PageState() be read after iteration but before
-	// Close — same ordering as object_store.ListByType.
 	nextState := append([]byte(nil), iter.PageState()...)
 	if err := iter.Close(); err != nil {
 		return nil, nil, &ScanError{Kind: "driver", Reason: err.Error()}
@@ -222,7 +228,10 @@ func (s *CassandraScanner) indexAllTypes(
 		rowType  string
 		objectID gocql.UUID
 	)
-	for iter.Scan(&rowType, &objectID) {
+	for i := 0; i < pageSize; i++ {
+		if !iter.Scan(&rowType, &objectID) {
+			break
+		}
 		out = append(out, indexRow{objectID: objectID, typeHint: rowType})
 	}
 	nextState := append([]byte(nil), iter.PageState()...)
