@@ -394,7 +394,8 @@ func (r *Repository) listJobsForBuild(ctx context.Context, buildID uuid.UUID) ([
 func (r *Repository) LoadPlan(ctx context.Context, buildID uuid.UUID) (executor.Plan, error) {
 	var plan executor.Plan
 	var abortPolicy string
-	err := r.db.QueryRow(ctx, `SELECT id, build_branch, abort_policy FROM builds WHERE id=$1`, buildID).Scan(&plan.BuildID, &plan.BuildBranch, &abortPolicy)
+	var forceBuild bool
+	err := r.db.QueryRow(ctx, `SELECT id, build_branch, abort_policy, force_build FROM builds WHERE id=$1`, buildID).Scan(&plan.BuildID, &plan.BuildBranch, &abortPolicy, &forceBuild)
 	if err != nil {
 		return executor.Plan{}, err
 	}
@@ -409,14 +410,98 @@ func (r *Repository) LoadPlan(ctx context.Context, buildID uuid.UUID) (executor.
 	if err != nil {
 		return executor.Plan{}, err
 	}
+	specs, err := r.jobSpecsByRID(ctx, buildID)
+	if err != nil {
+		return executor.Plan{}, err
+	}
 	for _, job := range jobs {
 		outputs, err := r.outputsForJob(ctx, job.ID)
 		if err != nil {
 			return executor.Plan{}, err
 		}
-		plan.Nodes = append(plan.Nodes, executor.Node{ID: job.JobSpecRID, JobID: job.ID, DependsOn: deps[job.ID], Outputs: outputs, MaxAttempts: 1, Metadata: map[string]any{"job_spec_rid": job.JobSpecRID}})
+		metadata := map[string]any{
+			"job_spec_rid": job.JobSpecRID,
+			"force_build":  forceBuild,
+		}
+		if spec, ok := specs[job.JobSpecRID]; ok {
+			if spec.LogicKind != "" {
+				metadata["logic_kind"] = spec.LogicKind
+			}
+			if len(spec.LogicPayload) > 0 {
+				metadata["logic_payload"] = spec.LogicPayload
+			}
+			if spec.TransformType != "" {
+				metadata["transform_type"] = spec.TransformType
+			}
+			if len(spec.InputDatasetRIDs) > 0 {
+				metadata["input_dataset_ids"] = append([]string(nil), spec.InputDatasetRIDs...)
+			}
+			if len(spec.OutputDatasetRIDs) > 0 {
+				metadata["output_dataset_id"] = spec.OutputDatasetRIDs[0]
+			}
+		}
+		plan.Nodes = append(plan.Nodes, executor.Node{ID: job.JobSpecRID, JobID: job.ID, DependsOn: deps[job.ID], Outputs: outputs, MaxAttempts: 1, Metadata: metadata})
 	}
 	return plan, nil
+}
+
+type jobSpecMetadata struct {
+	LogicKind         string
+	LogicPayload      json.RawMessage
+	TransformType     string
+	InputDatasetRIDs  []string
+	OutputDatasetRIDs []string
+}
+
+// jobSpecsByRID joins jobs with the published job_specs table to recover the
+// spec body needed by the runner (logic_kind, logic_payload, transform_type,
+// input/output dataset rids). Missing rows just yield empty metadata; the
+// runner falls back to defaults the same way it does for inline-built plans.
+func (r *Repository) jobSpecsByRID(ctx context.Context, buildID uuid.UUID) (map[string]jobSpecMetadata, error) {
+	rows, err := r.db.Query(ctx, `SELECT js.rid, js.logic_kind, js.logic_payload, js.inputs, js.output_dataset_rids
+FROM jobs j
+JOIN job_specs js ON js.rid = j.job_spec_rid
+WHERE j.build_id = $1`, buildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]jobSpecMetadata{}
+	for rows.Next() {
+		var rid string
+		var logicKind string
+		var payload, inputsRaw []byte
+		var outputs []string
+		if err := rows.Scan(&rid, &logicKind, &payload, &inputsRaw, &outputs); err != nil {
+			return nil, err
+		}
+		spec := jobSpecMetadata{LogicKind: logicKind, LogicPayload: append(json.RawMessage(nil), payload...), OutputDatasetRIDs: outputs}
+		var inputs []struct {
+			DatasetRID    string `json:"dataset_rid"`
+			TransformType string `json:"transform_type"`
+		}
+		if len(inputsRaw) > 0 {
+			_ = json.Unmarshal(inputsRaw, &inputs)
+		}
+		for _, item := range inputs {
+			if item.DatasetRID != "" {
+				spec.InputDatasetRIDs = append(spec.InputDatasetRIDs, item.DatasetRID)
+			}
+			if item.TransformType != "" && spec.TransformType == "" {
+				spec.TransformType = item.TransformType
+			}
+		}
+		if spec.TransformType == "" && len(payload) > 0 {
+			var pcfg struct {
+				TransformType string `json:"transform_type"`
+			}
+			if json.Unmarshal(payload, &pcfg) == nil && pcfg.TransformType != "" {
+				spec.TransformType = pcfg.TransformType
+			}
+		}
+		out[rid] = spec
+	}
+	return out, rows.Err()
 }
 
 func (r *Repository) dependenciesForBuild(ctx context.Context, buildID uuid.UUID) (map[uuid.UUID][]string, error) {
@@ -726,6 +811,43 @@ func (r *Repository) Abort(ctx context.Context, tx executor.OutputTransaction) e
 func (r *Repository) Commit(ctx context.Context, tx executor.OutputTransaction) error {
 	_, err := r.db.Exec(ctx, `UPDATE job_outputs SET committed=TRUE WHERE output_dataset_rid=$1 AND transaction_rid=$2`, tx.DatasetRID, tx.TransactionRID)
 	return err
+}
+
+// Record implements executor.AuditSink. It mirrors Rust transition_job_in_tx by
+// flipping jobs.state on a matching `from` row and appending a
+// job_state_transitions row, but only when the event carries a real state
+// transition (build-terminal events and per-output commit/abort markers are
+// dropped — those are surfaced via build_events / job_outputs flags instead).
+func (r *Repository) Record(ctx context.Context, event executor.AuditEvent) error {
+	if event.JobID == uuid.Nil || event.From == "" || event.To == "" || event.From == event.To {
+		return nil
+	}
+	from := string(event.From)
+	to := string(event.To)
+	reason := event.Reason
+	var tag pgconn.CommandTag
+	var err error
+	if isFailureState(event.To) {
+		tag, err = r.db.Exec(ctx, `UPDATE jobs SET state=$2, state_changed_at=NOW(), failure_reason=$3, attempt=GREATEST(attempt, $5) WHERE id=$1 AND state=$4`, event.JobID, to, reason, from, event.Attempt)
+	} else {
+		tag, err = r.db.Exec(ctx, `UPDATE jobs SET state=$2, state_changed_at=NOW(), attempt=GREATEST(attempt, $4) WHERE id=$1 AND state=$3`, event.JobID, to, from, event.Attempt)
+	}
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil
+	}
+	_, err = r.db.Exec(ctx, `INSERT INTO job_state_transitions (job_id, from_state, to_state, reason) VALUES ($1,$2,$3,$4)`, event.JobID, from, to, reason)
+	return err
+}
+
+func isFailureState(state executor.NodeState) bool {
+	switch state {
+	case executor.NodeFailed, executor.NodeAborted, executor.NodeAbortPending:
+		return true
+	}
+	return false
 }
 
 func (r *Repository) ListDatasetBuilds(ctx context.Context, datasetRID string, limit int64) ([]models.Build, error) {

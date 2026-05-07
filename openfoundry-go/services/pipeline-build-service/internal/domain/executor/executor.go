@@ -109,10 +109,12 @@ type AuditSink interface {
 }
 
 // AuditEvent is emitted for state transitions, commit/abort operations, retries
-// and build terminal state.
+// and build terminal state. JobID is uuid.Nil for build-terminal events that do
+// not correspond to a single job row.
 type AuditEvent struct {
 	At         time.Time
 	BuildID    uuid.UUID
+	JobID      uuid.UUID
 	NodeID     string
 	From       NodeState
 	To         NodeState

@@ -12,6 +12,7 @@ import (
 	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/require"
 
+	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/domain/executor"
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/domain/resolver"
 	livellogs "github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/logs"
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/models"
@@ -111,5 +112,105 @@ func TestRepositoryPipelineRunsAbortAndLogs(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, logs, 1)
 	require.Equal(t, int64(7), logs[0].Sequence)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRepositoryLoadPlanPopulatesNodeMetadata(t *testing.T) {
+	mock, repo := newMockRepo(t)
+	ctx := context.Background()
+	buildID := uuid.New()
+	jobID := uuid.New()
+	now := time.Now().UTC()
+
+	mock.ExpectQuery("SELECT id, build_branch, abort_policy, force_build FROM builds WHERE id").
+		WithArgs(buildID).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "build_branch", "abort_policy", "force_build"}).
+			AddRow(buildID, "master", string(models.AbortDependentOnly), true))
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, rid, build_id, job_spec_rid, state, output_transaction_rids, state_changed_at, attempt, stale_skipped, failure_reason, output_content_hash, created_at FROM jobs WHERE build_id")).
+		WithArgs(buildID).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "rid", "build_id", "job_spec_rid", "state", "output_transaction_rids", "state_changed_at", "attempt", "stale_skipped", "failure_reason", "output_content_hash", "created_at"}).
+			AddRow(jobID, "ri.foundry.main.job."+jobID.String(), buildID, "ri.foundry.main.job_spec.alpha", string(models.JobWaiting), []string{}, now, int32(0), false, nil, nil, now))
+
+	mock.ExpectQuery("FROM job_dependencies jd JOIN jobs dep").
+		WithArgs(buildID).
+		WillReturnRows(pgxmock.NewRows([]string{"job_id", "depends_on_spec"}))
+
+	mock.ExpectQuery("FROM jobs j\nJOIN job_specs js ON js.rid").
+		WithArgs(buildID).
+		WillReturnRows(pgxmock.NewRows([]string{"rid", "logic_kind", "logic_payload", "inputs", "output_dataset_rids"}).
+			AddRow("ri.foundry.main.job_spec.alpha", "TRANSFORM", []byte(`{"transform_type":"python","source":"select 1"}`), []byte(`[{"dataset_rid":"in.alpha"}]`), []string{"out.alpha"}))
+
+	mock.ExpectQuery("FROM job_outputs WHERE job_id").
+		WithArgs(jobID).
+		WillReturnRows(pgxmock.NewRows([]string{"output_dataset_rid", "transaction_rid"}).
+			AddRow("out.alpha", "ri.foundry.main.transaction.tx-1"))
+
+	plan, err := repo.LoadPlan(ctx, buildID)
+	require.NoError(t, err)
+	require.Equal(t, buildID, plan.BuildID)
+	require.Equal(t, executor.AbortDependentOnly, plan.AbortPolicy)
+	require.Len(t, plan.Nodes, 1)
+	node := plan.Nodes[0]
+	require.Equal(t, "ri.foundry.main.job_spec.alpha", node.ID)
+	require.Equal(t, jobID, node.JobID)
+	require.Equal(t, "TRANSFORM", node.Metadata["logic_kind"])
+	require.Equal(t, "python", node.Metadata["transform_type"])
+	require.Equal(t, "out.alpha", node.Metadata["output_dataset_id"])
+	require.Equal(t, []string{"in.alpha"}, node.Metadata["input_dataset_ids"])
+	require.Equal(t, true, node.Metadata["force_build"])
+	require.Equal(t, json.RawMessage(`{"transform_type":"python","source":"select 1"}`), node.Metadata["logic_payload"])
+	require.Len(t, node.Outputs, 1)
+	require.Equal(t, "out.alpha", node.Outputs[0].DatasetRID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRepositoryAuditSinkPersistsLifecycleTransitions(t *testing.T) {
+	mock, repo := newMockRepo(t)
+	ctx := context.Background()
+	buildID := uuid.New()
+	jobID := uuid.New()
+
+	mock.ExpectExec("UPDATE jobs SET state").
+		WithArgs(jobID, string(models.JobRunPending), string(models.JobWaiting), 0).
+		WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	mock.ExpectExec("INSERT INTO job_state_transitions").
+		WithArgs(jobID, string(models.JobWaiting), string(models.JobRunPending), "dispatching").
+		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	require.NoError(t, repo.Record(ctx, executor.AuditEvent{BuildID: buildID, JobID: jobID, NodeID: "n", From: executor.NodeWaiting, To: executor.NodeRunPending, Reason: "dispatching"}))
+
+	mock.ExpectExec("UPDATE jobs SET state=\\$2, state_changed_at=NOW\\(\\), failure_reason=\\$3").
+		WithArgs(jobID, string(models.JobFailed), "boom", string(models.JobRunning), 2).
+		WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	mock.ExpectExec("INSERT INTO job_state_transitions").
+		WithArgs(jobID, string(models.JobRunning), string(models.JobFailed), "boom").
+		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	require.NoError(t, repo.Record(ctx, executor.AuditEvent{BuildID: buildID, JobID: jobID, NodeID: "n", From: executor.NodeRunning, To: executor.NodeFailed, Attempt: 2, Reason: "boom"}))
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRepositoryAuditSinkSkipsNonTransitionEvents(t *testing.T) {
+	mock, repo := newMockRepo(t)
+	ctx := context.Background()
+	jobID := uuid.New()
+
+	require.NoError(t, repo.Record(ctx, executor.AuditEvent{NodeID: "n", From: executor.NodeWaiting, To: executor.NodeRunPending}))
+	require.NoError(t, repo.Record(ctx, executor.AuditEvent{JobID: jobID, NodeID: "n", DatasetRID: "out.x", Reason: "output committed"}))
+	require.NoError(t, repo.Record(ctx, executor.AuditEvent{JobID: jobID, NodeID: "n", From: executor.NodeRunning, To: executor.NodeRunning, Reason: "noop"}))
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRepositoryAuditSinkIdempotentWhenStateAlreadyAdvanced(t *testing.T) {
+	mock, repo := newMockRepo(t)
+	ctx := context.Background()
+	jobID := uuid.New()
+
+	mock.ExpectExec("UPDATE jobs SET state").
+		WithArgs(jobID, string(models.JobCompleted), string(models.JobRunning), 1).
+		WillReturnResult(pgconn.NewCommandTag("UPDATE 0"))
+	require.NoError(t, repo.Record(ctx, executor.AuditEvent{JobID: jobID, NodeID: "n", From: executor.NodeRunning, To: executor.NodeCompleted, Attempt: 1, Reason: "all outputs committed"}))
+
 	require.NoError(t, mock.ExpectationsWereMet())
 }

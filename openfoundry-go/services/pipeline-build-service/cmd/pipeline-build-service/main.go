@@ -68,7 +68,7 @@ func main() {
 		}
 		repo := postgres.NewRepositoryFromPool(pool)
 		handler.SetBuildLifecyclePorts(handler.BuildLifecyclePorts{JobSpecs: repo, Versioning: repo, Locks: repo, Builds: repo})
-		handler.SetExecutionPorts(handler.ExecutionPorts{Plans: repo, Runs: repo, Transactions: repo, Committer: repo, Parallelism: cfg.DistributedPipelineWorkers})
+		handler.SetExecutionPorts(handler.ExecutionPorts{Plans: repo, Runs: repo, Transactions: repo, Committer: repo, Audit: repo, Parallelism: cfg.DistributedPipelineWorkers})
 		handler.SetBuildQueryRepository(repo)
 		handler.SetSparkSubmissionRepository(repo)
 		handler.SetJobLogService(&livellogs.Service{Store: repo, Subscriber: livellogs.NewMemoryService()})
