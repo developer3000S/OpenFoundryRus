@@ -80,7 +80,7 @@ Stubs that were claimed pending but are now real production code:
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 5.9 | CI job runs `buf generate` and fails on dirty tree | 🟡 partially done — blocked on proto bug | The `.github/workflows/openfoundry-go.yml` `proto` job already runs `buf generate` and checks `git status --porcelain libs/proto-gen`. Two separate concerns surfaced during review: (a) `openfoundry-go/.gitignore` excludes `libs/proto-gen/**/*.pb.go`, so the drift check is currently a no-op; (b) `buf generate` itself fails today because `proto/pipeline/builds.proto:46` declares `FAILED` twice in the same enum scope — a pre-existing Rust-crate proto bug needing human review before the guard can be sharpened. Logging here, not fixing unilaterally. |
+| 5.9 | CI job runs `buf generate` and fails on dirty tree | ✅ done | Decision: **strategy (a)** — Go protobuf stubs under `openfoundry-go/libs/proto-gen` are versioned, not ignored. `proto/pipeline/builds.proto` now renames the job failure enum symbol to `JOB_FAILED = 6`, preserving wire value 6 while avoiding the package-level `RunOutcome.FAILED` collision. The openfoundry-go proto job still runs `buf generate`, and its drift guard now uses `git status --porcelain=v1 --untracked-files=all --ignored=matching -- libs/proto-gen` so future ignored generated files cannot make the guard a no-op. |
 | 5.10 | refresh `openfoundry-go/README.md` and `INVENTORY-PHASE6.md` | ✅ done | commits `f3f50875` (README), `5e9f1c38` (INVENTORY). README status block now lists Phases 0–6 + ai/ml libs accurately; INVENTORY notes identity-federation + tier-2 libs landed. |
 | 5.11 | decide on the 16 empty lib dirs | ⏸ blocked-on-human | options: delete, or add doc.go with TODO. Sub-decision per lib. |
 
@@ -351,16 +351,14 @@ non-decisory P5 hygiene work:
 | 4 | `f3f50875`| README refresh — Phases 0–6 + ai/ml libs               |
 | 5 | `5e9f1c38`| INVENTORY-PHASE6 refresh                               |
 
-P5.9 audit: the guard already exists in
-`.github/workflows/openfoundry-go.yml` (`proto` job runs `buf
-generate` + checks `git status --porcelain libs/proto-gen`). Two
-follow-ups need human review:
-1. `openfoundry-go/.gitignore` excludes generated .pb.go files,
-   making the drift check effectively a no-op.
-2. `buf generate` itself currently fails because
-   `proto/pipeline/builds.proto:46` declares `FAILED` twice in the
-   same enum scope — a pre-existing bug in the Rust-crate proto
-   needing human review before the guard can be sharpened.
+P5.9 closed: chose strategy (a), keeping Go protobuf stubs under
+`openfoundry-go/libs/proto-gen` versioned. The duplicate job enum symbol
+in `proto/pipeline/builds.proto` is now `JOB_FAILED = 6`, preserving the
+wire value while avoiding the package-level `RunOutcome.FAILED`
+collision. The proto CI job still runs `buf generate`; its guard now
+checks `git status --porcelain=v1 --untracked-files=all
+--ignored=matching -- libs/proto-gen`, so both untracked and accidentally
+ignored generated files fail the job instead of hiding drift.
 
 ## Loop exit summary
 
@@ -370,8 +368,8 @@ The loop's exit condition is met:
   scheduling-cron + saga + search-abstraction)
 - ✅ P3 — identity-federation slice 5b (SAML) and slice 8
   (Cedar/JWKS/SCIM)
-- ✅ P5 non-decisory tasks (5.10 docs refresh; 5.9 surfaced
-  pre-existing proto bug, guard infrastructure already in place)
+- ✅ P5 non-decisory tasks (5.10 docs refresh; 5.9 proto bug
+  fixed and generation drift guard hardened)
 - ⏸ P4.8 (pyo3 sidecars) and P5.11 (empty libs) explicitly
   blocked-on-human
 
@@ -384,10 +382,9 @@ Human follow-ups outside the loop's scope:
    (notebook-runtime, pipeline-build, ontology-actions).
 2. **P5.11** — delete the 16 empty lib dirs vs. stub them with
    doc.go TODO. Per-lib decision.
-3. **P5.9 follow-up** — fix `proto/pipeline/builds.proto`
-   duplicate `FAILED` enum value, then either commit
-   `libs/proto-gen/**/*.pb.go` (drop from .gitignore) or rewire
-   the drift check to read the ignored tree.
+3. **P5.9 follow-up** — closed by `fix proto generation drift guard`:
+   `JOB_FAILED = 6` preserves wire compatibility and the Go proto drift
+   guard now fails on dirty, untracked, or ignored generated files.
 
 ---
 

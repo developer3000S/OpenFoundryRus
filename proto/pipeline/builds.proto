@@ -42,8 +42,10 @@ enum JobState {
   ABORT_PENDING = 4;
   // Aborted (user request or cascading from failed dependency).
   ABORTED = 5;
-  // Invoked; computation failed.
-  FAILED = 6;
+  // Invoked; computation failed. String/domain value remains "FAILED";
+  // the proto symbol is prefixed to avoid colliding with RunOutcome.FAILED
+  // in the shared open_foundry.pipeline enum namespace.
+  JOB_FAILED = 6;
   // Invoked; computation succeeded.
   COMPLETED = 7;
 }

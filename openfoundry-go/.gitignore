@@ -1,4 +1,8 @@
 # Build artifacts
+# Generated protobuf stubs under libs/proto-gen are intentionally
+# versioned so CI can detect buf generation drift. Do not add a
+# libs/proto-gen/**/*.pb.go ignore here.
+
 /bin/
 /dist/
 /coverage.out

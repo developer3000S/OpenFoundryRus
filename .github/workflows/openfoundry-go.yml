@@ -45,9 +45,9 @@ jobs:
         working-directory: openfoundry-go
       - name: ensure no drift between checked-in & generated proto
         run: |
-          status="$(git status --porcelain=v1 -- libs/proto-gen)"
+          status="$(git status --porcelain=v1 --untracked-files=all --ignored=matching -- libs/proto-gen)"
           if [ -n "$status" ]; then
-            echo "::error::buf generate produced drift — commit the regenerated files"
+            echo "::error::buf generate produced drift — commit the regenerated files and keep libs/proto-gen unignored"
             printf '%s\n' "$status"
             git --no-pager diff -- libs/proto-gen
             exit 1
