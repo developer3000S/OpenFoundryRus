@@ -116,8 +116,12 @@ type ReindexRecord struct {
 	// does not compute it; whatever was in objects_by_id.properties
 	// is forwarded verbatim.
 	Embedding []float64 `json:"embedding,omitempty"`
-	// Always false: deleted rows are filtered out before publish.
-	Deleted bool `json:"deleted,omitempty"`
+	// Always false on publish — deleted rows are filtered out
+	// before publish — but the field is always emitted on the wire
+	// so the JSON shape matches the Rust producer (Rust uses
+	// `#[serde(default)]` only, with no `skip_serializing_if`, so
+	// the field is present unconditionally).
+	Deleted bool `json:"deleted"`
 }
 
 // PartitionKey is the Kafka partition key for this record. Same
@@ -145,6 +149,12 @@ func EncodeBatchRecord(tenant, id, typeID string, version int64, properties json
 	}
 }
 
+// extractEmbedding mirrors the Rust `extract_embedding` heuristic:
+// pull `properties.embedding`, treat it as a JSON array, and keep
+// only the entries that decode as a JSON number — non-numeric
+// entries are skipped rather than failing the whole record.
+// Returns nil when the field is absent, not an array, or yields no
+// numbers (matches Rust's `Option::None` short-circuit).
 func extractEmbedding(properties json.RawMessage) []float64 {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(properties, &m); err != nil {
@@ -154,11 +164,26 @@ func extractEmbedding(properties json.RawMessage) []float64 {
 	if !ok {
 		return nil
 	}
-	var arr []float64
-	if err := json.Unmarshal(raw, &arr); err != nil || len(arr) == 0 {
+	var rawArr []json.RawMessage
+	if err := json.Unmarshal(raw, &rawArr); err != nil {
 		return nil
 	}
-	return arr
+	out := make([]float64, 0, len(rawArr))
+	for _, v := range rawArr {
+		// Decoding into a *float64 (rather than float64) lets us
+		// distinguish JSON `null` from a legitimate `0.0` —
+		// `null` decodes the pointer to nil without raising an
+		// error, matching Rust serde's `as_f64() -> None` for
+		// null.
+		var f *float64
+		if err := json.Unmarshal(v, &f); err == nil && f != nil {
+			out = append(out, *f)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func trimSpace(s string) string {

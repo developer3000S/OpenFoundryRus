@@ -91,4 +91,83 @@ func TestEncodeBatchRecordOmitsEmbeddingWhenAbsent(t *testing.T) {
 	assert.NotContains(t, string(b), "embedding", "omitempty must elide nil embedding from wire")
 }
 
+// Mirrors the Rust `record_omits_embedding_when_absent_or_empty`
+// test (the empty-array branch): `{"embedding":[]}` MUST collapse
+// to nil so the `omitempty` json tag elides it from the wire.
+func TestEncodeBatchRecordOmitsEmbeddingWhenEmpty(t *testing.T) {
+	t.Parallel()
+	r := EncodeBatchRecord("t", "id", "u", 1, json.RawMessage(`{"embedding":[]}`))
+	assert.Nil(t, r.Embedding)
+}
+
+// Rust serde's `as_f64` accepts JSON integers as floats, so the Go
+// port must too — the two implementations must agree on what counts
+// as a numeric entry.
+func TestEncodeBatchRecordAcceptsIntegerEmbedding(t *testing.T) {
+	t.Parallel()
+	r := EncodeBatchRecord("t", "id", "u", 1, json.RawMessage(`{"embedding":[1,2,3]}`))
+	assert.Equal(t, []float64{1, 2, 3}, r.Embedding)
+}
+
+// Mirrors Rust's lenient `extract_embedding`: a heterogeneous array
+// keeps the numeric entries and drops the rest, instead of failing
+// the whole record. Strict `json.Unmarshal` of `[]float64` would
+// fail on the first non-numeric entry; the Go port iterates and
+// skips, matching the Rust loop.
+func TestEncodeBatchRecordSkipsNonNumericEmbeddingEntries(t *testing.T) {
+	t.Parallel()
+	r := EncodeBatchRecord("t", "id", "u", 1,
+		json.RawMessage(`{"embedding":[0.1,"oops",null,0.3]}`))
+	assert.Equal(t, []float64{0.1, 0.3}, r.Embedding)
+}
+
+// Mirrors the Rust
+// `record_round_trip_json_shape_matches_object_changed_v1` test:
+// the wire shape MUST stay aligned with services/ontology-indexer
+// `ObjectChangedV1` so the indexer keeps decoding both topics with
+// the same code path. In particular `deleted` is always present on
+// the wire — Rust serde emits it unconditionally, so Go must too.
+func TestReindexRecordWireShapeMatchesObjectChangedV1(t *testing.T) {
+	t.Parallel()
+	r := EncodeBatchRecord(
+		"tenant-a",
+		"00000000-0000-0000-0000-000000000001",
+		"users",
+		7,
+		json.RawMessage(`{"name":"alice"}`),
+	)
+	b, err := json.Marshal(r)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(b, &got))
+	assert.Equal(t, "tenant-a", got["tenant"])
+	assert.Equal(t, "00000000-0000-0000-0000-000000000001", got["id"])
+	assert.Equal(t, "users", got["type_id"])
+	assert.Equal(t, float64(7), got["version"])
+	assert.Equal(t, false, got["deleted"], "deleted must be present on wire (no omitempty)")
+	payload, ok := got["payload"].(map[string]any)
+	require.True(t, ok, "payload must round-trip as a JSON object")
+	assert.Equal(t, "alice", payload["name"])
+	_, hasEmbedding := got["embedding"]
+	assert.False(t, hasEmbedding, "absent embedding must not appear on wire")
+}
+
+// Mirrors the Rust `record_partition_key_matches_legacy_format`
+// test using a real UUID-shaped id, so a regression that breaks the
+// `tenant/id` composition surfaces under the same assertion the
+// Rust suite uses.
+func TestReindexRecordPartitionKeyMatchesLegacyFormat(t *testing.T) {
+	t.Parallel()
+	r := EncodeBatchRecord(
+		"tenant-a",
+		"00000000-0000-0000-0000-000000000001",
+		"users",
+		7,
+		json.RawMessage(`{}`),
+	)
+	assert.Equal(t,
+		"tenant-a/00000000-0000-0000-0000-000000000001",
+		r.PartitionKey())
+}
+
 func ptr[T any](v T) *T { return &v }
