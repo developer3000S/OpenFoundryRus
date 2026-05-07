@@ -400,6 +400,9 @@ func (s *AppState) Routes() chi.Router {
 	r.Put("/layers/{id}", s.UpdateLayer)
 	r.Post("/query", s.QueryFeatures)
 	r.Post("/cluster", s.ClusterFeatures)
+	r.Get("/tiles/{id}", s.GetVectorTile)
+	r.Post("/geocode", s.ForwardGeocode)
+	r.Post("/geocode/reverse", s.ReverseGeocode)
 	return r
 }
 
