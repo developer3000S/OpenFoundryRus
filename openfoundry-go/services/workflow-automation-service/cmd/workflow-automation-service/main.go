@@ -28,6 +28,7 @@ import (
 	"github.com/openfoundry/openfoundry-go/libs/observability"
 	"github.com/openfoundry/openfoundry-go/services/workflow-automation-service/internal/approvals"
 	"github.com/openfoundry/openfoundry-go/services/workflow-automation-service/internal/automationoperations"
+	"github.com/openfoundry/openfoundry-go/services/workflow-automation-service/internal/automationoperations/steps"
 	"github.com/openfoundry/openfoundry-go/services/workflow-automation-service/internal/config"
 	"github.com/openfoundry/openfoundry-go/services/workflow-automation-service/internal/domain/automationrun"
 	"github.com/openfoundry/openfoundry-go/services/workflow-automation-service/internal/domain/conditionconsumer"
@@ -91,17 +92,22 @@ func main() {
 	}
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
+	retentionSweepClient := steps.NewHTTPRetentionSweepClient(
+		httpClient,
+		cfg.AuditComplianceServiceURL,
+		cfg.AuditComplianceBearerToken,
+	)
 	jwtConfig := authmw.NewJWTConfig(cfg.JWTSecret)
 	appState := &state.AppState{
-		DB:                          pool,
-		HTTPClient:                  httpClient,
-		JWTConfig:                   jwtConfig,
-		NATSURL:                     cfg.NATSURL,
-		PipelineServiceURL:          cfg.PipelineServiceURL,
-		OntologyServiceURL:          cfg.OntologyServiceURL,
-		AuditComplianceServiceURL:   cfg.AuditComplianceServiceURL,
-		AuditComplianceBearerToken:  cfg.AuditComplianceBearerToken,
-		ApprovalTTLHours:            cfg.ApprovalTTLHours,
+		DB:                         pool,
+		HTTPClient:                 httpClient,
+		JWTConfig:                  jwtConfig,
+		NATSURL:                    cfg.NATSURL,
+		PipelineServiceURL:         cfg.PipelineServiceURL,
+		OntologyServiceURL:         cfg.OntologyServiceURL,
+		AuditComplianceServiceURL:  cfg.AuditComplianceServiceURL,
+		AuditComplianceBearerToken: cfg.AuditComplianceBearerToken,
+		ApprovalTTLHours:           cfg.ApprovalTTLHours,
 	}
 
 	srv := server.New(cfg, metrics, &server.Options{
@@ -155,7 +161,7 @@ func main() {
 			log.Warn("skipping saga.step.requested.v1 consumer (publisher init failed)",
 				slog.String("error", err.Error()))
 		} else {
-			sagaConsumer := automationoperations.NewSagaConsumer(pool, idem, publisher)
+			sagaConsumer := automationoperations.NewSagaConsumer(pool, idem, publisher, retentionSweepClient)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

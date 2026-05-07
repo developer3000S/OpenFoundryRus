@@ -54,6 +54,8 @@ func buildRouter(cfg *config.Config, h *handlers.Handlers, m *observability.Metr
 		r.Method(http.MethodGet, "/metrics", m.Handler())
 	}
 
+	r.Post("/v1/code-security/scans", h.CreateCodeSecurityScan)
+
 	r.Route("/v1/global-branches", func(api chi.Router) {
 		api.Get("/", h.ListGlobalBranches)
 		api.Post("/", h.CreateGlobalBranch)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -14,9 +15,11 @@ type Config struct {
 		Host string
 		Port uint16
 	}
-	DatabaseURL string
-	JWTSecret   string
-	Actor       string
+	DatabaseURL               string
+	JWTSecret                 string
+	Actor                     string
+	KafkaBrokers              []string
+	BranchEventsConsumerGroup string
 }
 
 func FromEnv() (*Config, error) {
@@ -28,6 +31,8 @@ func FromEnv() (*Config, error) {
 	cfg.DatabaseURL = os.Getenv("DATABASE_URL")
 	cfg.JWTSecret = os.Getenv("JWT_SECRET")
 	cfg.Actor = defaultStr(os.Getenv("SERVICE_ACTOR"), "system")
+	cfg.KafkaBrokers = splitCSV(os.Getenv("KAFKA_BROKERS"))
+	cfg.BranchEventsConsumerGroup = defaultStr(os.Getenv("BRANCH_EVENTS_CONSUMER_GROUP"), "code-repository-review-service.branch-events")
 
 	if cfg.DatabaseURL == "" {
 		return nil, &MissingEnvError{Key: "DATABASE_URL"}
@@ -62,4 +67,19 @@ func parseUint16(v string, fallback uint16) uint16 {
 		return fallback
 	}
 	return uint16(n)
+}
+
+func splitCSV(v string) []string {
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

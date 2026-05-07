@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/openfoundry/openfoundry-go/libs/outbox"
+	"github.com/openfoundry/openfoundry-go/services/code-repository-review-service/internal/codesecurity"
 	"github.com/openfoundry/openfoundry-go/services/code-repository-review-service/internal/models"
 	"github.com/openfoundry/openfoundry-go/services/code-repository-review-service/internal/repo"
 )
@@ -29,9 +30,10 @@ const PromoteEventType = "global.branch.promote.requested.v1"
 
 // Handlers wires repo + pool together.
 type Handlers struct {
-	Repo  *repo.GlobalBranchRepo
-	Pool  *pgxpool.Pool
-	Actor string
+	Repo         *repo.GlobalBranchRepo
+	Pool         *pgxpool.Pool
+	Actor        string
+	CodeSecurity *codesecurity.Service
 }
 
 // --- helpers ------------------------------------------------------------
@@ -241,3 +243,21 @@ func buildPromotePayload(globalID uuid.UUID, name, actor string) (json.RawMessag
 	return json.Marshal(body)
 }
 
+// CreateCodeSecurityScan runs the configured scanner and persists the scan + findings.
+func (h *Handlers) CreateCodeSecurityScan(w http.ResponseWriter, r *http.Request) {
+	if h.CodeSecurity == nil {
+		writeError(w, http.StatusServiceUnavailable, "code security scanner is not configured")
+		return
+	}
+	var body codesecurity.ScanRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := h.CodeSecurity.ScanAndPersist(r.Context(), body)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}

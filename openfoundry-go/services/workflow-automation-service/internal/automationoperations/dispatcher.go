@@ -25,14 +25,23 @@ func IsKnown(taskType string) bool {
 	return false
 }
 
+// DispatchOptions carries effect clients used by step implementations.
+type DispatchOptions struct {
+	RetentionSweepClient steps.RetentionSweepClient
+}
+
 // DispatchSaga drives `taskType`'s step graph to completion. Returns
 // nil on the happy path; returns an error if any step (or the input
 // parsing) failed — by then the runner has already run LIFO
 // compensations and updated saga.state to its terminal value.
-func DispatchSaga(ctx context.Context, runner *saga.SagaRunner, taskType string, input json.RawMessage) error {
+func DispatchSaga(ctx context.Context, runner *saga.SagaRunner, taskType string, input json.RawMessage, options ...DispatchOptions) error {
+	opts := DispatchOptions{}
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	switch taskType {
 	case "retention.sweep":
-		return dispatchRetentionSweep(ctx, runner, input)
+		return dispatchRetentionSweep(ctx, runner, input, opts.RetentionSweepClient)
 	case "cleanup.workspace":
 		return dispatchCleanupWorkspace(ctx, runner, input)
 	default:
@@ -40,13 +49,13 @@ func DispatchSaga(ctx context.Context, runner *saga.SagaRunner, taskType string,
 	}
 }
 
-func dispatchRetentionSweep(ctx context.Context, runner *saga.SagaRunner, raw json.RawMessage) error {
+func dispatchRetentionSweep(ctx context.Context, runner *saga.SagaRunner, raw json.RawMessage, client steps.RetentionSweepClient) error {
 	var in steps.RetentionSweepInput
 	if err := json.Unmarshal(rawOrNullObject(raw), &in); err != nil {
 		return saga.StepFailure("retention.sweep", fmt.Sprintf("invalid input: %s", err))
 	}
 	if _, err := saga.ExecuteStep[steps.RetentionSweepInput, steps.RetentionSweepOutput](
-		ctx, runner, steps.EvictRetentionEligible{}, in,
+		ctx, runner, steps.EvictRetentionEligible{Client: client}, in,
 	); err != nil {
 		return err
 	}

@@ -15,6 +15,7 @@ import (
 	databus "github.com/openfoundry/openfoundry-go/libs/event-bus-data"
 	"github.com/openfoundry/openfoundry-go/libs/idempotency"
 	saga "github.com/openfoundry/openfoundry-go/libs/saga"
+	"github.com/openfoundry/openfoundry-go/services/workflow-automation-service/internal/automationoperations/steps"
 )
 
 // SagaConsumer holds the long-lived state shared across the loop.
@@ -25,12 +26,17 @@ type SagaConsumer struct {
 	// (e.g. emitting a synthetic `saga.aborted.v1` to Kafka without
 	// going through outbox+Debezium when the service shuts down
 	// mid-saga).
-	Publisher databus.Publisher
+	Publisher            databus.Publisher
+	RetentionSweepClient steps.RetentionSweepClient
 }
 
 // NewSagaConsumer mirrors `SagaConsumer::new`.
-func NewSagaConsumer(pool *pgxpool.Pool, idem idempotency.Store, publisher databus.Publisher) *SagaConsumer {
-	return &SagaConsumer{Pool: pool, Idempotency: idem, Publisher: publisher}
+func NewSagaConsumer(pool *pgxpool.Pool, idem idempotency.Store, publisher databus.Publisher, retentionClient ...steps.RetentionSweepClient) *SagaConsumer {
+	var client steps.RetentionSweepClient
+	if len(retentionClient) > 0 {
+		client = retentionClient[0]
+	}
+	return &SagaConsumer{Pool: pool, Idempotency: idem, Publisher: publisher, RetentionSweepClient: client}
 }
 
 // Process drives one inbound saga request. Returns a metric label.
@@ -73,7 +79,7 @@ func (c *SagaConsumer) runSaga(ctx context.Context, request saga.SagaStepRequest
 		// no-op success label.
 		return "", err
 	}
-	dispatchErr := DispatchSaga(ctx, runner, request.Saga, request.Input)
+	dispatchErr := DispatchSaga(ctx, runner, request.Saga, request.Input, DispatchOptions{RetentionSweepClient: c.RetentionSweepClient})
 	// Commit regardless of the dispatch outcome — the runner has
 	// already updated saga.state to its terminal value (`completed`,
 	// `failed`, or `compensated`) and emitted the matching outbox
