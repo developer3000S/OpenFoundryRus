@@ -398,6 +398,7 @@ func TestStreamRuntimeUnavailable(t *testing.T) {
 type fakeKafkaAdmin struct {
 	provisioned []handlers.KafkaTopicSpec
 	updated     []handlers.KafkaTopicSpec
+	deleted     []string
 	cdc         []handlers.CdcRegistrationSpec
 	err         error
 	result      *handlers.CdcRegistrationResult
@@ -409,6 +410,10 @@ func (f *fakeKafkaAdmin) ProvisionTopic(_ context.Context, spec handlers.KafkaTo
 }
 func (f *fakeKafkaAdmin) UpdateTopic(_ context.Context, spec handlers.KafkaTopicSpec) error {
 	f.updated = append(f.updated, spec)
+	return f.err
+}
+func (f *fakeKafkaAdmin) DeleteTopic(_ context.Context, topic string) error {
+	f.deleted = append(f.deleted, topic)
 	return f.err
 }
 func (f *fakeKafkaAdmin) RegisterCDCSource(_ context.Context, spec handlers.CdcRegistrationSpec) (*handlers.CdcRegistrationResult, error) {

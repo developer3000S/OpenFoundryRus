@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	kafka "github.com/segmentio/kafka-go"
 
 	"github.com/openfoundry/openfoundry-go/services/ingestion-replication-service/internal/models"
 )
@@ -97,6 +99,7 @@ type CdcRegistrationResult struct {
 type KafkaAdmin interface {
 	ProvisionTopic(ctx context.Context, spec KafkaTopicSpec) error
 	UpdateTopic(ctx context.Context, spec KafkaTopicSpec) error
+	DeleteTopic(ctx context.Context, topic string) error
 	RegisterCDCSource(ctx context.Context, spec CdcRegistrationSpec) (*CdcRegistrationResult, error)
 }
 
@@ -234,18 +237,55 @@ func shortID(id uuid.UUID) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-// HTTPKafkaAdmin is the production adapter for Kafka/Kafka Connect control
-// planes. It expects a small internal REST surface at KAFKA_RUNTIME_URL.
+// HTTPKafkaAdmin is the production adapter for Kafka topic management and
+// the Kafka Connect control plane.
+//
+// Topic lifecycle (ProvisionTopic / UpdateTopic / DeleteTopic) goes
+// directly to the broker via segmentio/kafka-go's admin API when
+// BootstrapServers is set, mirroring the Rust hot_buffer::kafka path
+// (AdminClient::create_topics with idempotent TopicAlreadyExists). When
+// BootstrapServers is empty the legacy HTTP shim at BaseURL is used so
+// existing deployments keep working.
+//
+// CDC source registration (RegisterCDCSource) always goes via HTTP — it
+// targets a Kafka Connect cluster, not the broker admin API.
 type HTTPKafkaAdmin struct {
 	BaseURL string
 	Client  *http.Client
+
+	BootstrapServers  []string
+	Transport         kafka.RoundTripper
+	ReplicationFactor int
+	RequestTimeout    time.Duration
+
+	adminClient kafkaTopicAdminClient
+}
+
+// kafkaTopicAdminClient is the tiny subset of segmentio/kafka-go's
+// *kafka.Client that HTTPKafkaAdmin uses, exposed as an interface so
+// tests can inject a fake without spinning a broker.
+type kafkaTopicAdminClient interface {
+	CreateTopics(ctx context.Context, req *kafka.CreateTopicsRequest) (*kafka.CreateTopicsResponse, error)
+	DeleteTopics(ctx context.Context, req *kafka.DeleteTopicsRequest) (*kafka.DeleteTopicsResponse, error)
 }
 
 func (a *HTTPKafkaAdmin) ProvisionTopic(ctx context.Context, spec KafkaTopicSpec) error {
+	if a.useDirectKafka() {
+		return a.kafkaEnsureTopic(ctx, spec)
+	}
 	return a.do(ctx, http.MethodPost, "/topics", spec, nil)
 }
 func (a *HTTPKafkaAdmin) UpdateTopic(ctx context.Context, spec KafkaTopicSpec) error {
+	if a.useDirectKafka() {
+		return a.kafkaEnsureTopic(ctx, spec)
+	}
 	return a.do(ctx, http.MethodPut, "/topics/"+spec.Topic, spec, nil)
+}
+func (a *HTTPKafkaAdmin) DeleteTopic(ctx context.Context, topic string) error {
+	if a.useDirectKafka() {
+		return a.kafkaDeleteTopic(ctx, topic)
+	}
+	return a.do(ctx, http.MethodDelete, "/topics/"+topic, nil, nil)
 }
 func (a *HTTPKafkaAdmin) RegisterCDCSource(ctx context.Context, spec CdcRegistrationSpec) (*CdcRegistrationResult, error) {
 	var out CdcRegistrationResult
@@ -253,6 +293,125 @@ func (a *HTTPKafkaAdmin) RegisterCDCSource(ctx context.Context, spec CdcRegistra
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (a *HTTPKafkaAdmin) useDirectKafka() bool {
+	return a.adminClient != nil || len(a.BootstrapServers) > 0
+}
+
+func (a *HTTPKafkaAdmin) topicAdmin() kafkaTopicAdminClient {
+	if a.adminClient != nil {
+		return a.adminClient
+	}
+	return &kafka.Client{
+		Addr:      kafka.TCP(a.BootstrapServers...),
+		Timeout:   a.kafkaRequestTimeout(),
+		Transport: a.Transport,
+	}
+}
+
+func (a *HTTPKafkaAdmin) kafkaRequestTimeout() time.Duration {
+	if a.RequestTimeout > 0 {
+		return a.RequestTimeout
+	}
+	return 15 * time.Second
+}
+
+func (a *HTTPKafkaAdmin) kafkaReplicationFactor() int {
+	if a.ReplicationFactor > 0 {
+		return a.ReplicationFactor
+	}
+	return 1
+}
+
+// kafkaEnsureTopic is the idempotent topic-create path used by both
+// ProvisionTopic and UpdateTopic. Mirrors KafkaHotBuffer::ensure_topic
+// in the Rust source: TopicAlreadyExists is the happy path so repeat
+// calls are no-ops.
+func (a *HTTPKafkaAdmin) kafkaEnsureTopic(ctx context.Context, spec KafkaTopicSpec) error {
+	topic := strings.TrimSpace(spec.Topic)
+	if topic == "" {
+		return runtimeErr(RuntimeValidation, "kafka topic name is required")
+	}
+	if spec.Partitions < 1 {
+		return runtimeErr(RuntimeValidation, "kafka partitions must be >= 1, got %d", spec.Partitions)
+	}
+	cfg := kafka.TopicConfig{
+		Topic:             topic,
+		NumPartitions:     int(spec.Partitions),
+		ReplicationFactor: a.kafkaReplicationFactor(),
+		ConfigEntries:     buildKafkaTopicConfigs(spec),
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, a.kafkaRequestTimeout())
+	defer cancel()
+	resp, err := a.topicAdmin().CreateTopics(reqCtx, &kafka.CreateTopicsRequest{
+		Topics: []kafka.TopicConfig{cfg},
+	})
+	if err != nil {
+		return runtimeErr(RuntimeUpstream, "kafka create_topics(%s): %v", topic, err)
+	}
+	if topicErr, ok := resp.Errors[topic]; ok && topicErr != nil {
+		if errors.Is(topicErr, kafka.TopicAlreadyExists) {
+			return nil
+		}
+		return mapKafkaTopicError("create_topics", topic, topicErr)
+	}
+	return nil
+}
+
+// kafkaDeleteTopic deletes the topic via DeleteTopics and treats
+// UnknownTopicOrPartition as success so deprovision is idempotent.
+func (a *HTTPKafkaAdmin) kafkaDeleteTopic(ctx context.Context, topic string) error {
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return runtimeErr(RuntimeValidation, "kafka topic name is required")
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, a.kafkaRequestTimeout())
+	defer cancel()
+	resp, err := a.topicAdmin().DeleteTopics(reqCtx, &kafka.DeleteTopicsRequest{
+		Topics: []string{topic},
+	})
+	if err != nil {
+		return runtimeErr(RuntimeUpstream, "kafka delete_topics(%s): %v", topic, err)
+	}
+	if topicErr, ok := resp.Errors[topic]; ok && topicErr != nil {
+		if errors.Is(topicErr, kafka.UnknownTopicOrPartition) {
+			return nil
+		}
+		return mapKafkaTopicError("delete_topics", topic, topicErr)
+	}
+	return nil
+}
+
+func buildKafkaTopicConfigs(spec KafkaTopicSpec) []kafka.ConfigEntry {
+	var entries []kafka.ConfigEntry
+	if spec.RetentionHours > 0 {
+		ms := int64(spec.RetentionHours) * int64(time.Hour/time.Millisecond)
+		entries = append(entries, kafka.ConfigEntry{
+			ConfigName:  "retention.ms",
+			ConfigValue: strconv.FormatInt(ms, 10),
+		})
+	}
+	if spec.Compression {
+		entries = append(entries, kafka.ConfigEntry{
+			ConfigName:  "compression.type",
+			ConfigValue: "lz4",
+		})
+	}
+	return entries
+}
+
+func mapKafkaTopicError(op, topic string, err error) error {
+	var kerr kafka.Error
+	if errors.As(err, &kerr) {
+		switch kerr {
+		case kafka.InvalidTopic, kafka.InvalidConfiguration:
+			return runtimeErr(RuntimeValidation, "kafka %s(%s): %v", op, topic, err)
+		case kafka.TopicAuthorizationFailed, kafka.ClusterAuthorizationFailed:
+			return runtimeErr(RuntimeUpstream, "kafka %s(%s): %v", op, topic, err)
+		}
+	}
+	return runtimeErr(RuntimeUpstream, "kafka %s(%s): %v", op, topic, err)
 }
 
 func (a *HTTPKafkaAdmin) do(ctx context.Context, method, path string, in any, out any) error {

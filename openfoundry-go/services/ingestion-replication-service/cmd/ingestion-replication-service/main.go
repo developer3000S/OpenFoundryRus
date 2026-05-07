@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -60,7 +61,10 @@ func main() {
 
 	jwt := authmw.NewJWTConfig(cfg.JWTSecret)
 	runtime := handlers.NewProductionStreamingRuntime(
-		&handlers.HTTPKafkaAdmin{BaseURL: os.Getenv("KAFKA_RUNTIME_URL")},
+		&handlers.HTTPKafkaAdmin{
+			BaseURL:          os.Getenv("KAFKA_RUNTIME_URL"),
+			BootstrapServers: splitCSV(os.Getenv("KAFKA_BOOTSTRAP_SERVERS")),
+		},
 		&handlers.HTTPFlinkDeployer{BaseURL: os.Getenv("FLINK_RUNTIME_URL")},
 	)
 	h := &handlers.Handlers{Repo: &repo.Repo{Pool: pool}, Runtime: runtime}
@@ -71,4 +75,18 @@ func main() {
 		log.Error("server exited with error", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+}
+
+func splitCSV(v string) []string {
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
