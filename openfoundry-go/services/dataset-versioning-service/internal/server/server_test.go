@@ -133,7 +133,6 @@ func TestPlaceholderRoutesReturnNotImplementedAfterAuth(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/v1/catalog/facets"},
-		{http.MethodPost, "/v1/datasets/ri.foundry.main.dataset.example/transactions:batchGet"},
 	} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(tc.method, tc.path, nil)

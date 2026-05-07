@@ -94,23 +94,24 @@ func TestListDatasetsRejectsBadOwnerID(t *testing.T) {
 }
 
 type fakeStore struct {
-	datasets           []models.Dataset
-	versions           map[uuid.UUID][]models.DatasetVersion
-	branches           map[uuid.UUID][]models.DatasetBranch
-	files              map[uuid.UUID][]models.DatasetFile
-	transactions       map[uuid.UUID]string
-	markings           map[uuid.UUID][]models.EffectiveMarking
-	permissions        map[uuid.UUID][]models.DatasetPermissionEdge
-	lineageLinks       map[uuid.UUID][]models.DatasetLineageLink
-	fileIndex          map[uuid.UUID][]models.DatasetFileIndexEntry
-	views              map[uuid.UUID][]models.DatasetView
-	schemas            map[uuid.UUID]models.SchemaResponse
-	quality            map[uuid.UUID]*models.DatasetQualityResponse
-	health             map[string]*models.DatasetHealth
-	lint               map[uuid.UUID]*models.DatasetLintSummary
-	versionConflict    bool
-	branchConflict     bool
-	permissionConflict bool
+	datasets            []models.Dataset
+	versions            map[uuid.UUID][]models.DatasetVersion
+	branches            map[uuid.UUID][]models.DatasetBranch
+	files               map[uuid.UUID][]models.DatasetFile
+	transactions        map[uuid.UUID]string
+	runtimeTransactions map[uuid.UUID]models.RuntimeTransaction
+	markings            map[uuid.UUID][]models.EffectiveMarking
+	permissions         map[uuid.UUID][]models.DatasetPermissionEdge
+	lineageLinks        map[uuid.UUID][]models.DatasetLineageLink
+	fileIndex           map[uuid.UUID][]models.DatasetFileIndexEntry
+	views               map[uuid.UUID][]models.DatasetView
+	schemas             map[uuid.UUID]models.SchemaResponse
+	quality             map[uuid.UUID]*models.DatasetQualityResponse
+	health              map[string]*models.DatasetHealth
+	lint                map[uuid.UUID]*models.DatasetLintSummary
+	versionConflict     bool
+	branchConflict      bool
+	permissionConflict  bool
 }
 
 func newFakeStore(owner uuid.UUID) *fakeStore {
@@ -119,7 +120,7 @@ func newFakeStore(owner uuid.UUID) *fakeStore {
 		StoragePath: "s3://bucket/sales", OwnerID: owner, CurrentVersion: 1,
 		Tags: []string{}, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	return &fakeStore{datasets: []models.Dataset{ds}, versions: map[uuid.UUID][]models.DatasetVersion{}, branches: map[uuid.UUID][]models.DatasetBranch{}, files: map[uuid.UUID][]models.DatasetFile{}, transactions: map[uuid.UUID]string{}, markings: map[uuid.UUID][]models.EffectiveMarking{}, permissions: map[uuid.UUID][]models.DatasetPermissionEdge{}, lineageLinks: map[uuid.UUID][]models.DatasetLineageLink{}, fileIndex: map[uuid.UUID][]models.DatasetFileIndexEntry{}, views: map[uuid.UUID][]models.DatasetView{}, schemas: map[uuid.UUID]models.SchemaResponse{}, quality: map[uuid.UUID]*models.DatasetQualityResponse{}, health: map[string]*models.DatasetHealth{}, lint: map[uuid.UUID]*models.DatasetLintSummary{}}
+	return &fakeStore{datasets: []models.Dataset{ds}, versions: map[uuid.UUID][]models.DatasetVersion{}, branches: map[uuid.UUID][]models.DatasetBranch{}, files: map[uuid.UUID][]models.DatasetFile{}, transactions: map[uuid.UUID]string{}, runtimeTransactions: map[uuid.UUID]models.RuntimeTransaction{}, markings: map[uuid.UUID][]models.EffectiveMarking{}, permissions: map[uuid.UUID][]models.DatasetPermissionEdge{}, lineageLinks: map[uuid.UUID][]models.DatasetLineageLink{}, fileIndex: map[uuid.UUID][]models.DatasetFileIndexEntry{}, views: map[uuid.UUID][]models.DatasetView{}, schemas: map[uuid.UUID]models.SchemaResponse{}, quality: map[uuid.UUID]*models.DatasetQualityResponse{}, health: map[string]*models.DatasetHealth{}, lint: map[uuid.UUID]*models.DatasetLintSummary{}}
 }
 
 func (f *fakeStore) ListDatasets(_ context.Context, ownerID *uuid.UUID, _ int) ([]models.Dataset, error) {
@@ -467,6 +468,82 @@ func (f *fakeStore) ListFallbacks(_ context.Context, _ uuid.UUID) ([]models.Runt
 }
 func (f *fakeStore) ReplaceFallbacks(_ context.Context, _ uuid.UUID, _ []string) error { return nil }
 
+func (f *fakeStore) StartTransaction(_ context.Context, datasetID uuid.UUID, branchID uuid.UUID, branchName string, txType models.TransactionType, summary string, providence models.JSONValue, startedBy uuid.UUID) (*models.RuntimeTransaction, error) {
+	for _, tx := range f.runtimeTransactions {
+		if tx.BranchID == branchID && tx.Status == models.TransactionStatusOpen {
+			return nil, repo.ErrConflict
+		}
+	}
+	id := uuid.New()
+	tx := models.RuntimeTransaction{ID: id, DatasetID: datasetID, BranchID: branchID, BranchName: branchName, TxType: txType, Status: models.TransactionStatusOpen, Summary: summary, Metadata: []byte(`{}`), Providence: providence, StartedBy: &startedBy, StartedAt: time.Now().UTC()}
+	if len(tx.Providence) == 0 {
+		tx.Providence = []byte(`{}`)
+	}
+	f.runtimeTransactions[id] = tx
+	f.transactions[id] = string(tx.Status)
+	return &tx, nil
+}
+
+func (f *fakeStore) GetRuntimeTransaction(_ context.Context, datasetID uuid.UUID, txnID uuid.UUID) (*models.RuntimeTransaction, error) {
+	tx, ok := f.runtimeTransactions[txnID]
+	if !ok {
+		return nil, nil
+	}
+	if tx.DatasetID != datasetID {
+		return nil, nil
+	}
+	return &tx, nil
+}
+
+func (f *fakeStore) ListRuntimeTransactions(_ context.Context, datasetID uuid.UUID, branch *string, before *time.Time, limit int) ([]models.RuntimeTransaction, error) {
+	out := []models.RuntimeTransaction{}
+	for _, tx := range f.runtimeTransactions {
+		if tx.DatasetID != datasetID {
+			continue
+		}
+		if branch != nil && tx.BranchName != *branch {
+			continue
+		}
+		if before != nil && !tx.StartedAt.Before(*before) {
+			continue
+		}
+		out = append(out, tx)
+	}
+	return out, nil
+}
+
+func (f *fakeStore) CommitTransaction(_ context.Context, datasetID uuid.UUID, txnID uuid.UUID) error {
+	tx, ok := f.runtimeTransactions[txnID]
+	if !ok || tx.DatasetID != datasetID {
+		return repo.ErrNotFound
+	}
+	if tx.Status != models.TransactionStatusOpen {
+		return repo.ErrInvalidTransition
+	}
+	now := time.Now().UTC()
+	tx.Status = models.TransactionStatusCommitted
+	tx.CommittedAt = &now
+	f.runtimeTransactions[txnID] = tx
+	f.transactions[txnID] = string(tx.Status)
+	return nil
+}
+
+func (f *fakeStore) AbortTransaction(_ context.Context, datasetID uuid.UUID, txnID uuid.UUID) error {
+	tx, ok := f.runtimeTransactions[txnID]
+	if !ok || tx.DatasetID != datasetID {
+		return repo.ErrNotFound
+	}
+	if tx.Status != models.TransactionStatusOpen && tx.Status != models.TransactionStatusAborted {
+		return repo.ErrInvalidTransition
+	}
+	now := time.Now().UTC()
+	tx.Status = models.TransactionStatusAborted
+	tx.AbortedAt = &now
+	f.runtimeTransactions[txnID] = tx
+	f.transactions[txnID] = string(tx.Status)
+	return nil
+}
+
 func (f *fakeStore) ListViews(_ context.Context, datasetID uuid.UUID) ([]models.DatasetView, error) {
 	return f.views[datasetID], nil
 }
@@ -629,7 +706,7 @@ func (f *fakeStore) GetDatasetHealth(_ context.Context, datasetRID string) (*mod
 
 func authedReq(method, target, body string, sub uuid.UUID) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
-	return req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: sub}))
+	return req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: sub, Roles: []string{"admin"}}))
 }
 
 func withRouteParam(req *http.Request, key, val string) *http.Request {
@@ -1319,4 +1396,67 @@ func TestDatasetHealthHandlerReadsPersistedSnapshot(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.GetDatasetHealth(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func transactionReq(method string, store *fakeStore, owner uuid.UUID, branch string, txn *uuid.UUID, body string) *http.Request {
+	target := "/v1/datasets/" + store.datasets[0].ID.String() + "/branches/" + branch + "/transactions"
+	if txn != nil {
+		target += "/" + txn.String()
+	}
+	req := authedReq(method, target, body, owner)
+	req = withRouteParam(req, "rid", store.datasets[0].ID.String())
+	req = withRouteParam(req, "branch", branch)
+	if txn != nil {
+		req = withRouteParam(req, "txn", txn.String())
+	}
+	return req
+}
+
+func TestTransactionHandlersLifecycleAndBatch(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	datasetID := store.datasets[0].ID
+	store.branches[datasetID] = []models.DatasetBranch{{ID: uuid.New(), DatasetID: datasetID, Name: "master", Labels: []byte(`{}`), FallbackChain: []string{}, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), LastActivityAt: time.Now().UTC()}}
+	h := &handlers.Handlers{Repo: store}
+
+	startBody := `{"type":"APPEND","summary":"load","providence":{"source":"test"}}`
+	rec := httptest.NewRecorder()
+	h.StartTransaction(rec, transactionReq(http.MethodPost, store, owner, "master", nil, startBody))
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var opened models.RuntimeTransaction
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&opened))
+	require.Equal(t, models.TransactionStatusOpen, opened.Status)
+
+	rec = httptest.NewRecorder()
+	h.GetTransaction(rec, transactionReq(http.MethodGet, store, owner, "master", &opened.ID, ""))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotEmpty(t, rec.Header().Get("ETag"))
+
+	rec = httptest.NewRecorder()
+	h.CommitTransaction(rec, transactionReq(http.MethodPost, store, owner, "master", &opened.ID, ""))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var committed models.RuntimeTransaction
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&committed))
+	require.Equal(t, models.TransactionStatusCommitted, committed.Status)
+
+	batchBody := `{"ids":["` + opened.ID.String() + `","not-a-uuid","` + uuid.NewString() + `"]}`
+	rec = httptest.NewRecorder()
+	req := authedReq(http.MethodPost, "/v1/datasets/"+datasetID.String()+"/transactions:batchGet", batchBody, owner)
+	req = withRouteParam(req, "rid", datasetID.String())
+	h.BatchGetTransactions(rec, req)
+	require.Equal(t, http.StatusMultiStatus, rec.Code)
+	var items []models.BatchItemResult[models.RuntimeTransaction]
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&items))
+	require.Equal(t, []int{http.StatusOK, http.StatusBadRequest, http.StatusNotFound}, []int{items[0].Status, items[1].Status, items[2].Status})
+}
+
+func TestListTransactionsBeforeValidation(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	req := authedReq(http.MethodGet, "/v1/datasets/"+store.datasets[0].ID.String()+"/transactions?before=nope", "", owner)
+	req = withRouteParam(req, "rid", store.datasets[0].ID.String())
+	rec := httptest.NewRecorder()
+	h.ListTransactions(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }

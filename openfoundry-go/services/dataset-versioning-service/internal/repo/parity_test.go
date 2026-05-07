@@ -282,3 +282,30 @@ func TestArchiveBranchForRetentionWithOutboxReparentsArchivesAndEmits(t *testing
 	require.True(t, archived)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestListRuntimeTransactionsAppliesRustFilters(t *testing.T) {
+	ctx := context.Background()
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	datasetID := uuid.New()
+	branch := "master"
+	before := time.Now().UTC()
+	started := before.Add(-time.Hour)
+	txnID := uuid.New()
+	branchID := uuid.New()
+	startedBy := uuid.New()
+	mock.ExpectQuery("SELECT id, dataset_id, branch_id, branch_name, tx_type, status, summary, metadata, providence, started_by, started_at, committed_at, aborted_at FROM dataset_transactions").
+		WithArgs(datasetID, &branch, &before, 200).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "dataset_id", "branch_id", "branch_name", "tx_type", "status", "summary", "metadata", "providence", "started_by", "started_at", "committed_at", "aborted_at"}).
+			AddRow(txnID, datasetID, branchID, branch, models.TransactionTypeAppend, models.TransactionStatusOpen, "load", []byte(`{}`), []byte(`{"source":"test"}`), &startedBy, started, nil, nil))
+
+	r := &repo.Repo{Pool: mock}
+	got, err := r.ListRuntimeTransactions(ctx, datasetID, &branch, &before, 200)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, txnID, got[0].ID)
+	require.Equal(t, models.TransactionStatusOpen, got[0].Status)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
