@@ -19,10 +19,8 @@
 //
 // Coverage vs Rust: the Rust source declares seven trait fields —
 // objects / links / actions / definitions / read_models / search /
-// object_set_materializations. The Go port ships six (Search added
-// alongside the function-runtime accessibility cascade); the
-// ObjectSetMaterializationStore lands with the bounded context that
-// consumes it.
+// object_set_materializations. The Go port ships all seven, with
+// object set materializations backed by the same search abstraction used by Rust.
 package stores
 
 import storageabstraction "github.com/openfoundry/openfoundry-go/libs/storage-abstraction"
@@ -40,7 +38,8 @@ type Stores struct {
 	// `LoadAccessibleObjectSet` falls back to ObjectStore.ListByType
 	// (matches the Rust feature-flag fallback when SearchBackend is
 	// not configured).
-	Search storageabstraction.SearchBackend
+	Search                    storageabstraction.SearchBackend
+	ObjectSetMaterializations ObjectSetMaterializationStore
 }
 
 // NewInMemory mirrors `Stores::in_memory()`. Returns a Stores backed
@@ -49,7 +48,7 @@ type Stores struct {
 // unit tests and for smoke-testing handlers without spinning up
 // infrastructure.
 func NewInMemory() Stores {
-	return Stores{
+	out := Stores{
 		Objects:     NewInMemoryObjectStore(),
 		Links:       NewInMemoryLinkStore(),
 		Actions:     NewInMemoryActionLogStore(),
@@ -57,4 +56,6 @@ func NewInMemory() Stores {
 		ReadModels:  NewInMemoryReadModelStore(),
 		Search:      storageabstraction.NewInMemorySearchBackend(),
 	}
+	out.ObjectSetMaterializations = NewInMemoryObjectSetMaterializationStore()
+	return out
 }

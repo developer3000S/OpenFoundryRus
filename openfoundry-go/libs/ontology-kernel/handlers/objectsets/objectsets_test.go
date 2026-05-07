@@ -16,6 +16,7 @@ import (
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
 	ontologykernel "github.com/openfoundry/openfoundry-go/libs/ontology-kernel"
+	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/domain"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/models"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/stores"
 	storage "github.com/openfoundry/openfoundry-go/libs/storage-abstraction"
@@ -34,9 +35,10 @@ func withClaims(claims *authmw.Claims, h http.Handler) http.Handler {
 
 func newStateWithDefinitions() (*ontologykernel.AppState, *stores.InMemoryDefinitionStore) {
 	defs := stores.NewInMemoryDefinitionStore()
-	state := &ontologykernel.AppState{
-		Stores: stores.Stores{Definitions: defs},
-	}
+	bag := stores.NewInMemory()
+	bag.Definitions = defs
+	bag.Search = nil
+	state := &ontologykernel.AppState{Stores: bag}
 	return state, defs
 }
 
@@ -258,31 +260,136 @@ func TestDeleteObjectSetRejectsNonOwner(t *testing.T) {
 	assert.Contains(t, delRec.Body.String(), "forbidden: only the owner can delete this object set")
 }
 
-// libs/ontology-kernel/src/handlers/object_sets.rs `evaluate_object_set` —
-// while the function_runtime port is in flight the endpoint surfaces
-// 501 verbatim so callers can detect the gap.
-func TestEvaluateObjectSetReturns501(t *testing.T) {
-	state, _ := newStateWithDefinitions()
-	r := chi.NewRouter()
-	r.Post("/ontology/object-sets/{id}/evaluate", EvaluateObjectSet(state))
-	req := httptest.NewRequest(http.MethodPost, "/ontology/object-sets/"+uuid.New().String()+"/evaluate", strings.NewReader(`{}`))
-	rec := httptest.NewRecorder()
-	withClaims(sampleClaims(), r).ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusNotImplemented, rec.Code)
-	assert.Contains(t, rec.Body.String(), "object set evaluation is not implemented")
+func seedStoredObject(t *testing.T, state *ontologykernel.AppState, tenant storage.TenantId, typeID uuid.UUID, id uuid.UUID, props string, markings ...storage.MarkingId) {
+	t.Helper()
+	if len(markings) == 0 {
+		markings = []storage.MarkingId{"public"}
+	}
+	now := time.Now().UTC().UnixMilli()
+	_, err := state.Stores.Objects.Put(context.Background(), storage.Object{
+		Tenant:      tenant,
+		ID:          storage.ObjectId(id.String()),
+		TypeID:      storage.TypeId(typeID.String()),
+		Payload:     json.RawMessage(props),
+		UpdatedAtMs: now,
+		Markings:    markings,
+	}, nil)
+	require.NoError(t, err)
 }
 
-// libs/ontology-kernel/src/handlers/object_sets.rs `materialize_object_set` —
-// 501 mirror; gated on the same domain port + materialization store.
-func TestMaterializeObjectSetReturns501(t *testing.T) {
-	state, _ := newStateWithDefinitions()
+func createObjectSetForEval(t *testing.T, state *ontologykernel.AppState, defs *stores.InMemoryDefinitionStore, typeID uuid.UUID, filters []models.ObjectSetFilter) models.ObjectSetDefinition {
+	t.Helper()
+	seedObjectType(t, defs, typeID)
+	body, err := json.Marshal(models.CreateObjectSetRequest{
+		Name:             "eval-set",
+		BaseObjectTypeID: typeID,
+		Filters:          filters,
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/ontology/object-sets", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	withClaims(sampleClaims(), CreateObjectSet(state)).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var def models.ObjectSetDefinition
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &def))
+	return def
+}
+
+// libs/ontology-kernel/src/handlers/object_sets.rs `evaluate_object_set` —
+// invalid filter input is validated by the evaluator and surfaces 400.
+func TestEvaluateObjectSetRejectsInvalidInput(t *testing.T) {
+	state, defs := newStateWithDefinitions()
+	typeID := uuid.New()
+	def := createObjectSetForEval(t, state, defs, typeID, nil)
+	def.Filters = []models.ObjectSetFilter{{Field: "status", Operator: "bogus", Value: json.RawMessage(`"active"`)}}
+	record, err := domain.ObjectSetDefinitionToRecord(def)
+	require.NoError(t, err)
+	_, err = defs.Put(context.Background(), record, nil)
+	require.NoError(t, err)
 	r := chi.NewRouter()
-	r.Post("/ontology/object-sets/{id}/materialize", MaterializeObjectSet(state))
-	req := httptest.NewRequest(http.MethodPost, "/ontology/object-sets/"+uuid.New().String()+"/materialize", strings.NewReader(`{}`))
+	r.Post("/ontology/object-sets/{id}/evaluate", EvaluateObjectSet(state))
+	req := httptest.NewRequest(http.MethodPost, "/ontology/object-sets/"+def.ID.String()+"/evaluate", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 	withClaims(sampleClaims(), r).ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusNotImplemented, rec.Code)
-	assert.Contains(t, rec.Body.String(), "object set materialization is not implemented")
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "unsupported filter operator")
+}
+
+func TestEvaluateObjectSetEmpty(t *testing.T) {
+	state, defs := newStateWithDefinitions()
+	typeID := uuid.New()
+	def := createObjectSetForEval(t, state, defs, typeID, nil)
+	r := chi.NewRouter()
+	r.Post("/ontology/object-sets/{id}/evaluate", EvaluateObjectSet(state))
+	req := httptest.NewRequest(http.MethodPost, "/ontology/object-sets/"+def.ID.String()+"/evaluate", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	withClaims(sampleClaims(), r).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got models.ObjectSetEvaluationResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, 0, got.TotalBaseMatches)
+	assert.Equal(t, 0, got.TotalRows)
+	assert.Empty(t, got.Rows)
+	assert.False(t, got.Materialized)
+}
+
+func TestEvaluateObjectSetWithSimpleFilters(t *testing.T) {
+	state, defs := newStateWithDefinitions()
+	typeID := uuid.New()
+	def := createObjectSetForEval(t, state, defs, typeID, []models.ObjectSetFilter{{Field: "status", Operator: "equals", Value: json.RawMessage(`"active"`)}})
+	seedStoredObject(t, state, "default", typeID, uuid.New(), `{"status":"active","name":"A"}`)
+	seedStoredObject(t, state, "default", typeID, uuid.New(), `{"status":"inactive","name":"B"}`)
+	r := chi.NewRouter()
+	r.Post("/ontology/object-sets/{id}/evaluate", EvaluateObjectSet(state))
+	req := httptest.NewRequest(http.MethodPost, "/ontology/object-sets/"+def.ID.String()+"/evaluate", strings.NewReader(`{"limit":10}`))
+	rec := httptest.NewRecorder()
+	withClaims(sampleClaims(), r).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got models.ObjectSetEvaluationResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, 1, got.TotalBaseMatches)
+	assert.Equal(t, 1, got.TotalRows)
+	require.Len(t, got.Rows, 1)
+	assert.JSONEq(t, `"active"`, string(domain.ResolveObjectSetPath(got.Rows[0], "base.properties.status")))
+}
+
+func TestMaterializeObjectSetPersistsMetadata(t *testing.T) {
+	state, defs := newStateWithDefinitions()
+	typeID := uuid.New()
+	def := createObjectSetForEval(t, state, defs, typeID, nil)
+	objectID := uuid.New()
+	seedStoredObject(t, state, "default", typeID, objectID, `{"status":"active"}`)
+	r := chi.NewRouter()
+	r.Post("/ontology/object-sets/{id}/materialize", MaterializeObjectSet(state))
+	req := httptest.NewRequest(http.MethodPost, "/ontology/object-sets/"+def.ID.String()+"/materialize", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	withClaims(sampleClaims(), r).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got models.ObjectSetEvaluationResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.True(t, got.Materialized)
+	require.NotNil(t, got.ObjectSet.MaterializedAt)
+	assert.Equal(t, int32(1), got.ObjectSet.MaterializedRowCount)
+	meta, err := state.Stores.ObjectSetMaterializations.GetMetadata(context.Background(), "default", storage.ObjectSetId(def.ID.String()), storage.Strong())
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	assert.Equal(t, uint64(1), meta.StoredRowCount)
+}
+
+func TestEvaluateObjectSetBackendErrors(t *testing.T) {
+	state, defs := newStateWithDefinitions()
+	typeID := uuid.New()
+	def := createObjectSetForEval(t, state, defs, typeID, nil)
+	mockObjects := stores.NewMockObjectStore()
+	mockObjects.QueueListByType(storage.PagedResult[storage.Object]{}, storage.Backend("boom"))
+	state.Stores.Objects = mockObjects
+	r := chi.NewRouter()
+	r.Post("/ontology/object-sets/{id}/evaluate", EvaluateObjectSet(state))
+	req := httptest.NewRequest(http.MethodPost, "/ontology/object-sets/"+def.ID.String()+"/evaluate", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	withClaims(sampleClaims(), r).ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "boom")
 }
 
 // libs/ontology-kernel/src/handlers/object_sets.rs — invalid path
