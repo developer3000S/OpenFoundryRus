@@ -47,15 +47,17 @@ func (s *State) CreateSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.Pool == nil {
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
 		now := time.Now().UTC()
 		sess := models.Session{
 			ID: id, NotebookID: notebookID, Kernel: kernel,
 			Status: "idle", StartedBy: claims.Sub,
 			CreatedAt: now, LastActivity: now,
 		}
-		if s.MemoryRepo != nil {
-			s.MemoryRepo.putSession(sess)
-		}
+		s.memoryRepo().putSession(sess)
 		writeJSON(w, http.StatusCreated, sess)
 		return
 	}
@@ -80,7 +82,11 @@ func (s *State) ListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Pool == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": s.memoryRepo().listSessions(notebookID)})
 		return
 	}
 	rows, err := s.Pool.Query(r.Context(), `
@@ -112,7 +118,22 @@ func (s *State) StopSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Pool == nil {
-		writeJSON(w, http.StatusNotFound, nil)
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
+		sess, ok := s.memoryRepo().stopSession(sessionID)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, nil)
+			return
+		}
+		if sess.Kernel == "python" && s.PythonKernel != nil {
+			_ = s.PythonKernel.DropSession(r.Context(), sessionID)
+		}
+		if sess.Kernel == "llm" && s.LLMKernel != nil {
+			_ = s.LLMKernel.DropSession(r.Context(), sessionID)
+		}
+		writeJSON(w, http.StatusOK, sess)
 		return
 	}
 	row := s.Pool.QueryRow(r.Context(), `

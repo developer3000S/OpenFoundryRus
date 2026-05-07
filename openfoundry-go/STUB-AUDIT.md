@@ -10,8 +10,7 @@ Primary search command run from the repository root:
 rg -n "TODO|FIXME|stub|not implemented|NotImplemented|http\.StatusNotImplemented|Status: stub|ErrNotImplemented|NOT_IMPLEMENTED" openfoundry-go --glob '*.go' --glob '!*_test.go'
 ```
 
-The scan returned **105 production-Go matches** after cleaning obsolete
-comments in this pass. The table below classifies every match by file/surface;
+The scan returned **108 production-Go matches** after this notebook-runtime reconciliation pass. The table below classifies every match by file/surface;
 adjacent matches in the same implementation are grouped so owners can act on a
 single backlog item instead of on individual string hits.
 
@@ -34,7 +33,6 @@ Classification values used here:
 
 | Priority | Area | Classification | Suggested owner | Action |
 | --- | --- | --- | --- | --- |
-| P0 | `notebook-runtime-service` notepad CRUD + unconfigured Python runtime | productivo pendiente | Notebook Runtime + Python sidecar | Keep notebook/cell/session CRUD status as wired; add a notepad repository slice and require/operate the Python sidecar for production Python execution. |
 | P0 | `agent-runtime-service` `AskCopilot` + chat-completion placeholder | productivo pendiente | AI Kernel / Agent Runtime | Wire service handlers into `libs/ai-kernel-go` agent/LLM execution; do not leave placeholder answers in production. |
 | P0 | `pipeline-build-service` handlers + runtime dispatch | productivo pendiente | Pipeline Builder / data platform | Continue resolver, DAG executor, logs SSE, Spark route parity, and Iceberg output work; route gaps are listed in `docs/migration/route-parity-audit.md`. |
 | P0 | `ontology-kernel` action/function execution 501s | productivo pendiente | Ontology Kernel / Actions | Replace 501 branches once Python/runtime integration is complete. |
@@ -85,8 +83,6 @@ Classification values used here:
 
 | Matches | Priority | Suggested owner | Actionable next step |
 | --- | --- | --- | --- |
-| `services/notebook-runtime-service/internal/handler/handlers.go` notepad CRUD `notImplemented` + empty envelopes | P0 | Notebook Runtime | Implement document/presence repository-backed CRUD. Export is already wired through `domain/notepad`. |
-| `services/notebook-runtime-service/cmd/notebook-runtime-service/main.go` Python sidecar gating | P0 | Notebook Runtime + Python sidecar | Production Python execution requires `PYTHON_SIDECAR_BINARY`; unset config currently returns explicit sidecar-not-configured errors. SQL/R/LLM kernels remain unsupported. |
 | `services/agent-runtime-service/{cmd,internal/handlers}` `AskCopilot` and chat-completion placeholder text | P0 | AI Kernel / Agent Runtime | Connect service handlers to the AI kernel/LLM runtime instead of returning placeholder content. |
 | `services/pipeline-build-service/{internal/handler,internal/domain/engine}` | P0 | Pipeline Builder / data platform | Replace empty envelopes/501s and runtime dispatch placeholders; route parity report lists missing Rust paths. |
 | `libs/ontology-kernel/handlers/actions/execute.go` | P0 | Ontology Kernel / Actions | Replace Phase 5A action execution 501 when runtime integration lands. |
@@ -103,7 +99,19 @@ Classification values used here:
 | `services/pipeline-build-service/README.md` and `cmd/pipeline-build-service/main.go` | Claimed the URL grid was 1:1 with Rust and all unported handlers were 501. | Now points to the route-parity audit and documents missing paths, 501s, empty envelopes, and config-gated behavior. |
 | `services/authorization-policy-service/{README.md,cmd/main.go,internal/models/models.go,internal/server/server.go}` | Described the service as the Cedar-policy foundation slice with RBAC/ABAC/submodules deferred. | Now documents the consolidated authorization surface and records that the production scan has no productive stub matches. |
 | `libs/ml-kernel-go/handlers/{experiments.go,models.go,training.go,asset_lineage.go}` | Comments still described run/model-version/training/lineage handlers as 501 stubs. | Comments now match the implemented handlers that call `domain/interop`, `domain/training`, `runs.go`, and `asset_lineage.go`. |
-| `services/notebook-runtime-service/{README.md,cmd/main.go}` | Claimed notebook/cell/session CRUD were stubs. | Now distinguishes implemented pgx CRUD + smoke empty-envelope fallback from real pending notepad CRUD and Python sidecar gating. |
+| `services/notebook-runtime-service/{README.md,cmd/main.go,internal/handler,internal/config}` and `libs/python-sidecar/manager_test.go` | Claimed notebook/cell/session CRUD had implicit empty-envelope no-DB fallbacks and notepad CRUD/Python sidecar were pending. | Now documents/tests repository-backed notepad CRUD + presence/export, explicit smoke-only in-memory notebook/cell/session CRUD, 503 outside smoke mode when DB is absent, and fake/real Python sidecar paths. |
+
+## Notebook-runtime-service note
+
+`notebook-runtime-service` no longer has a productive notepad CRUD backlog item
+in this audit. The Go service now has tested notebook/cell/session smoke CRUD,
+workspace files, notepad document CRUD, notepad presence, and notepad export.
+Notebook/cell/session no-DB behavior is explicit: `NOTEBOOK_RUNTIME_SMOKE_MODE=true`
+uses an in-memory repository; without DB and without smoke mode, CRUD returns a
+configuration `503` instead of an empty envelope. Python execution remains
+configuration-gated by `PYTHON_SIDECAR_BINARY`; this is no longer classified as
+a productive placeholder because unset config returns an explicit execution error
+and manager tests cover both unset and fake-sidecar configured paths.
 
 ## Authorization-policy-service note
 
@@ -116,8 +124,7 @@ placeholder handler match in this service.
 
 ## Recommended sequencing
 
-1. **P0 product-facing placeholders**: notebook notepad CRUD + Python runtime
-   operations, agent-runtime copilot/chat, pipeline-build, ontology-kernel
+1. **P0 product-facing placeholders**: agent-runtime copilot/chat, pipeline-build, ontology-kernel
    actions/functions, and ontology-actions DB-backed kernel wiring.
 2. **P1 operational runtimes**: ontology-indexer Kafka loop and Iceberg writers
    for audit/AI sinks.

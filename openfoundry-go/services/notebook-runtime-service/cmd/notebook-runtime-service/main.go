@@ -3,10 +3,10 @@
 // files, notepad documents + presence + export).
 //
 // Current port: notebook + cell + session CRUD use pgx when
-// DATABASE_URL is configured and fall back to empty envelopes for
-// smoke/test mode. Notepad document/presence CRUD remains the
-// productive stub surface; Python execution is gated on
-// PYTHON_SIDECAR_BINARY. The two domain pieces ported 1:1 with full
+// DATABASE_URL is configured. Explicit NOTEBOOK_RUNTIME_SMOKE_MODE=true
+// enables in-memory smoke CRUD; otherwise missing DB config returns a clear
+// 503. Notepad document/presence/export are repository-backed. Python
+// execution is gated on PYTHON_SIDECAR_BINARY. Domain pieces ported 1:1 with
 // coverage:
 //
 //   - Workspace file CRUD (filesystem-backed, [`internal/domain/environment`]).
@@ -61,22 +61,21 @@ func main() {
 			slog.String("error", err.Error()))
 	}
 
-	// Best-effort DB pool: when DATABASE_URL is unset or unreachable,
-	// CRUD endpoints fall back to the empty-envelope shape so smoke
-	// clusters / unit tests keep working. Matches the sql-bi-gateway
-	// pattern.
+	// Best-effort DB pool: production CRUD requires DATABASE_URL. An explicit
+	// NOTEBOOK_RUNTIME_SMOKE_MODE=true opt-in enables in-memory smoke CRUD when
+	// the DB is absent/unreachable.
 	var pool *pgxpool.Pool
 	if cfg.DatabaseURL != "" {
 		pcfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 		if err != nil {
-			log.Warn("DATABASE_URL parse failed; CRUD endpoints will return empty envelopes",
+			log.Warn("DATABASE_URL parse failed; CRUD endpoints require NOTEBOOK_RUNTIME_SMOKE_MODE=true for in-memory smoke mode",
 				slog.String("error", err.Error()))
 		} else {
 			poolCtx, cancelPool := context.WithTimeout(ctx, 10*time.Second)
 			pool, err = pgxpool.NewWithConfig(poolCtx, pcfg)
 			cancelPool()
 			if err != nil {
-				log.Warn("DB pool init failed; CRUD endpoints will return empty envelopes",
+				log.Warn("DB pool init failed; CRUD endpoints require NOTEBOOK_RUNTIME_SMOKE_MODE=true for in-memory smoke mode",
 					slog.String("error", err.Error()))
 				pool = nil
 			} else {
@@ -85,7 +84,7 @@ func main() {
 			}
 		}
 	} else {
-		log.Warn("DATABASE_URL unset; CRUD endpoints will return empty envelopes")
+		log.Warn("DATABASE_URL unset; CRUD endpoints require NOTEBOOK_RUNTIME_SMOKE_MODE=true for in-memory smoke mode")
 	}
 
 	var pyKernel *kernel.SidecarKernel

@@ -65,13 +65,86 @@ type httpLLMKernel struct {
 // tests and smoke clusters. The Postgres path remains the source of
 // truth when Pool is non-nil.
 type MemoryNotebookRepo struct {
-	mu       sync.Mutex
-	cells    map[uuid.UUID]models.Cell
-	sessions map[uuid.UUID]models.Session
+	mu        sync.Mutex
+	notebooks map[uuid.UUID]models.Notebook
+	cells     map[uuid.UUID]models.Cell
+	sessions  map[uuid.UUID]models.Session
 }
 
 func NewMemoryNotebookRepo() *MemoryNotebookRepo {
-	return &MemoryNotebookRepo{cells: map[uuid.UUID]models.Cell{}, sessions: map[uuid.UUID]models.Session{}}
+	return &MemoryNotebookRepo{
+		notebooks: map[uuid.UUID]models.Notebook{},
+		cells:     map[uuid.UUID]models.Cell{},
+		sessions:  map[uuid.UUID]models.Session{},
+	}
+}
+
+func (m *MemoryNotebookRepo) putNotebook(nb models.Notebook) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.notebooks == nil {
+		m.notebooks = map[uuid.UUID]models.Notebook{}
+	}
+	m.notebooks[nb.ID] = nb
+}
+
+func (m *MemoryNotebookRepo) listNotebooks() []models.Notebook {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]models.Notebook, 0, len(m.notebooks))
+	for _, nb := range m.notebooks {
+		out = append(out, nb)
+	}
+	sortNotebooksByUpdatedAt(out)
+	return out
+}
+
+func (m *MemoryNotebookRepo) loadNotebook(id uuid.UUID) (models.Notebook, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	nb, ok := m.notebooks[id]
+	return nb, ok
+}
+
+func (m *MemoryNotebookRepo) updateNotebook(id uuid.UUID, body models.UpdateNotebookRequest) (models.Notebook, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	nb, ok := m.notebooks[id]
+	if !ok {
+		return models.Notebook{}, false
+	}
+	if body.Name != nil {
+		nb.Name = *body.Name
+	}
+	if body.Description != nil {
+		nb.Description = *body.Description
+	}
+	if body.DefaultKernel != nil {
+		nb.DefaultKernel = *body.DefaultKernel
+	}
+	nb.UpdatedAt = time.Now().UTC()
+	m.notebooks[id] = nb
+	return nb, true
+}
+
+func (m *MemoryNotebookRepo) deleteNotebook(id uuid.UUID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.notebooks[id]; !ok {
+		return false
+	}
+	delete(m.notebooks, id)
+	for cellID, cell := range m.cells {
+		if cell.NotebookID == id {
+			delete(m.cells, cellID)
+		}
+	}
+	for sessionID, session := range m.sessions {
+		if session.NotebookID == id {
+			delete(m.sessions, sessionID)
+		}
+	}
+	return true
 }
 
 func (m *MemoryNotebookRepo) putCell(c models.Cell) {
@@ -81,6 +154,40 @@ func (m *MemoryNotebookRepo) putCell(c models.Cell) {
 		m.cells = map[uuid.UUID]models.Cell{}
 	}
 	m.cells[c.ID] = c
+}
+
+func (m *MemoryNotebookRepo) updateCell(id uuid.UUID, body models.UpdateCellRequest) (models.Cell, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.cells[id]
+	if !ok {
+		return models.Cell{}, false
+	}
+	if body.Source != nil {
+		c.Source = *body.Source
+	}
+	if body.CellType != nil {
+		c.CellType = *body.CellType
+	}
+	if body.Kernel != nil {
+		c.Kernel = *body.Kernel
+	}
+	if body.Position != nil {
+		c.Position = *body.Position
+	}
+	c.UpdatedAt = time.Now().UTC()
+	m.cells[id] = c
+	return c, true
+}
+
+func (m *MemoryNotebookRepo) deleteCell(id uuid.UUID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.cells[id]; !ok {
+		return false
+	}
+	delete(m.cells, id)
+	return true
 }
 
 func (m *MemoryNotebookRepo) putSession(sess models.Session) {
@@ -97,6 +204,19 @@ func (m *MemoryNotebookRepo) loadCell(id uuid.UUID) (models.Cell, bool) {
 	defer m.mu.Unlock()
 	c, ok := m.cells[id]
 	return c, ok
+}
+
+func (m *MemoryNotebookRepo) loadCells(notebookID uuid.UUID) []models.Cell {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []models.Cell{}
+	for _, c := range m.cells {
+		if c.NotebookID == notebookID {
+			out = append(out, c)
+		}
+	}
+	sortCellsByPosition(out)
+	return out
 }
 
 func (m *MemoryNotebookRepo) loadCodeCells(notebookID uuid.UUID) []models.Cell {
@@ -117,6 +237,32 @@ func (m *MemoryNotebookRepo) loadSession(id uuid.UUID) (models.Session, bool) {
 	defer m.mu.Unlock()
 	sess, ok := m.sessions[id]
 	return sess, ok
+}
+
+func (m *MemoryNotebookRepo) listSessions(notebookID uuid.UUID) []models.Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []models.Session{}
+	for _, sess := range m.sessions {
+		if sess.NotebookID == notebookID {
+			out = append(out, sess)
+		}
+	}
+	sortSessionsByCreatedAt(out)
+	return out
+}
+
+func (m *MemoryNotebookRepo) stopSession(id uuid.UUID) (models.Session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sess, ok := m.sessions[id]
+	if !ok {
+		return models.Session{}, false
+	}
+	sess.Status = "dead"
+	sess.LastActivity = time.Now().UTC()
+	m.sessions[id] = sess
+	return sess, true
 }
 
 func (m *MemoryNotebookRepo) updateSessionStatus(id uuid.UUID, status string) {
@@ -739,6 +885,26 @@ func (s *State) notebookCellTimeoutSeconds() uint32 {
 		return s.Cfg.PythonSidecarTimeoutSeconds
 	}
 	return defaultNotebookCellTimeoutSeconds
+}
+
+func sortNotebooksByUpdatedAt(notebooks []models.Notebook) {
+	for i := 1; i < len(notebooks); i++ {
+		j := i
+		for j > 0 && notebooks[j-1].UpdatedAt.Before(notebooks[j].UpdatedAt) {
+			notebooks[j-1], notebooks[j] = notebooks[j], notebooks[j-1]
+			j--
+		}
+	}
+}
+
+func sortSessionsByCreatedAt(sessions []models.Session) {
+	for i := 1; i < len(sessions); i++ {
+		j := i
+		for j > 0 && sessions[j-1].CreatedAt.Before(sessions[j].CreatedAt) {
+			sessions[j-1], sessions[j] = sessions[j], sessions[j-1]
+			j--
+		}
+	}
 }
 
 func sortCellsByPosition(cells []models.Cell) {

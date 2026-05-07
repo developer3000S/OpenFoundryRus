@@ -24,6 +24,10 @@ type Config struct {
 
 	PythonSidecarBinary         string
 	PythonSidecarTimeoutSeconds uint32
+
+	// SmokeMode enables documented no-DB smoke fallbacks for notebook CRUD.
+	// Production should leave this false and provide DATABASE_URL.
+	SmokeMode bool
 }
 
 func FromEnv() (*Config, error) {
@@ -39,6 +43,7 @@ func FromEnv() (*Config, error) {
 	c.AIServiceURL = defaultStr(os.Getenv("AI_SERVICE_URL"), "http://127.0.0.1:50127")
 	c.PythonSidecarBinary = os.Getenv("PYTHON_SIDECAR_BINARY")
 	c.PythonSidecarTimeoutSeconds = parseUint32(os.Getenv("PYTHON_SIDECAR_TIMEOUT_SECONDS"), 60)
+	c.SmokeMode = parseBool(os.Getenv("NOTEBOOK_RUNTIME_SMOKE_MODE"), false)
 	return c, nil
 }
 
@@ -69,4 +74,15 @@ func parseUint32(v string, fallback uint32) uint32 {
 		return fallback
 	}
 	return uint32(n)
+}
+
+func parseBool(v string, fallback bool) bool {
+	if v == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return b
 }

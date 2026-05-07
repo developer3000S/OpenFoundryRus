@@ -21,7 +21,7 @@ import (
 )
 
 func newState() *State {
-	return &State{Cfg: &config.Config{}, Pool: nil}
+	return &State{Cfg: &config.Config{SmokeMode: true}, Pool: nil, MemoryRepo: NewMemoryNotebookRepo()}
 }
 
 // mountTestRouter wires the same chi tree the server uses but stops
@@ -84,9 +84,13 @@ func TestCreateNotebookRejectsWithoutClaims(t *testing.T) {
 	}
 }
 
-func TestListNotebooksReturnsEmptyEnvelope(t *testing.T) {
+func TestListNotebooksSmokeModeReturnsPersistedEnvelope(t *testing.T) {
 	t.Parallel()
 	r := mountTestRouter(newState())
+	createBody, _ := json.Marshal(models.CreateNotebookRequest{Name: "smoke-listed"})
+	createReq := withClaims(httptest.NewRequest(http.MethodPost, "/api/v1/notebooks", bytes.NewReader(createBody)), uuid.New())
+	createReq.ContentLength = int64(len(createBody))
+	r.ServeHTTP(httptest.NewRecorder(), createReq)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/notebooks?page=2&per_page=5", nil))
 	if w.Code != http.StatusOK {
@@ -94,8 +98,18 @@ func TestListNotebooksReturnsEmptyEnvelope(t *testing.T) {
 	}
 	var env map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &env)
-	if env["page"].(float64) != 2 || env["per_page"].(float64) != 5 {
+	if env["page"].(float64) != 2 || env["per_page"].(float64) != 5 || env["total"].(float64) != 1 {
 		t.Errorf("pagination drift: %+v", env)
+	}
+}
+
+func TestListNotebooksRequiresDatabaseOutsideSmokeMode(t *testing.T) {
+	t.Parallel()
+	r := mountTestRouter(&State{Cfg: &config.Config{}, Pool: nil})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/notebooks", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -144,6 +158,108 @@ func TestDeleteNotebookNoDBReturns404(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/notebooks/"+uuid.New().String(), nil))
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status: %d", w.Code)
+	}
+}
+
+func TestNotebookCellSessionSmokeCRUDRoundTrip(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	r := mountTestRouter(newState())
+
+	nbBody := []byte(`{"name":"Roundtrip","description":"d","default_kernel":"python"}`)
+	w := httptest.NewRecorder()
+	req := withClaims(httptest.NewRequest(http.MethodPost, "/api/v1/notebooks", bytes.NewReader(nbBody)), owner)
+	req.ContentLength = int64(len(nbBody))
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create notebook status=%d body=%s", w.Code, w.Body.String())
+	}
+	var nb models.Notebook
+	_ = json.Unmarshal(w.Body.Bytes(), &nb)
+
+	newName := "Renamed"
+	patchBody, _ := json.Marshal(models.UpdateNotebookRequest{Name: &newName})
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/notebooks/"+nb.ID.String(), bytes.NewReader(patchBody))
+	req.ContentLength = int64(len(patchBody))
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update notebook status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	source := "print(42)"
+	cellBody, _ := json.Marshal(models.CreateCellRequest{Source: &source})
+	w = httptest.NewRecorder()
+	req = withClaims(httptest.NewRequest(http.MethodPost, "/api/v1/notebooks/"+nb.ID.String()+"/cells", bytes.NewReader(cellBody)), owner)
+	req.ContentLength = int64(len(cellBody))
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("add cell status=%d body=%s", w.Code, w.Body.String())
+	}
+	var cell models.Cell
+	_ = json.Unmarshal(w.Body.Bytes(), &cell)
+
+	updatedSource := "print(43)"
+	cellPatch, _ := json.Marshal(models.UpdateCellRequest{Source: &updatedSource})
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/notebooks/"+nb.ID.String()+"/cells/"+cell.ID.String(), bytes.NewReader(cellPatch))
+	req.ContentLength = int64(len(cellPatch))
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update cell status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/notebooks/"+nb.ID.String(), nil))
+	if w.Code != http.StatusOK || bytes.Contains(w.Body.Bytes(), []byte(`"data":[]`)) {
+		t.Fatalf("get notebook should return notebook+cells, status=%d body=%s", w.Code, w.Body.String())
+	}
+	var got struct {
+		Notebook models.Notebook `json:"notebook"`
+		Cells    []models.Cell   `json:"cells"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &got)
+	if got.Notebook.Name != "Renamed" || len(got.Cells) != 1 || got.Cells[0].Source != updatedSource {
+		t.Fatalf("get notebook drift: %+v", got)
+	}
+
+	sessionBody := []byte(`{}`)
+	w = httptest.NewRecorder()
+	req = withClaims(httptest.NewRequest(http.MethodPost, "/api/v1/notebooks/"+nb.ID.String()+"/sessions", bytes.NewReader(sessionBody)), owner)
+	req.ContentLength = int64(len(sessionBody))
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create session status=%d body=%s", w.Code, w.Body.String())
+	}
+	var sess models.Session
+	_ = json.Unmarshal(w.Body.Bytes(), &sess)
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/notebooks/"+nb.ID.String()+"/sessions", nil))
+	var sessions struct {
+		Data []models.Session `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &sessions)
+	if w.Code != http.StatusOK || len(sessions.Data) != 1 || sessions.Data[0].ID != sess.ID {
+		t.Fatalf("list sessions drift status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/notebooks/"+nb.ID.String()+"/sessions/"+sess.ID.String()+"/stop", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("stop session status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/notebooks/"+nb.ID.String()+"/cells/"+cell.ID.String(), nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete cell status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/notebooks/"+nb.ID.String(), nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete notebook status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

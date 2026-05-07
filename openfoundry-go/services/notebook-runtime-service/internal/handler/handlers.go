@@ -3,9 +3,8 @@
 // Status:
 //
 //   - Notebook + Cell + Session CRUD: 1:1 ported against pgx (matches
-//     Rust sqlx). When the DB pool is nil (smoke clusters / unit
-//     tests), endpoints return the empty-envelope shape so dashboards
-//     keep round-tripping.
+//     Rust sqlx). When the DB pool is nil, explicit smoke mode uses an
+//     in-memory repository; otherwise handlers return a database-required 503.
 //   - Workspace file CRUD: filesystem-backed via `domain/environment`.
 //   - Notepad export: HTML rendering via `domain/notepad`.
 //   - Cell execute (`ExecuteCell` / `ExecuteAllCells`): Python cells run
@@ -46,6 +45,21 @@ type State struct {
 	LLMKernel    NotebookLLMKernel
 	NotepadRepo  nbrepo.NotepadRepository
 	MemoryRepo   *MemoryNotebookRepo
+}
+
+func (s *State) smokeMode() bool {
+	return s.Cfg != nil && s.Cfg.SmokeMode
+}
+
+func (s *State) memoryRepo() *MemoryNotebookRepo {
+	if s.MemoryRepo == nil {
+		s.MemoryRepo = NewMemoryNotebookRepo()
+	}
+	return s.MemoryRepo
+}
+
+func (s *State) databaseRequired(w http.ResponseWriter) {
+	writeJSON(w, http.StatusServiceUnavailable, errBody("DATABASE_URL is required unless NOTEBOOK_RUNTIME_SMOKE_MODE=true"))
 }
 
 // ── Workspace files (1:1 ported domain/environment) ──────────────────

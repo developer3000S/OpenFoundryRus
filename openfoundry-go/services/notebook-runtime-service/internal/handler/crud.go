@@ -55,14 +55,19 @@ func (s *State) CreateNotebook(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := uuid.NewV7()
 	if s.Pool == nil {
-		// Smoke-cluster fallback: synthesise the row the caller
-		// would have got after a successful insert.
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
+		// Explicit smoke-mode fallback: synthesise and keep the row in memory.
 		now := time.Now().UTC()
-		writeJSON(w, http.StatusCreated, models.Notebook{
+		nb := models.Notebook{
 			ID: id, Name: body.Name, Description: description,
 			OwnerID: claims.Sub, DefaultKernel: kernel,
 			CreatedAt: now, UpdatedAt: now,
-		})
+		}
+		s.memoryRepo().putNotebook(nb)
+		writeJSON(w, http.StatusCreated, nb)
 		return
 	}
 	row := s.Pool.QueryRow(r.Context(), `
@@ -96,8 +101,13 @@ func (s *State) ListNotebooks(w http.ResponseWriter, r *http.Request) {
 	pattern := "%" + q.Get("search") + "%"
 
 	if s.Pool == nil {
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
+		notebooks := s.memoryRepo().listNotebooks()
 		writeJSON(w, http.StatusOK, map[string]any{
-			"data": []any{}, "total": 0, "page": page, "per_page": perPage,
+			"data": notebooks, "total": len(notebooks), "page": page, "per_page": perPage,
 		})
 		return
 	}
@@ -138,7 +148,17 @@ func (s *State) GetNotebook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Pool == nil {
-		writeJSON(w, http.StatusNotFound, nil)
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
+		nb, ok := s.memoryRepo().loadNotebook(id)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, nil)
+			return
+		}
+		cells := s.memoryRepo().loadCells(id)
+		writeJSON(w, http.StatusOK, map[string]any{"notebook": nb, "cells": cells})
 		return
 	}
 	row := s.Pool.QueryRow(r.Context(), `
@@ -179,7 +199,16 @@ func (s *State) UpdateNotebook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Pool == nil {
-		writeJSON(w, http.StatusNotFound, nil)
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
+		nb, ok := s.memoryRepo().updateNotebook(id, body)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, nb)
 		return
 	}
 	row := s.Pool.QueryRow(r.Context(), `
@@ -211,7 +240,15 @@ func (s *State) DeleteNotebook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Pool == nil {
-		w.WriteHeader(http.StatusNotFound)
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
+		if !s.memoryRepo().deleteNotebook(id) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	tag, err := s.Pool.Exec(r.Context(), `DELETE FROM notebooks WHERE id = $1`, id)
@@ -256,6 +293,10 @@ func (s *State) AddCell(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := uuid.NewV7()
 	if s.Pool == nil {
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
 		position := int32(1)
 		if body.Position != nil {
 			position = *body.Position
@@ -271,9 +312,7 @@ func (s *State) AddCell(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		}
-		if s.MemoryRepo != nil {
-			s.MemoryRepo.putCell(cell)
-		}
+		s.memoryRepo().putCell(cell)
 		writeJSON(w, http.StatusCreated, cell)
 		return
 	}
@@ -318,7 +357,16 @@ func (s *State) UpdateCell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Pool == nil {
-		writeJSON(w, http.StatusNotFound, nil)
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
+		cell, ok := s.memoryRepo().updateCell(cellID, body)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, cell)
 		return
 	}
 	row := s.Pool.QueryRow(r.Context(), `
@@ -352,7 +400,15 @@ func (s *State) DeleteCell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Pool == nil {
-		w.WriteHeader(http.StatusNotFound)
+		if !s.smokeMode() {
+			s.databaseRequired(w)
+			return
+		}
+		if !s.memoryRepo().deleteCell(cellID) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	tag, err := s.Pool.Exec(r.Context(), `DELETE FROM cells WHERE id = $1`, cellID)
