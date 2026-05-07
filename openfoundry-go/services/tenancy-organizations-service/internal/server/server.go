@@ -77,6 +77,9 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, ph *ha
 			wr.Post("/resources/{kind}/{id}/duplicate", ws.DuplicateResource)
 			wr.Delete("/resources/{kind}/{id}", ws.SoftDeleteResource)
 			wr.Post("/resources/batch", ws.BatchApply)
+			wr.Get("/trash", ws.ListTrash)
+			wr.Post("/resources/{kind}/{id}/restore", ws.RestoreResource)
+			wr.Delete("/resources/{kind}/{id}/purge", ws.PurgeResource)
 		})
 	})
 
