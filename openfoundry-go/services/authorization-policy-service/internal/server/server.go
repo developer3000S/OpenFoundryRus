@@ -48,6 +48,27 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *obs
 		api.Delete("/abac-policies/{id}", h.DeleteABACPolicy)
 
 		api.Post("/policy-evaluations", h.EvaluatePolicy)
+		api.Get("/permissions", h.ListPermissions)
+		api.Post("/permissions", h.CreatePermission)
+
+		api.Get("/roles", h.ListRoles)
+		api.Post("/roles", h.CreateRole)
+		api.Get("/roles/{id}", h.GetRole)
+		api.Put("/roles/{id}", h.UpdateRole)
+		api.Patch("/roles/{id}", h.UpdateRole)
+		api.Delete("/roles/{id}", h.DeleteRole)
+
+		api.Get("/groups", h.ListGroups)
+		api.Post("/groups", h.CreateGroup)
+		api.Get("/groups/{id}", h.GetGroup)
+		api.Put("/groups/{id}", h.UpdateGroup)
+		api.Patch("/groups/{id}", h.UpdateGroup)
+		api.Delete("/groups/{id}", h.DeleteGroup)
+
+		api.Post("/users/{id}/roles", h.AssignRole)
+		api.Delete("/users/{id}/roles/{role_id}", h.RemoveRole)
+		api.Post("/users/{id}/groups", h.AddUserToGroup)
+		api.Delete("/users/{id}/groups/{group_id}", h.RemoveUserFromGroup)
 
 		api.Get("/governance-template-applications", h.ListGovernanceTemplateApplications)
 		api.Post("/governance-template-applications", h.ApplyGovernanceTemplate)
