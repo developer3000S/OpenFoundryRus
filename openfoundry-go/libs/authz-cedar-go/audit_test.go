@@ -64,6 +64,27 @@ func TestAuthzAuditEventOmitsZeroFields(t *testing.T) {
 	assert.NotContains(t, view, "diagnostics")
 }
 
+func TestAuthzAuditEventJSONByteCompatibleWithRust(t *testing.T) {
+	t.Parallel()
+	tenant := "acme"
+	ev := cedarauthz.AuthzAuditEvent{
+		Timestamp:   time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC),
+		Principal:   `User::"alice"`,
+		Action:      `Action::"read"`,
+		Resource:    `Dataset::"ds-1"`,
+		Decision:    "allow",
+		Tenant:      &tenant,
+		PolicyIDs:   []string{"permit-cleared-readers"},
+		Diagnostics: []string{"while evaluating policy `p`: missing attribute"},
+	}
+	out, err := json.Marshal(ev)
+	require.NoError(t, err)
+	const expected = "{\"timestamp\":\"2026-05-06T00:00:00Z\",\"principal\":\"User::\\\"alice\\\"\",\"action\":\"Action::\\\"read\\\"\",\"resource\":\"Dataset::\\\"ds-1\\\"\",\"decision\":\"allow\",\"tenant\":\"acme\",\"policy_ids\":[\"permit-cleared-readers\"],\"diagnostics\":[\"while evaluating policy `p`: missing attribute\"]}"
+	assert.JSONEq(t, expected, string(out))
+	assert.Equal(t, expected, string(out),
+		"encoding/json field order is part of the pinned Rust-compatible wire fixture")
+}
+
 // NoopAuditSink is a no-op (covered to ensure the contract).
 func TestNoopAuditSink(t *testing.T) {
 	t.Parallel()

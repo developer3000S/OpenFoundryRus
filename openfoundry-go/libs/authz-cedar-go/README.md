@@ -5,9 +5,9 @@ Go port of `libs/authz-cedar`, backed by
 v1.6.0+ (post-1.0; AWS maintains it in lock-step with cedar-rust v4
 against the same conformance test suite).
 
-## Status — first slice
+## Status — conformance-ready port
 
-This commit ships the **core** of the lib:
+This package now mirrors the reusable Rust `libs/authz-cedar` surfaces:
 
 - `lib.go` — `PolicyStore` (in-memory `*cedar.PolicySet` + bundled
   schema, behind a `sync.RWMutex`), `PolicyRecord` (mirrors the
@@ -21,26 +21,24 @@ This commit ships the **core** of the lib:
 - `errors.go` — `PolicyParseError`, `ValidationError`, sentinel errors.
 - `cedar_schema.cedarschema` — bundled schema, copied verbatim from
   `libs/authz-cedar/`.
+- `pg.go` — Postgres reload adapter for the latest active policy version
+  per id, with atomic replacement semantics.
+- `nats.go` — hot-reload subscriber interface for `authz.policy.changed`.
+- `audit_kafka.go` — Kafka audit sink publishing `audit.authz.v1` with
+  the Rust-compatible OpenLineage header shape.
+- `chi.go` — chi middleware replacement for the Rust `axum.rs` guard.
+- `iceberg_policies.go` / `schedule_policies.go` — policy bundles kept
+  in parity with the Rust helpers.
 - Tests covering schema parsing, policy validation (strict mode,
   duplicate ids, schema-incompatible attribute), end-to-end Allow/Deny
-  via the engine, audit JSON wire-format pinning.
+  via the engine, diagnostics reasons/errors, Postgres reload,
+  Kafka/NATS reload/audit adapters, policy-bundle validation, and audit
+  JSON byte-compatible wire-format pinning.
 
-## Follow-up slices (deferred)
+## Remaining follow-up
 
-- Postgres adapter (`pg.go`) — load policies from
-  `pg-policy.cedar_policies` at startup.
-- NATS adapter (`nats.go`) — hot-reload on `authz.policy.changed`.
-- Kafka audit sink (`audit_kafka.go`) — publish to topic
-  `audit.authz.v1`.
-- chi middleware (replacement for the Rust `axum.rs`) — guard handler
-  factory.
-- `iceberg_policies.go` — generates Cedar policies from Iceberg table
-  ACLs.
-- `schedule_policies.go` — generates Cedar policies from schedule
-  resources.
-- AWS conformance test suite mirror — pin a corpus of (schema, policies,
-  request, expected decision) tuples in CI so a cedar-go upgrade can't
-  silently change semantics.
+- Keep extending the local conformance corpus when new service policy
+  shapes land, and run it before cedar-go upgrades.
 
 ## Cedar-go API differences vs cedar-rust
 
@@ -60,7 +58,7 @@ Notable shape differences picked up during the port:
 The validator is in an experimental namespace
 (`x/exp/schema/validate`) but is the same code path the cedar-go
 maintainers use to run the AWS Cedar conformance suite. Pinned to
-v1.6.0; bumps require running the conformance mirror (when added).
+v1.6.0; bumps require running the conformance mirror.
 
 The validator consumes `*ast.Policy` from `cedar-go/x/exp/ast`, but the
 top-level `cedar.Policy.AST()` returns `*ast.Policy` from
