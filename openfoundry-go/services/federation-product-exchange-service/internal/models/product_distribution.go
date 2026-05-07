@@ -134,3 +134,28 @@ type UpdateContractRequest struct {
 	Status            *string    `json:"status"`
 	ExpiresAt         *time.Time `json:"expires_at"`
 }
+
+// FederatedQueryRequest mirrors `models::access_grant::FederatedQueryRequest`
+// from Rust. It is the wire shape for `POST /api/v1/product-distribution/queries`.
+// `Limit` is optional and clamped against the access grant's
+// max_rows_per_query at runtime.
+type FederatedQueryRequest struct {
+	ShareID uuid.UUID `json:"share_id"`
+	SQL     string    `json:"sql"`
+	Purpose string    `json:"purpose"`
+	Limit   *int      `json:"limit,omitempty"`
+}
+
+// FederatedQueryResult mirrors `models::access_grant::FederatedQueryResult`
+// from Rust. Field order, names, and JSON tags match the Rust struct so
+// the federation UI deserializes the Go response without changes.
+type FederatedQueryResult struct {
+	ShareID     uuid.UUID         `json:"share_id"`
+	DatasetName string            `json:"dataset_name"`
+	SourcePeer  string            `json:"source_peer"`
+	ExecutedSQL string            `json:"executed_sql"`
+	QueryMode   string            `json:"query_mode"`
+	Limit       int               `json:"limit"`
+	Columns     []string          `json:"columns"`
+	Rows        []json.RawMessage `json:"rows"`
+}

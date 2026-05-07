@@ -29,6 +29,9 @@ type Repository interface {
 	CreateShareManifest(ctx context.Context, req models.CreateShareRequest) (*models.ShareManifest, error)
 	GetShareManifest(ctx context.Context, id uuid.UUID) (*models.ShareManifest, error)
 	ListSyncStatuses(ctx context.Context) ([]models.SyncStatus, error)
+	GetShare(ctx context.Context, id uuid.UUID) (*models.SharedDataset, error)
+	GetContract(ctx context.Context, id uuid.UUID) (*models.SharingContract, error)
+	GetAccessGrantByShare(ctx context.Context, shareID uuid.UUID) (*models.AccessGrant, error)
 	UpdateSyncStatus(ctx context.Context, shareID uuid.UUID, req models.SyncStatusUpdateRequest) (*models.SyncStatus, error)
 }
 
@@ -465,6 +468,46 @@ func scanPeer(row scanner) (*models.PeerOrganization, error) {
 		return nil, fmt.Errorf("decode admin_contacts: %w", err)
 	}
 	return &peer, nil
+}
+
+
+// GetShare returns the shared-dataset row for the given id. It is a
+// thin wrapper around the private getShare helper so callers outside
+// this package (the federated-consume handler) can resolve a share
+// without going through the manifest envelope.
+func (r *PGXRepository) GetShare(ctx context.Context, id uuid.UUID) (*models.SharedDataset, error) {
+	return r.getShare(ctx, id)
+}
+
+// GetContract returns the full sharing-contract row, decoded into a
+// `models.SharingContract` value. It mirrors the Rust path used by the
+// federated-consume handler.
+func (r *PGXRepository) GetContract(ctx context.Context, id uuid.UUID) (*models.SharingContract, error) {
+	return r.getContractFull(ctx, id)
+}
+
+// GetAccessGrantByShare returns the most recently issued access grant
+// bound to the supplied share id. When no grant exists this returns
+// `ErrNotFound` so the handler layer can map it to a 404.
+func (r *PGXRepository) GetAccessGrantByShare(ctx context.Context, shareID uuid.UUID) (*models.AccessGrant, error) {
+	row := r.Pool.QueryRow(ctx, `SELECT id, share_id, peer_id, query_template, max_rows_per_query, can_replicate, allowed_purposes, expires_at, issued_at FROM nexus_access_grants WHERE share_id = $1 ORDER BY issued_at DESC LIMIT 1`, shareID)
+	grant, err := scanAccessGrant(row)
+	if err != nil {
+		return nil, mapPGError(err)
+	}
+	return grant, nil
+}
+
+func scanAccessGrant(row scanner) (*models.AccessGrant, error) {
+	var grant models.AccessGrant
+	var allowedPurposes []byte
+	if err := row.Scan(&grant.ID, &grant.ShareID, &grant.PeerID, &grant.QueryTemplate, &grant.MaxRowsPerQuery, &grant.CanReplicate, &allowedPurposes, &grant.ExpiresAt, &grant.IssuedAt); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(allowedPurposes, &grant.AllowedPurposes); err != nil {
+		return nil, fmt.Errorf("decode allowed_purposes: %w", err)
+	}
+	return &grant, nil
 }
 
 func scanContract(row scanner) (*models.SharingContract, error) {

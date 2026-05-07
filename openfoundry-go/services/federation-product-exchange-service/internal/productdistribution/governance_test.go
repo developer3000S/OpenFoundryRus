@@ -121,3 +121,97 @@ func TestValidateContractTable(t *testing.T) {
 		})
 	}
 }
+
+// Ports `rejects_federated_runtime_with_mismatched_grant_peer` from
+// services/federation-product-exchange-service/src/domain/governance.rs.
+func TestValidateFederatedRuntimeRejectsMismatchedGrantPeer(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	provider := makePeer("authenticated")
+	consumer := makePeer("authenticated")
+	contract := &models.SharingContract{
+		ID: uuid.New(), PeerID: provider.ID, Status: "active",
+		ExpiresAt: now.Add(time.Hour),
+	}
+	share := &models.SharedDataset{
+		ID: uuid.New(), ContractID: contract.ID,
+		ProviderPeerID: provider.ID, ConsumerPeerID: consumer.ID,
+		Status: "active",
+	}
+	grant := &models.AccessGrant{
+		ShareID: share.ID, PeerID: provider.ID, // mismatch: should be consumer
+		ExpiresAt: now.Add(time.Hour),
+	}
+	if err := productdistribution.ValidateFederatedRuntime(share, contract, grant, &provider, &consumer, now); err == nil {
+		t.Fatal("expected validation error for mismatched grant peer")
+	}
+}
+
+func TestValidateFederatedRuntimeAcceptsConsistentSetup(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	provider := makePeer("authenticated")
+	consumer := makePeer("authenticated")
+	contract := &models.SharingContract{
+		ID: uuid.New(), PeerID: provider.ID, Status: "active",
+		ExpiresAt: now.Add(time.Hour),
+	}
+	share := &models.SharedDataset{
+		ID: uuid.New(), ContractID: contract.ID,
+		ProviderPeerID: provider.ID, ConsumerPeerID: consumer.ID,
+		Status: "active",
+	}
+	grant := &models.AccessGrant{
+		ShareID: share.ID, PeerID: consumer.ID,
+		ExpiresAt: now.Add(time.Hour),
+	}
+	if err := productdistribution.ValidateFederatedRuntime(share, contract, grant, &provider, &consumer, now); err != nil {
+		t.Fatalf("expected validation to succeed, got %v", err)
+	}
+}
+
+func TestValidateFederatedRuntimeRejectsExpiredContract(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	provider := makePeer("authenticated")
+	consumer := makePeer("authenticated")
+	contract := &models.SharingContract{
+		ID: uuid.New(), PeerID: provider.ID, Status: "active",
+		ExpiresAt: now.Add(-time.Hour),
+	}
+	share := &models.SharedDataset{
+		ContractID: contract.ID,
+		ProviderPeerID: provider.ID, ConsumerPeerID: consumer.ID,
+		Status: "active",
+	}
+	grant := &models.AccessGrant{PeerID: consumer.ID}
+	if err := productdistribution.ValidateFederatedRuntime(share, contract, grant, &provider, &consumer, now); err == nil || err.Error() != "sharing contract is not active" {
+		t.Fatalf("want \"sharing contract is not active\", got %v", err)
+	}
+}
+
+func TestValidateFederatedRuntimeRejectsInactiveShare(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	provider := makePeer("authenticated")
+	consumer := makePeer("authenticated")
+	contract := &models.SharingContract{PeerID: provider.ID, Status: "active", ExpiresAt: now.Add(time.Hour)}
+	share := &models.SharedDataset{ProviderPeerID: provider.ID, ConsumerPeerID: consumer.ID, Status: "paused"}
+	grant := &models.AccessGrant{PeerID: consumer.ID}
+	if err := productdistribution.ValidateFederatedRuntime(share, contract, grant, &provider, &consumer, now); err == nil || err.Error() != "shared dataset is not active" {
+		t.Fatalf("want \"shared dataset is not active\", got %v", err)
+	}
+}
+
+func TestValidateFederatedRuntimeRejectsUnauthenticatedConsumer(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	provider := makePeer("authenticated")
+	consumer := makePeer("pending")
+	contract := &models.SharingContract{PeerID: provider.ID, Status: "active", ExpiresAt: now.Add(time.Hour)}
+	share := &models.SharedDataset{ProviderPeerID: provider.ID, ConsumerPeerID: consumer.ID, Status: "active"}
+	grant := &models.AccessGrant{PeerID: consumer.ID}
+	if err := productdistribution.ValidateFederatedRuntime(share, contract, grant, &provider, &consumer, now); err == nil {
+		t.Fatal("expected unauthenticated consumer to be rejected")
+	}
+}

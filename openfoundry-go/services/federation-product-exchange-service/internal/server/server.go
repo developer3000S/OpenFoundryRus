@@ -119,6 +119,7 @@ func buildRouter(cfg *config.Config, jwt *authmw.JWTConfig, h *marketplace.Handl
 			api.Get("/shares/{id}", d.GetShareManifest)
 			api.Get("/sync-statuses", d.ListSyncStatuses)
 			api.Patch("/shares/{id}/sync-status", d.UpdateSyncStatus)
+			api.Post("/queries", d.ConsumeQuery)
 		})
 	}
 

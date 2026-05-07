@@ -58,6 +58,47 @@ func ValidateContract(
 	return nil
 }
 
+// ValidateFederatedRuntime is the 1:1 port of
+// `governance::validate_federated_runtime` from Rust. The federated-query
+// consume handler invokes this before any rows are produced. The
+// invariants mirror the Rust source verbatim:
+//  1. share.status == "active"
+//  2. contract.status == "active" and contract.expires_at > now
+//  3. share.provider_peer_id == contract.peer_id
+//  4. grant.peer_id == share.consumer_peer_id
+//  5. provider and consumer peers are both in status "authenticated"
+//
+// Error messages mirror the Rust strings byte-exactly so the handler can
+// surface them as 400 responses without translation.
+func ValidateFederatedRuntime(
+	share *models.SharedDataset,
+	contract *models.SharingContract,
+	grant *models.AccessGrant,
+	providerPeer *models.PeerOrganization,
+	consumerPeer *models.PeerOrganization,
+	now time.Time,
+) error {
+	if share.Status != "active" {
+		return fmt.Errorf("shared dataset is not active")
+	}
+	if contract.Status != "active" || !contract.ExpiresAt.After(now) {
+		return fmt.Errorf("sharing contract is not active")
+	}
+	if contract.PeerID != share.ProviderPeerID {
+		return fmt.Errorf("share provider does not match the contract owner peer")
+	}
+	if grant.PeerID != share.ConsumerPeerID {
+		return fmt.Errorf("access grant is not bound to the consumer peer")
+	}
+	if err := ensurePeerAuthenticated(providerPeer, "provider peer"); err != nil {
+		return err
+	}
+	if err := ensurePeerAuthenticated(consumerPeer, "consumer peer"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func ensurePeerAuthenticated(peer *models.PeerOrganization, label string) error {
 	if peer == nil || peer.Status != authenticatedPeerStatus {
 		return fmt.Errorf("%s must be authenticated", label)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -187,6 +188,77 @@ func (h *Handlers) UpdateSyncStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+
+// ConsumeQuery is the 1:1 port of Rust `handlers::consume::run_federated_query`.
+// It validates per-peer access grants and executes a read-only SQL preview
+// against the share's sample rows.
+func (h *Handlers) ConsumeQuery(w http.ResponseWriter, r *http.Request) {
+	var req models.FederatedQueryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	share, err := h.Repo.GetShare(r.Context(), req.ShareID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "shared dataset not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "database operation failed")
+		return
+	}
+	grant, err := h.Repo.GetAccessGrantByShare(r.Context(), req.ShareID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "access grant not found for shared dataset")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "database operation failed")
+		return
+	}
+	contract, err := h.Repo.GetContract(r.Context(), share.ContractID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "sharing contract not found for shared dataset")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "database operation failed")
+		return
+	}
+	providerPeer, err := h.Repo.GetPeer(r.Context(), share.ProviderPeerID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "provider peer not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "database operation failed")
+		return
+	}
+	consumerPeer, err := h.Repo.GetPeer(r.Context(), share.ConsumerPeerID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "consumer peer not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "database operation failed")
+		return
+	}
+	if err := ValidateFederatedRuntime(share, contract, grant, providerPeer, consumerPeer, time.Now().UTC()); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	peers := map[uuid.UUID]models.PeerOrganization{
+		providerPeer.ID: *providerPeer,
+		consumerPeer.ID: *consumerPeer,
+	}
+	result, err := ExecuteFederatedQuery(&req, share, grant, peers)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func parseUUIDParam(w http.ResponseWriter, r *http.Request, name string) (uuid.UUID, bool) {

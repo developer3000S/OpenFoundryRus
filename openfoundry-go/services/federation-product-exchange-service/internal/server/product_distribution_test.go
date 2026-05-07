@@ -224,10 +224,11 @@ type distributionMemoryRepo struct {
 	contracts map[uuid.UUID]models.SharingContract
 	shares    map[uuid.UUID]models.SharedDataset
 	statuses  map[uuid.UUID]models.SyncStatus
+	grants    map[uuid.UUID]models.AccessGrant
 }
 
 func newDistributionMemoryRepo() *distributionMemoryRepo {
-	return &distributionMemoryRepo{peers: map[uuid.UUID]models.PeerOrganization{}, contracts: map[uuid.UUID]models.SharingContract{}, shares: map[uuid.UUID]models.SharedDataset{}, statuses: map[uuid.UUID]models.SyncStatus{}}
+	return &distributionMemoryRepo{peers: map[uuid.UUID]models.PeerOrganization{}, contracts: map[uuid.UUID]models.SharingContract{}, shares: map[uuid.UUID]models.SharedDataset{}, statuses: map[uuid.UUID]models.SyncStatus{}, grants: map[uuid.UUID]models.AccessGrant{}}
 }
 
 func (r *distributionMemoryRepo) ListPeers(context.Context) ([]models.PeerOrganization, error) {
@@ -544,4 +545,124 @@ func decodeSharePayload(payload map[string]any) models.CreateShareRequest {
 	var req models.CreateShareRequest
 	_ = json.Unmarshal(b, &req)
 	return req
+}
+
+func (r *distributionMemoryRepo) GetShare(_ context.Context, id uuid.UUID) (*models.SharedDataset, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	share, ok := r.shares[id]
+	if !ok {
+		return nil, productdistribution.ErrNotFound
+	}
+	return &share, nil
+}
+
+func (r *distributionMemoryRepo) GetContract(_ context.Context, id uuid.UUID) (*models.SharingContract, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	contract, ok := r.contracts[id]
+	if !ok {
+		return nil, productdistribution.ErrNotFound
+	}
+	return &contract, nil
+}
+
+func (r *distributionMemoryRepo) GetAccessGrantByShare(_ context.Context, shareID uuid.UUID) (*models.AccessGrant, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, grant := range r.grants {
+		if grant.ShareID == shareID {
+			return &grant, nil
+		}
+	}
+	return nil, productdistribution.ErrNotFound
+}
+
+func (r *distributionMemoryRepo) seedAccessGrant(shareID, peerID uuid.UUID, purposes []string) models.AccessGrant {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now().UTC()
+	id := uuid.New()
+	grant := models.AccessGrant{
+		ID: id, ShareID: shareID, PeerID: peerID,
+		QueryTemplate: "SELECT * FROM shared_dataset", MaxRowsPerQuery: 100,
+		AllowedPurposes: purposes,
+		ExpiresAt: now.Add(24 * time.Hour), IssuedAt: now,
+	}
+	r.grants[id] = grant
+	return grant
+}
+
+func (r *distributionMemoryRepo) expireContract(id uuid.UUID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c := r.contracts[id]
+	c.ExpiresAt = time.Now().UTC().Add(-time.Hour)
+	r.contracts[id] = c
+}
+
+// TestProductDistributionConsumeQuery exercises the federated-consume
+// endpoint end-to-end, covering the happy path plus the four 4xx cases
+// the Rust handler / domain returns: missing share, write-oriented SQL,
+// disallowed purpose, and expired contract.
+func TestProductDistributionConsumeQuery(t *testing.T) {
+	t.Parallel()
+	srv, token, repo := newDistributionTestServer(t)
+	provider, consumer, contractID := repo.seedShareDependencies()
+	manifest, err := repo.CreateShareManifest(context.Background(), decodeSharePayload(sharePayload(contractID, provider.ID, consumer.ID)))
+	require.NoError(t, err)
+	shareID := manifest.Share.ID
+	repo.seedAccessGrant(shareID, consumer.ID, []string{"claims"})
+
+	// 200 — happy path.
+	body := doJSON(t, http.MethodPost, srv.URL+"/api/v1/product-distribution/queries", token, map[string]any{
+		"share_id": shareID.String(),
+		"sql":      "select * from claims",
+		"purpose":  "claims",
+	}, http.StatusOK)
+	var res models.FederatedQueryResult
+	require.NoError(t, json.Unmarshal(body, &res))
+	assert.Equal(t, "claims_eu", res.DatasetName)
+	assert.Equal(t, "Provider", res.SourcePeer)
+	assert.Equal(t, "incremental_replication", res.QueryMode)
+	assert.Len(t, res.Rows, 1)
+	assert.Equal(t, []string{"claim_id"}, res.Columns)
+
+	// 404 — missing share.
+	doJSON(t, http.MethodPost, srv.URL+"/api/v1/product-distribution/queries", token, map[string]any{
+		"share_id": uuid.New().String(),
+		"sql":      "select 1",
+		"purpose":  "claims",
+	}, http.StatusNotFound)
+
+	// 400 — write-oriented SQL.
+	writeBody := doJSON(t, http.MethodPost, srv.URL+"/api/v1/product-distribution/queries", token, map[string]any{
+		"share_id": shareID.String(),
+		"sql":      "DELETE FROM claims",
+		"purpose":  "claims",
+	}, http.StatusBadRequest)
+	var writeErr map[string]string
+	require.NoError(t, json.Unmarshal(writeBody, &writeErr))
+	assert.Contains(t, writeErr["error"], "read-only")
+
+	// 400 — purpose not allowed by the grant.
+	purposeBody := doJSON(t, http.MethodPost, srv.URL+"/api/v1/product-distribution/queries", token, map[string]any{
+		"share_id": shareID.String(),
+		"sql":      "select 1",
+		"purpose":  "marketing",
+	}, http.StatusBadRequest)
+	var purposeErr map[string]string
+	require.NoError(t, json.Unmarshal(purposeBody, &purposeErr))
+	assert.Contains(t, purposeErr["error"], "purpose")
+
+	// 400 — expired contract.
+	repo.expireContract(contractID)
+	expiredBody := doJSON(t, http.MethodPost, srv.URL+"/api/v1/product-distribution/queries", token, map[string]any{
+		"share_id": shareID.String(),
+		"sql":      "select 1",
+		"purpose":  "claims",
+	}, http.StatusBadRequest)
+	var expiredErr map[string]string
+	require.NoError(t, json.Unmarshal(expiredBody, &expiredErr))
+	assert.Contains(t, expiredErr["error"], "sharing contract")
 }
