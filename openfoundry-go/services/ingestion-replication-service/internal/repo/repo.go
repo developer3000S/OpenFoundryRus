@@ -612,6 +612,210 @@ func (r *Repo) ListSchemaHistory(ctx context.Context, streamID uuid.UUID) ([]mod
 	return out, rows.Err()
 }
 
+// ResetStreamResult is the value returned to the handler after a
+// successful reset transaction. Mirrors the data the Rust handler hands
+// back to its outbox/audit emitters.
+type ResetStreamResult struct {
+	Stream        models.StreamDefinition
+	PreviousView  *models.StreamView
+	NewView       models.StreamView
+	SchemaChanged bool
+	ConfigChanged bool
+}
+
+// DownstreamPipelinesActive reports whether at least one running
+// streaming topology references streamID. Returns false (no error)
+// when streaming_topologies has not been provisioned yet — the table
+// lands in a separate slice.
+func (r *Repo) DownstreamPipelinesActive(ctx context.Context, streamID uuid.UUID) (bool, error) {
+	var exists bool
+	if err := r.Pool.QueryRow(ctx,
+		`SELECT to_regclass('public.streaming_topologies') IS NOT NULL`,
+	).Scan(&exists); err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	var count int64
+	err := r.Pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM streaming_topologies
+		  WHERE status NOT IN ('stopped','failed','archived')
+		    AND source_stream_ids @> jsonb_build_array($1::text)::jsonb`,
+		streamID.String(),
+	).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// ResetStream rotates a stream's active view atomically. Retires the
+// previous active view (active=false, retired_at stamped), inserts the
+// fresh view (generation+1) and, when newSchema is non-empty, mirrors
+// the schema onto streaming_streams so subsequent push validations
+// honour it.
+//
+// Caller is responsible for permission, kind, and downstream-active
+// guards before invoking.
+func (r *Repo) ResetStream(
+	ctx context.Context,
+	streamID uuid.UUID,
+	ownerID uuid.UUID,
+	createdBy string,
+	body *models.ResetStreamRequest,
+) (*ResetStreamResult, error) {
+	if body == nil {
+		body = &models.ResetStreamRequest{}
+	}
+	tx, err := r.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	streamRow := tx.QueryRow(ctx, streamSelect+` WHERE id = $1 AND owner_id = $2`, streamID, ownerID)
+	stream, err := scanStream(streamRow)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrStreamNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	streamRID := models.StreamRIDFor(stream.ID)
+
+	previous, err := loadActiveStreamView(ctx, tx, streamRID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	if previous != nil {
+		if _, err := tx.Exec(ctx,
+			`UPDATE streaming_stream_views
+			    SET active = FALSE, retired_at = $2
+			  WHERE stream_rid = $1 AND active = TRUE`,
+			streamRID, now,
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	schemaForView := body.NewSchema
+	if len(schemaForView) == 0 {
+		if previous != nil && len(previous.SchemaJSON) > 0 {
+			schemaForView = previous.SchemaJSON
+		} else {
+			schemaForView = stream.Schema
+		}
+	}
+	configForView := body.NewConfig
+	if len(configForView) == 0 && previous != nil && len(previous.ConfigJSON) > 0 {
+		configForView = previous.ConfigJSON
+	}
+	schemaChanged := previous == nil || !rawJSONEqual(previous.SchemaJSON, schemaForView)
+	configChanged := previous == nil || !rawJSONEqual(previous.ConfigJSON, configForView)
+
+	newID, err := uuid.NewV7()
+	if err != nil {
+		return nil, fmt.Errorf("mint view uuid: %w", err)
+	}
+	newViewRID := models.ViewRIDFor(newID)
+	previousGeneration := int32(0)
+	if previous != nil {
+		previousGeneration = previous.Generation
+	}
+	newGeneration := previousGeneration + 1
+
+	row := tx.QueryRow(ctx,
+		`INSERT INTO streaming_stream_views
+		 (id, stream_rid, view_rid, schema_json, config_json, generation, active, created_by)
+		 VALUES ($1,$2,$3,$4,$5,$6,TRUE,$7)
+		 RETURNING id, stream_rid, view_rid, schema_json, config_json, generation, active,
+		           created_by, created_at, retired_at`,
+		newID, streamRID, newViewRID, nullableJSON(schemaForView), nullableJSON(configForView),
+		newGeneration, createdBy,
+	)
+	newView, err := scanStreamView(row)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(body.NewSchema) > 0 {
+		if _, err := tx.Exec(ctx,
+			`UPDATE streaming_streams SET schema = $2, updated_at = NOW() WHERE id = $1`,
+			stream.ID, body.NewSchema,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &ResetStreamResult{
+		Stream:        *stream,
+		PreviousView:  previous,
+		NewView:       *newView,
+		SchemaChanged: schemaChanged,
+		ConfigChanged: configChanged,
+	}, nil
+}
+
+func loadActiveStreamView(ctx context.Context, tx pgx.Tx, streamRID string) (*models.StreamView, error) {
+	row := tx.QueryRow(ctx,
+		`SELECT id, stream_rid, view_rid, schema_json, config_json, generation, active,
+		        created_by, created_at, retired_at
+		   FROM streaming_stream_views
+		  WHERE stream_rid = $1 AND active = TRUE
+		  ORDER BY generation DESC LIMIT 1`,
+		streamRID,
+	)
+	v, err := scanStreamView(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func scanStreamView(r rowLikeT) (*models.StreamView, error) {
+	var v models.StreamView
+	if err := r.Scan(
+		&v.ID, &v.StreamRID, &v.ViewRID, &v.SchemaJSON, &v.ConfigJSON,
+		&v.Generation, &v.Active, &v.CreatedBy, &v.CreatedAt, &v.RetiredAt,
+	); err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func nullableJSON(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return json.RawMessage(b)
+}
+
+// rawJSONEqual compares two JSON blobs structurally — the previous
+// view stores normalized JSONB, so a byte-equal check is too strict
+// for whitespace differences.
+func rawJSONEqual(a, b json.RawMessage) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	var av, bv any
+	if err := json.Unmarshal(a, &av); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(b, &bv); err != nil {
+		return false
+	}
+	ab, _ := json.Marshal(av)
+	bb, _ := json.Marshal(bv)
+	return string(ab) == string(bb)
+}
+
 func (r *Repo) ApplyResolution(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID, update *models.ResolutionUpdate) (*models.ResolutionState, error) {
 	if update == nil {
 		return r.GetResolution(ctx, streamID, ownerID)

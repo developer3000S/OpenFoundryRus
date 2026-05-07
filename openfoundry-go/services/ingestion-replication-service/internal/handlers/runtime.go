@@ -154,6 +154,29 @@ func (r *ProductionStreamingRuntime) UpdateStream(ctx context.Context, stream *m
 	return nil
 }
 
+// ResetStream truncates the Kafka topic backing this stream by deleting
+// it and re-provisioning it with the same partition / retention spec.
+// Effect: all records are dropped and consumer-group offsets become
+// invalid, which is exactly the "reset" semantics callers expect. Both
+// DeleteTopic and ProvisionTopic are idempotent so retries after a
+// partial failure converge.
+func (r *ProductionStreamingRuntime) ResetStream(ctx context.Context, stream *models.StreamDefinition) error {
+	if stream == nil {
+		return runtimeErr(RuntimeValidation, "stream is required")
+	}
+	if r == nil || r.Kafka == nil {
+		return runtimeErr(RuntimeUnavailable, "streaming runtime is not configured")
+	}
+	topic := topicName(stream)
+	if err := r.Kafka.DeleteTopic(ctx, topic); err != nil {
+		return wrapRuntimeUpstream("kafka delete topic", err)
+	}
+	if err := r.Kafka.ProvisionTopic(ctx, topicSpec(stream, topic)); err != nil {
+		return wrapRuntimeUpstream("kafka re-provision topic", err)
+	}
+	return nil
+}
+
 func (r *ProductionStreamingRuntime) RegisterCDC(ctx context.Context, stream *models.CdcStream) (*CdcRegistrationResult, error) {
 	if stream == nil {
 		return nil, runtimeErr(RuntimeValidation, "cdc stream is required")

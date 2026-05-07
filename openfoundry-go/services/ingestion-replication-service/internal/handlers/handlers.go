@@ -12,6 +12,7 @@ import (
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
 	"github.com/openfoundry/openfoundry-go/services/ingestion-replication-service/internal/models"
+	"github.com/openfoundry/openfoundry-go/services/ingestion-replication-service/internal/repo"
 )
 
 type Store interface {
@@ -31,6 +32,8 @@ type Store interface {
 	GetResolution(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID) (*models.ResolutionState, error)
 	ApplyCheckpoint(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID, update *models.CheckpointUpdate) (*models.IncrementalCheckpoint, error)
 	ApplyResolution(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID, update *models.ResolutionUpdate) (*models.ResolutionState, error)
+	DownstreamPipelinesActive(ctx context.Context, streamID uuid.UUID) (bool, error)
+	ResetStream(ctx context.Context, streamID uuid.UUID, ownerID uuid.UUID, createdBy string, body *models.ResetStreamRequest) (*repo.ResetStreamResult, error)
 }
 
 // StreamingRuntime hides Kafka/Flink provisioning and CDC registration.
@@ -38,11 +41,19 @@ type StreamingRuntime interface {
 	ProvisionStream(ctx context.Context, stream *models.StreamDefinition) error
 	UpdateStream(ctx context.Context, stream *models.StreamDefinition) error
 	RegisterCDC(ctx context.Context, stream *models.CdcStream) (*CdcRegistrationResult, error)
+	// ResetStream truncates the stream's Kafka topic and resets
+	// consumer offsets. Mirrors hot_buffer::ensure_topic on the Rust
+	// side: it must be idempotent so retries after partial failures
+	// converge.
+	ResetStream(ctx context.Context, stream *models.StreamDefinition) error
 }
 
 type Handlers struct {
 	Repo    Store
 	Runtime StreamingRuntime
+	// PushURL renders the rotated push URL in the ResetStream response.
+	// Optional — when nil the response carries an empty push_url.
+	PushURL *PushURLBuilder
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

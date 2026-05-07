@@ -148,6 +148,65 @@ type ResolutionState struct {
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
+// Stream-kind constants mirror event_streaming::models::stream_view::StreamKind.
+// Foundry only allows resetting INGEST streams.
+const (
+	StreamKindIngest  = "INGEST"
+	StreamKindDerived = "DERIVED"
+)
+
+// RID prefixes for stable stream / rotating view identifiers. Mirrors
+// event_streaming::models::stream_view (Rust): keep the format stable
+// so the gateway can parse view_rid back into a UUID.
+const (
+	StreamRIDPrefix = "ri.streams.main.stream."
+	ViewRIDPrefix   = "ri.streams.main.view."
+)
+
+// StreamRIDFor composes the stable stream RID for a stream UUID.
+func StreamRIDFor(streamID uuid.UUID) string {
+	return StreamRIDPrefix + streamID.String()
+}
+
+// ViewRIDFor composes a fresh view RID for a UUID. Callers typically
+// pass uuid.NewV7() so view RIDs sort by creation order.
+func ViewRIDFor(id uuid.UUID) string {
+	return ViewRIDPrefix + id.String()
+}
+
+// StreamView is the persisted shape of a single row in
+// streaming_stream_views.
+type StreamView struct {
+	ID         uuid.UUID       `json:"id"`
+	StreamRID  string          `json:"stream_rid"`
+	ViewRID    string          `json:"view_rid"`
+	SchemaJSON json.RawMessage `json:"schema_json,omitempty"`
+	ConfigJSON json.RawMessage `json:"config_json,omitempty"`
+	Generation int32           `json:"generation"`
+	Active     bool            `json:"active"`
+	CreatedBy  string          `json:"created_by"`
+	CreatedAt  time.Time       `json:"created_at"`
+	RetiredAt  *time.Time      `json:"retired_at,omitempty"`
+}
+
+// ResetStreamRequest is the body of POST /streams/{id}:reset.
+type ResetStreamRequest struct {
+	NewSchema json.RawMessage `json:"new_schema,omitempty"`
+	NewConfig json.RawMessage `json:"new_config,omitempty"`
+	Force     bool            `json:"force,omitempty"`
+}
+
+// ResetStreamResponse is the success body of POST /streams/{id}:reset.
+type ResetStreamResponse struct {
+	StreamRID  string     `json:"stream_rid"`
+	OldViewRID string     `json:"old_view_rid"`
+	NewViewRID string     `json:"new_view_rid"`
+	Generation int32      `json:"generation"`
+	View       StreamView `json:"view"`
+	PushURL    string     `json:"push_url"`
+	Forced     bool       `json:"forced"`
+}
+
 // CheckpointUpdate is emitted by the streaming runtime when Kafka/Flink CDC
 // registration or callbacks advance the durable source offset.
 type CheckpointUpdate struct {

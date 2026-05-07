@@ -17,6 +17,7 @@ import (
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
 	"github.com/openfoundry/openfoundry-go/services/ingestion-replication-service/internal/handlers"
 	"github.com/openfoundry/openfoundry-go/services/ingestion-replication-service/internal/models"
+	"github.com/openfoundry/openfoundry-go/services/ingestion-replication-service/internal/repo"
 )
 
 func TestIngestJobJSONShape(t *testing.T) {
@@ -93,10 +94,22 @@ type fakeStore struct {
 	cdcStreams  map[uuid.UUID]models.CdcStream
 	checkpoints map[uuid.UUID]models.IncrementalCheckpoint
 	resolutions map[uuid.UUID]models.ResolutionState
+	views       map[uuid.UUID][]models.StreamView
+	// downstreamActive forces DownstreamPipelinesActive to return true
+	// when set on a stream id. Tests use it to assert the conflict path.
+	downstreamActive map[uuid.UUID]bool
+	resetErr         error
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{streams: map[uuid.UUID]models.StreamDefinition{}, cdcStreams: map[uuid.UUID]models.CdcStream{}, checkpoints: map[uuid.UUID]models.IncrementalCheckpoint{}, resolutions: map[uuid.UUID]models.ResolutionState{}}
+	return &fakeStore{
+		streams:          map[uuid.UUID]models.StreamDefinition{},
+		cdcStreams:       map[uuid.UUID]models.CdcStream{},
+		checkpoints:      map[uuid.UUID]models.IncrementalCheckpoint{},
+		resolutions:      map[uuid.UUID]models.ResolutionState{},
+		views:            map[uuid.UUID][]models.StreamView{},
+		downstreamActive: map[uuid.UUID]bool{},
+	}
 }
 
 func (f *fakeStore) ListIngestJobs(context.Context, string, string) ([]models.IngestJob, error) {
@@ -265,11 +278,67 @@ func (f *fakeStore) ApplyResolution(_ context.Context, streamID uuid.UUID, owner
 	return &res, nil
 }
 
+func (f *fakeStore) DownstreamPipelinesActive(_ context.Context, streamID uuid.UUID) (bool, error) {
+	return f.downstreamActive[streamID], nil
+}
+func (f *fakeStore) ResetStream(_ context.Context, streamID uuid.UUID, ownerID uuid.UUID, createdBy string, body *models.ResetStreamRequest) (*repo.ResetStreamResult, error) {
+	if f.resetErr != nil {
+		return nil, f.resetErr
+	}
+	s, ok := f.streams[streamID]
+	if !ok || s.OwnerID != ownerID {
+		return nil, repo.ErrStreamNotFound
+	}
+	streamRID := models.StreamRIDFor(s.ID)
+	prevSlice := f.views[streamID]
+	var prev *models.StreamView
+	for i := range prevSlice {
+		if prevSlice[i].Active {
+			prevSlice[i].Active = false
+			now := time.Now().UTC()
+			prevSlice[i].RetiredAt = &now
+			prev = &prevSlice[i]
+		}
+	}
+	gen := int32(1)
+	if prev != nil {
+		gen = prev.Generation + 1
+	}
+	newID := uuid.New()
+	newView := models.StreamView{
+		ID:         newID,
+		StreamRID:  streamRID,
+		ViewRID:    models.ViewRIDFor(newID),
+		Generation: gen,
+		Active:     true,
+		CreatedBy:  createdBy,
+		CreatedAt:  time.Now().UTC(),
+	}
+	if body != nil {
+		if len(body.NewSchema) > 0 {
+			newView.SchemaJSON = body.NewSchema
+		}
+		if len(body.NewConfig) > 0 {
+			newView.ConfigJSON = body.NewConfig
+		}
+	}
+	prevSlice = append(prevSlice, newView)
+	f.views[streamID] = prevSlice
+	result := &repo.ResetStreamResult{Stream: s, NewView: newView, SchemaChanged: true, ConfigChanged: true}
+	if prev != nil {
+		copy := *prev
+		result.PreviousView = &copy
+	}
+	return result, nil
+}
+
 type fakeRuntime struct {
 	provisioned int
 	updated     int
 	registered  int
+	resetCalls  int
 	err         error
+	resetErr    error
 	cdcResult   *handlers.CdcRegistrationResult
 }
 
@@ -284,6 +353,10 @@ func (f *fakeRuntime) UpdateStream(context.Context, *models.StreamDefinition) er
 func (f *fakeRuntime) RegisterCDC(context.Context, *models.CdcStream) (*handlers.CdcRegistrationResult, error) {
 	f.registered++
 	return f.cdcResult, f.err
+}
+func (f *fakeRuntime) ResetStream(context.Context, *models.StreamDefinition) error {
+	f.resetCalls++
+	return f.resetErr
 }
 
 func authedReq(method, target, body string, sub uuid.UUID) *http.Request {

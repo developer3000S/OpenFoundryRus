@@ -54,6 +54,10 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *obs
 		api.Post("/streams", h.CreateStream)
 		api.Get("/streams/{id}", h.GetStream)
 		api.Patch("/streams/{id}", h.UpdateStream)
+		// Foundry "Reset stream" — rotates view RID, retires the
+		// previous view, truncates the underlying topic + resets
+		// consumer offsets. Path mirrors the Rust router exactly.
+		api.Post("/streams/{id}:reset", h.ResetStream)
 
 		if sm.Schemas != nil {
 			// Confluent-style endpoints: the Rust router uses
