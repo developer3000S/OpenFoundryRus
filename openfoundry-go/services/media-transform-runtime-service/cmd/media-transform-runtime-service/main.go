@@ -1,20 +1,18 @@
 // Command media-transform-runtime-service hosts the worker that runs
 // Foundry-style media access patterns.
 //
-// Foundation slice scope:
+// Current slice scope:
 //   - Catalog endpoint (`GET /catalog`, `GET /catalog/{kind}`) ports
-//     the full Rust catalog verbatim. Image entries marked Native on
-//     the Rust side are NotImplemented on the Go side until the
-//     image-handler slice (golang.org/x/image port) lands.
-//   - REST runtime (`POST /transform`) routes by catalog status with
-//     the Rust 501 envelope for NotImplemented + External entries.
+//     the full Rust catalog shape and marks implemented Go-native image
+//     transforms as Native.
+//   - REST runtime (`POST /transform`) routes by catalog status, executes
+//     Native image handlers, and preserves the Rust 501 envelope for
+//     NotImplemented + External entries.
 //   - `/healthz` returns plain text "ok" matching Rust.
 //
-// Follow-up slice: Go-native image handlers (thumbnail / resize /
-// resize_within_bounding_box / rotate / crop / grayscale) using
-// stdlib + golang.org/x/image for round-trip parity with the Rust
-// `image` crate. Cost-meter integration (compute_seconds) lands
-// alongside that slice.
+// Follow-up slices wire external binaries (ffmpeg / pdfium / tesseract /
+// qpdf / dcmtk), AI-backed media transforms, geospatial tiles, and cost
+// metering.
 package main
 
 import (

@@ -10,6 +10,7 @@ GO             ?= go
 GOFLAGS        ?= -trimpath
 PKG            := ./...
 BIN_DIR        := bin
+export PATH    := $(PWD)/$(BIN_DIR):$(PATH)
 COVERAGE_FILE  := coverage.out
 
 SERVICES       := $(notdir $(wildcard services/*))

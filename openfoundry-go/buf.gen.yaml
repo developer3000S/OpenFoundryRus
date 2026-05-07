@@ -1,6 +1,7 @@
 version: v2
 # Generates Go code from the canonical .proto files in ../proto.
-# Output lives under libs/proto-gen and is git-ignored — regenerated via `make gen`.
+# Output lives under libs/proto-gen and is committed so fresh checkouts compile.
+# Regenerate via `make gen-proto` (or `make gen`).
 managed:
   enabled: true
   override:
