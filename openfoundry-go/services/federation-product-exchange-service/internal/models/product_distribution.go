@@ -102,28 +102,6 @@ type SyncStatusUpdateRequest struct {
 	AuditCursor        *string    `json:"audit_cursor"`
 }
 
-// SharingContract is the product-distribution sharing contract record.
-type SharingContract struct {
-	ID                uuid.UUID  `json:"id"`
-	PeerID            uuid.UUID  `json:"peer_id"`
-	Name              string     `json:"name"`
-	Description       string     `json:"description"`
-	DatasetLocator    string     `json:"dataset_locator"`
-	AllowedPurposes   []string   `json:"allowed_purposes"`
-	DataClasses       []string   `json:"data_classes"`
-	ResidencyRegion   string     `json:"residency_region"`
-	QueryTemplate     string     `json:"query_template"`
-	MaxRowsPerQuery   int64      `json:"max_rows_per_query"`
-	ReplicationMode   string     `json:"replication_mode"`
-	EncryptionProfile string     `json:"encryption_profile"`
-	RetentionDays     int32      `json:"retention_days"`
-	Status            string     `json:"status"`
-	SignedAt          *time.Time `json:"signed_at"`
-	ExpiresAt         time.Time  `json:"expires_at"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-}
-
 type CreateContractRequest struct {
 	PeerID            uuid.UUID `json:"peer_id"`
 	Name              string    `json:"name"`
