@@ -5,19 +5,18 @@ ADR-0027). The Rust binary is currently `fn main() {}` (S8 / B14
 consolidation pending), so the Go port is the **canonical
 implementation**.
 
-## Foundation slice (this commit)
+## Port status (2026-05-07)
 
-Cedar policy CRUD over Postgres with strict schema validation via
-`libs/authz-cedar-go` before every write. Optional NATS publish on
-`authz.policy.changed` so peer services hot-reload.
+The Go binary is no longer just the Cedar-policy foundation slice. It
+wires the consolidated `/api/v1` authorization surface: Cedar policy
+CRUD with strict validation, ABAC policies and `/policy-evaluations`,
+RBAC roles/groups/permissions, governance-template applications,
+project constraints, structural-security rules, checkpoints/purpose
+records, cipher channels/licenses, and network-boundary resources.
 
-Endpoints (all under `/api/v1`, JWT-protected):
-
-- `GET    /cedar-policies`             — list (500 most-recent)
-- `POST   /cedar-policies`             — create (validates against bundled schema)
-- `GET    /cedar-policies/{id}`        — fetch
-- `PATCH  /cedar-policies/{id}`        — partial update; bumps `version` on `source` change, re-validates
-- `DELETE /cedar-policies/{id}`        — delete
+The latest stub scan found **no productive `StatusNotImplemented` or
+placeholder handler matches** in this service. Test-only matches live in
+`*_test.go` and are excluded from the production scan.
 
 Plus `/healthz` + `/metrics`.
 
@@ -85,19 +84,12 @@ A bad source therefore fails with `400 Bad Request` and the row is
 never persisted. The active validator state is hermetic per request
 so concurrent malformed writes can't poison one another.
 
-## Follow-up slices (deferred)
+## Remaining migration notes
 
-Per the [INVENTORY](../../INVENTORY-authorization-policy-service.md):
-
-- Top-level RBAC: roles, groups, permissions, group→role grants (~700 LOC).
-- ABAC evaluator (`domain/abac.rs`, ~400 LOC) — depends on the Cedar engine.
-- Restricted views (alternative implementation; see also
-  identity-federation slice 7a).
-- `security_governance/` sub-module (~800 LOC).
-- `checkpoints_purpose/` sub-module (~700 LOC).
-- `cipher/` sub-module (~800 LOC).
-- `network_boundary/` sub-module (~600 LOC).
-- AWS Cedar conformance suite mirror (in `libs/authz-cedar-go/`).
+Per the [stub audit](../../STUB-AUDIT.md), this service currently has no
+productive stub matches in production Go files. Keep future work focused
+on conformance depth (Cedar/ABAC/RBAC fixtures and cross-service policy
+reload behavior), not on replacing placeholder route handlers.
 
 ## Build / test
 

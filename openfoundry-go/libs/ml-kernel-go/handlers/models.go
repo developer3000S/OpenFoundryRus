@@ -22,19 +22,12 @@ import (
 //   - POST  create_model
 //   - PATCH update_model
 //   - GET   list_model_versions
-//   - POST  create_model_version    (501 stub: chains
-//                                    interop::merge_metrics +
-//                                    normalize_model_version_schema +
-//                                    preferred_artifact_uri — 769 LOC
-//                                    interop port)
+//   - POST  create_model_version
 //   - PATCH transition_model_version
 //
-// list_model_versions + transition_model_version embed shallow
-// interop helpers (extractDescriptor) that read the schema JSON
-// fields for ExternalTracking / ModelAdapter / RegistrySource and
-// filter on HasSignal — they don't normalise strings (whitespace,
-// system / framework / flavor casing). Full normalisation lands
-// with the domain/interop port.
+// create_model_version, list_model_versions, and transition_model_version
+// use the domain/interop helpers for schema/metric/artifact normalization
+// instead of the former shallow descriptor-only placeholder path.
 type ModelsHandlers struct {
 	Pool *pgxpool.Pool
 }

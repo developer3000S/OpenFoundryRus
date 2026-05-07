@@ -1,7 +1,8 @@
 // Command pipeline-build-service serves the build / execution side of
-// Pipeline Builder. URL grid is mounted 1:1 against the Rust crate;
-// the resolver / DAG executor / Iceberg client / Spark integration
-// remain stubs in this iteration (see service README for the breakdown).
+// Pipeline Builder. The Go HTTP surface is intentionally audited
+// route-by-route rather than described as 1:1; see
+// docs/migration/route-parity-audit.md for missing Rust paths and
+// remaining 501 / empty-envelope / config-gated handlers.
 package main
 
 import (

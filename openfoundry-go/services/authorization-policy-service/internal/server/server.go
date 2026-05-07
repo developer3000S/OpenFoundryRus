@@ -20,7 +20,7 @@ import (
 	"github.com/openfoundry/openfoundry-go/services/authorization-policy-service/internal/handlers"
 )
 
-// New builds the http.Server for the foundation slice (cedar policy CRUD).
+// New builds the http.Server for the consolidated authorization policy surface.
 func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *observability.Metrics) *http.Server {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, chimw.Compress(5))

@@ -2,10 +2,12 @@
 // HTTP surface (notebooks, cells, sessions, kernel execute, workspace
 // files, notepad documents + presence + export).
 //
-// Substrate-only port today: notebook + cell + session + notepad CRUD
-// reach handler stubs that return the empty-envelope shape until the
-// repository slice (sqlc against the existing migrations) is wired
-// in. The two pieces ported 1:1 with full coverage:
+// Current port: notebook + cell + session CRUD use pgx when
+// DATABASE_URL is configured and fall back to empty envelopes for
+// smoke/test mode. Notepad document/presence CRUD remains the
+// productive stub surface; Python execution is gated on
+// PYTHON_SIDECAR_BINARY. The two domain pieces ported 1:1 with full
+// coverage:
 //
 //   - Workspace file CRUD (filesystem-backed, [`internal/domain/environment`]).
 //   - Notepad export HTML rendering ([`internal/domain/notepad`]).

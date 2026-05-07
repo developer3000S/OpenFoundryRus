@@ -21,9 +21,9 @@ import (
 //   - POST  create_experiment
 //   - PATCH update_experiment            (refreshes run-rollup)
 //
-// The run + asset-lineage + compare endpoints stub at 501 until the
-// runs row scaffolding (~260 LOC) and the asset-lineage builder
-// (~459 LOC, full interop dependency) ship in their own slices.
+// Runs, asset-lineage, and compare endpoints are now wired in their
+// own handler files (`runs.go`, `asset_lineage.go`) and use the
+// interop/domain helpers instead of returning 501 placeholders.
 type ExperimentsHandlers struct {
 	Pool *pgxpool.Pool
 }
@@ -283,4 +283,3 @@ func (h *ExperimentsHandlers) refreshExperimentRollup(ctx context.Context, exper
 // GetExperimentAssetLineage moved to asset_lineage.go — the 6-tier
 // graph builder lives there to keep this file focused on
 // experiment + run CRUD.
-

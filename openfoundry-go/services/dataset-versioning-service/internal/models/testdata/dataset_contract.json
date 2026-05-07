@@ -1,0 +1,35 @@
+{
+  "branch_request": {
+    "description": "Backfill branch",
+    "name": "feature/backfill",
+    "source_version": 2
+  },
+  "dataset": {
+    "created_at": "2026-05-07T06:00:00Z",
+    "current_version": 3,
+    "description": "Order facts",
+    "format": "parquet",
+    "id": "11111111-1111-1111-1111-111111111111",
+    "name": "orders",
+    "owner_id": "22222222-2222-2222-2222-222222222222",
+    "row_count": 789,
+    "size_bytes": 123456,
+    "storage_path": "s3://lake/orders",
+    "tags": [
+      "gold",
+      "pii"
+    ],
+    "updated_at": "2026-05-07T06:30:00Z"
+  },
+  "version": {
+    "created_at": "2026-05-07T06:31:00Z",
+    "dataset_id": "11111111-1111-1111-1111-111111111111",
+    "id": "33333333-3333-3333-3333-333333333333",
+    "message": "daily load",
+    "row_count": 789,
+    "size_bytes": 123456,
+    "storage_path": "s3://lake/orders/v3",
+    "transaction_id": "44444444-4444-4444-4444-444444444444",
+    "version": 3
+  }
+}

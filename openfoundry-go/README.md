@@ -112,6 +112,9 @@ make ci             # full local CI gate (tidy + vet + lint + test)
   principal tool surfaces: OpenAPI generation/validation from proto files,
   TypeScript/Python/Java SDK scaffold generation/validation, scenario-driven
   smoke runs, sequential benchmark runs, and the local AI mock provider.
+- ✅ `tools/route-audit/` generates `docs/migration/route-parity-audit.md`
+  with route-by-route Rust vs Go parity for prioritized services, including
+  `missing`, `501`, `empty-envelope`, and `config-gated` classifications.
 
 ## Phase 1 deliverables (this commit)
 

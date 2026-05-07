@@ -1,0 +1,10 @@
+{
+  "at": 1778157600000000,
+  "correlation_id": "corr-1",
+  "event_id": "11111111-1111-1111-1111-111111111111",
+  "kind": "dataset.version.created",
+  "payload": {
+    "dataset_rid": "ri.dataset.orders",
+    "version": 3
+  }
+}

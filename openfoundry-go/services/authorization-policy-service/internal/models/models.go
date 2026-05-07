@@ -1,8 +1,9 @@
 // Package models holds wire types for authorization-policy-service.
 //
-// Foundation slice (slice 1): CedarPolicy CRUD wire format. Roles,
-// groups, permissions, restricted views, and ABAC evaluator land in
-// follow-up slices — see INVENTORY-authorization-policy-service.md.
+// The Go service now carries the consolidated HTTP/API surface: Cedar
+// policy CRUD, ABAC policy evaluation, RBAC roles/groups/permissions,
+// governance/project constraints, checkpoints/purpose records, cipher
+// catalogs, and network-boundary policy resources.
 package models
 
 import (

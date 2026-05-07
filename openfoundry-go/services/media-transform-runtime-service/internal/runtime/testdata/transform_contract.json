@@ -1,0 +1,23 @@
+{
+  "input": {
+    "bytes_base64": "aGVsbG8=",
+    "kind": "image.thumbnail",
+    "mime_type": "image/png",
+    "params": {
+      "height": 128,
+      "width": 128
+    },
+    "schema": "media_transform.v1"
+  },
+  "output": {
+    "compute_seconds": 1,
+    "kind": "image.thumbnail",
+    "output_bytes_base64": "d29ybGQ=",
+    "output_json": {
+      "height": 128,
+      "width": 128
+    },
+    "output_mime_type": "image/webp",
+    "status": "OK"
+  }
+}

@@ -1,5 +1,14 @@
 # Inventory — authorization-policy-service
 
+> **2026-05-07 update:** this file is historical for the Cedar strategy
+> decision. The Go port has moved beyond the original foundation plan: the
+> runnable service now wires Cedar policies, ABAC policies/evaluation,
+> RBAC roles/groups/permissions, governance/project constraints,
+> checkpoints/purpose records, cipher catalogs, and network-boundary resources.
+> The current stub audit found no productive placeholder handlers in
+> `authorization-policy-service`; see `STUB-AUDIT.md` for the active status.
+
+
 ## DECISION (2026-05-06): Option A — adopt `github.com/cedar-policy/cedar-go`
 
 User signed off on **Option A** (cedar-go) over the sidecar (B) and the

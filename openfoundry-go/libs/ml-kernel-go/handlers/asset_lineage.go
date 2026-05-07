@@ -18,7 +18,6 @@ import (
 // libs/ml-kernel/src/handlers/experiments.rs verbatim. Builds a
 // 6-tier graph (experiment → runs → training jobs → model versions
 // → models → deployments) with edges between every neighbour pair.
-// Replaces the 501 stub on ExperimentsHandlers.GetExperimentAssetLineage.
 
 // lineageDeploymentRow holds the columns the lineage builder
 // actually reads — narrower than the full ml_deployments row used
@@ -210,12 +209,12 @@ func (h *ExperimentsHandlers) GetExperimentAssetLineage(w http.ResponseWriter, r
 	for _, job := range trainingJobs {
 		nodeID := assetNodeID("training_job", job.ID.String())
 		jobMeta, _ := json.Marshal(map[string]any{
-			"objective_metric_name":  job.ObjectiveMetricName,
-			"training_config":        rawOrNullValue(job.TrainingConfig),
-			"hyperparameter_search":  rawOrNullValue(job.HyperparameterSearch),
-			"dataset_ids":            job.DatasetIDs,
-			"trial_count":            len(job.Trials),
-			"external_training":      job.ExternalTraining,
+			"objective_metric_name": job.ObjectiveMetricName,
+			"training_config":       rawOrNullValue(job.TrainingConfig),
+			"hyperparameter_search": rawOrNullValue(job.HyperparameterSearch),
+			"dataset_ids":           job.DatasetIDs,
+			"trial_count":           len(job.Trials),
+			"external_training":     job.ExternalTraining,
 		})
 		nodes = append(nodes, models.ModelAssetNode{
 			ID:       nodeID,
@@ -563,4 +562,3 @@ func (s *stringSet) sorted() []string {
 	sort.Strings(out)
 	return out
 }
-
