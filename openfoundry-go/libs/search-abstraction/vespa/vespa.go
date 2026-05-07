@@ -48,15 +48,44 @@ func init() {
 // Backend is the Vespa HTTP client. Construct with the cluster's
 // HTTP endpoint (typically `https://vespa.search.svc.cluster.local:8080`).
 type Backend struct {
-	endpoint  string
-	namespace string
-	http      *http.Client
+	endpoint   string
+	namespace  string
+	http       *http.Client
+	authHeader string
+}
+
+// Option customises a Backend.
+type Option func(*Backend)
+
+// WithHTTPClient configures the HTTP client used by the backend.
+func WithHTTPClient(client *http.Client) Option {
+	return func(b *Backend) {
+		if client != nil {
+			b.http = client
+		}
+	}
+}
+
+// WithAuthHeader configures the Authorization header sent to Vespa.
+func WithAuthHeader(value string) Option {
+	return func(b *Backend) { b.authHeader = strings.TrimSpace(value) }
 }
 
 // New builds a Backend with the default namespace (`of`) and a
 // default *http.Client (30 s timeout).
 func New(endpoint string) *Backend {
-	return WithClient(endpoint, defaultNamespace, &http.Client{Timeout: 30 * time.Second})
+	return NewWithOptions(endpoint)
+}
+
+// NewWithOptions builds a Backend with optional transport/auth configuration.
+func NewWithOptions(endpoint string, opts ...Option) *Backend {
+	b := WithClient(endpoint, defaultNamespace, &http.Client{Timeout: 30 * time.Second})
+	for _, opt := range opts {
+		if opt != nil {
+			opt(b)
+		}
+	}
+	return b
 }
 
 // WithClient builds a Backend with a caller-provided namespace and
@@ -187,6 +216,12 @@ func buildFields(d searchabstraction.IndexDoc) (map[string]any, error) {
 	return fields, nil
 }
 
+func (b *Backend) applyAuth(req *http.Request) {
+	if b.authHeader != "" {
+		req.Header.Set("Authorization", b.authHeader)
+	}
+}
+
 func (b *Backend) sendJSON(ctx context.Context, method, u string, body any) (*http.Response, error) {
 	var rdr io.Reader
 	if body != nil {
@@ -203,6 +238,7 @@ func (b *Backend) sendJSON(ctx context.Context, method, u string, body any) (*ht
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	b.applyAuth(req)
 	return b.http.Do(req)
 }
 
@@ -268,6 +304,7 @@ func (b *Backend) Index(ctx context.Context, doc searchabstraction.IndexDoc) err
 		return repos.Backend("vespa index req: " + err.Error())
 	}
 	req.Header.Set("Content-Type", "application/json")
+	b.applyAuth(req)
 	resp, err := b.http.Do(req)
 	if err != nil {
 		return repos.Backend("vespa index send: " + err.Error())
@@ -305,6 +342,7 @@ func (b *Backend) Delete(
 	if err != nil {
 		return false, repos.Backend("vespa delete req: " + err.Error())
 	}
+	b.applyAuth(req)
 	resp, err := b.http.Do(req)
 	if err != nil {
 		return false, repos.Backend("vespa delete send: " + err.Error())

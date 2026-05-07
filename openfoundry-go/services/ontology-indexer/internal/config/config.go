@@ -36,11 +36,15 @@ type Config struct {
 		Host string
 		Port uint16
 	}
-	BackendKind     BackendKind
-	SearchEndpoint  string
-	KafkaBootstrap  string
-	ConsumerGroup   string
-	MetricsAddr     string
+	BackendKind       BackendKind
+	SearchEndpoint    string
+	SearchUsername    string
+	SearchPassword    string
+	SearchBearerToken string
+	SearchAPIKey      string
+	KafkaBootstrap    string
+	ConsumerGroup     string
+	MetricsAddr       string
 }
 
 func FromEnv() (*Config, error) {
@@ -51,6 +55,10 @@ func FromEnv() (*Config, error) {
 	cfg.Server.Port = parseUint16(os.Getenv("PORT"), 50124)
 	cfg.BackendKind = BackendKindFromEnv(os.Getenv("SEARCH_BACKEND"))
 	cfg.SearchEndpoint = os.Getenv("SEARCH_ENDPOINT")
+	cfg.SearchUsername = os.Getenv("SEARCH_USERNAME")
+	cfg.SearchPassword = os.Getenv("SEARCH_PASSWORD")
+	cfg.SearchBearerToken = os.Getenv("SEARCH_BEARER_TOKEN")
+	cfg.SearchAPIKey = os.Getenv("SEARCH_API_KEY")
 	cfg.KafkaBootstrap = os.Getenv("KAFKA_BOOTSTRAP_SERVERS")
 	cfg.ConsumerGroup = defaultStr(os.Getenv("KAFKA_CONSUMER_GROUP"), "ontology-indexer")
 	cfg.MetricsAddr = defaultStr(os.Getenv("METRICS_ADDR"), "0.0.0.0:9090")

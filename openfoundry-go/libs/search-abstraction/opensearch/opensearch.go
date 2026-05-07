@@ -47,13 +47,42 @@ func init() {
 // Backend is the OpenSearch HTTP client. Construct with the cluster
 // HTTP endpoint (typically `http://opensearch:9200` in `compose dev`).
 type Backend struct {
-	endpoint string
-	http     *http.Client
+	endpoint   string
+	http       *http.Client
+	authHeader string
+}
+
+// Option customises a Backend.
+type Option func(*Backend)
+
+// WithHTTPClient configures the HTTP client used by the backend.
+func WithHTTPClient(client *http.Client) Option {
+	return func(b *Backend) {
+		if client != nil {
+			b.http = client
+		}
+	}
+}
+
+// WithAuthHeader configures the Authorization header sent to OpenSearch.
+func WithAuthHeader(value string) Option {
+	return func(b *Backend) { b.authHeader = strings.TrimSpace(value) }
 }
 
 // New builds a Backend with a default *http.Client (30 s timeout).
 func New(endpoint string) *Backend {
-	return WithClient(endpoint, &http.Client{Timeout: 30 * time.Second})
+	return NewWithOptions(endpoint)
+}
+
+// NewWithOptions builds a Backend with optional transport/auth configuration.
+func NewWithOptions(endpoint string, opts ...Option) *Backend {
+	b := WithClient(endpoint, &http.Client{Timeout: 30 * time.Second})
+	for _, opt := range opts {
+		if opt != nil {
+			opt(b)
+		}
+	}
+	return b
 }
 
 // WithClient builds a Backend with a caller-provided *http.Client.
@@ -146,6 +175,12 @@ func augmentPayload(d searchabstraction.IndexDoc) ([]byte, error) {
 	return json.Marshal(obj)
 }
 
+func (b *Backend) applyAuth(req *http.Request) {
+	if b.authHeader != "" {
+		req.Header.Set("Authorization", b.authHeader)
+	}
+}
+
 func (b *Backend) sendJSON(ctx context.Context, method, u string, body any) (*http.Response, error) {
 	var rdr io.Reader
 	if body != nil {
@@ -162,6 +197,7 @@ func (b *Backend) sendJSON(ctx context.Context, method, u string, body any) (*ht
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	b.applyAuth(req)
 	return b.http.Do(req)
 }
 
@@ -244,6 +280,7 @@ func (b *Backend) Index(ctx context.Context, doc searchabstraction.IndexDoc) err
 		return repos.Backend("opensearch index req: " + err.Error())
 	}
 	req.Header.Set("Content-Type", "application/json")
+	b.applyAuth(req)
 	resp, err := b.http.Do(req)
 	if err != nil {
 		return repos.Backend("opensearch index send: " + err.Error())
@@ -392,6 +429,7 @@ func (b *Backend) BulkIndex(
 		return out, repos.Backend("opensearch bulk req: " + err.Error())
 	}
 	req.Header.Set("Content-Type", "application/x-ndjson")
+	b.applyAuth(req)
 	resp, err := b.http.Do(req)
 	if err != nil {
 		return out, repos.Backend("opensearch bulk send: " + err.Error())
@@ -484,4 +522,3 @@ func parseHits(v map[string]any) []searchabstraction.SearchHit {
 	}
 	return out
 }
-
