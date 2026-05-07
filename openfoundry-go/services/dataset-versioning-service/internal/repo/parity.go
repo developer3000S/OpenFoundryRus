@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/openfoundry/openfoundry-go/services/dataset-versioning-service/internal/domain"
 	"github.com/openfoundry/openfoundry-go/services/dataset-versioning-service/internal/models"
 )
 
@@ -909,12 +910,29 @@ func (r *Repo) RefreshDatasetView(ctx context.Context, datasetID uuid.UUID, view
 	if err != nil {
 		return nil, err
 	}
-	row := r.Pool.QueryRow(ctx, `UPDATE dataset_views SET last_refreshed_at = NOW(), updated_at = NOW()
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT id FROM datasets WHERE id = $1 FOR UPDATE`, datasetID); err != nil {
+		return nil, err
+	}
+
+	row := tx.QueryRow(ctx, `UPDATE dataset_views SET last_refreshed_at = NOW(), updated_at = NOW()
 		WHERE dataset_id = $1 AND id = $2
 		RETURNING id, dataset_id, name, description, sql_text, source_branch, source_version, materialized,
 		refresh_on_source_update, format, current_version, storage_path, row_count, schema_fields,
 		last_refreshed_at, created_at, updated_at`, datasetID, view.ID)
-	return scanDatasetView(row)
+	updated, err := scanDatasetView(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 func (r *Repo) GetViewAt(ctx context.Context, datasetID uuid.UUID, branch string, at *time.Time, transactionID *uuid.UUID) (*models.ViewOut, error) {
@@ -1000,57 +1018,41 @@ func (r *Repo) computeViewAt(ctx context.Context, datasetID uuid.UUID, branch st
 		return nil, err
 	}
 
-	startIdx := 0
-	for i := range txns {
-		if txns[i].TxType == string(models.TransactionTypeSnapshot) {
-			startIdx = i
-		}
-	}
-
-	filesByPath := map[string]models.RuntimeViewFile{}
-	for _, txn := range txns[startIdx:] {
+	entries := make([]domain.TransactionEntry, 0, len(txns))
+	for _, txn := range txns {
 		rows, err := r.listTransactionFiles(ctx, txn.ID)
 		if err != nil {
 			return nil, err
 		}
-		switch txn.TxType {
-		case string(models.TransactionTypeSnapshot):
-			filesByPath = map[string]models.RuntimeViewFile{}
-			for _, row := range rows {
-				filesByPath[row.LogicalPath] = models.RuntimeViewFile{LogicalPath: row.LogicalPath, PhysicalPath: row.PhysicalPath, SizeBytes: row.SizeBytes, IntroducedBy: &txn.ID}
-			}
-		case string(models.TransactionTypeAppend):
-			for _, row := range rows {
-				if _, exists := filesByPath[row.LogicalPath]; !exists {
-					filesByPath[row.LogicalPath] = models.RuntimeViewFile{LogicalPath: row.LogicalPath, PhysicalPath: row.PhysicalPath, SizeBytes: row.SizeBytes, IntroducedBy: &txn.ID}
-				}
-			}
-		case string(models.TransactionTypeUpdate):
-			for _, row := range rows {
-				if row.Op == models.FileOperationRemove {
-					delete(filesByPath, row.LogicalPath)
-					continue
-				}
-				filesByPath[row.LogicalPath] = models.RuntimeViewFile{LogicalPath: row.LogicalPath, PhysicalPath: row.PhysicalPath, SizeBytes: row.SizeBytes, IntroducedBy: &txn.ID}
-			}
-		case string(models.TransactionTypeDelete):
-			for _, row := range rows {
-				delete(filesByPath, row.LogicalPath)
-			}
+		ops := make([]domain.FileOp, 0, len(rows))
+		for _, row := range rows {
+			ops = append(ops, domain.FileOp{
+				LogicalPath:  row.LogicalPath,
+				PhysicalPath: row.PhysicalPath,
+				SizeBytes:    row.SizeBytes,
+				Kind:         fileOpKindFromOperation(row.Op),
+			})
 		}
+		entries = append(entries, domain.TransactionEntry{
+			TxnID:       txn.ID,
+			Kind:        models.TransactionType(txn.TxType),
+			CommittedAt: effectiveCommittedAt(txn),
+			Files:       ops,
+		})
 	}
 
-	paths := make([]string, 0, len(filesByPath))
-	for path := range filesByPath {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	files := make([]models.RuntimeViewFile, 0, len(paths))
+	view := domain.ComputeView(entries, at)
+	files := make([]models.RuntimeViewFile, 0, len(view))
 	var sizeBytes int64
-	for _, path := range paths {
-		file := filesByPath[path]
-		files = append(files, file)
-		sizeBytes += file.SizeBytes
+	for i := range view {
+		introduced := view[i].IntroducedBy
+		files = append(files, models.RuntimeViewFile{
+			LogicalPath:  view[i].LogicalPath,
+			PhysicalPath: view[i].PhysicalPath,
+			SizeBytes:    view[i].SizeBytes,
+			IntroducedBy: &introduced,
+		})
+		sizeBytes += view[i].SizeBytes
 	}
 
 	headTxnID := uuid.Nil
@@ -1058,6 +1060,24 @@ func (r *Repo) computeViewAt(ctx context.Context, datasetID uuid.UUID, branch st
 		headTxnID = txns[len(txns)-1].ID
 	}
 	return &models.ViewOut{ID: uuid.Nil, DatasetID: datasetID, BranchID: target.ID, HeadTransactionID: headTxnID, RequestedBranch: branch, ResolvedBranch: target.Name, FallbackChain: fallbackChain, ComputedAt: time.Now().UTC(), FileCount: int32(len(files)), SizeBytes: sizeBytes, Files: files}, nil
+}
+
+func effectiveCommittedAt(txn viewTransactionRecord) time.Time {
+	if txn.CommittedAt != nil {
+		return *txn.CommittedAt
+	}
+	return txn.StartedAt
+}
+
+func fileOpKindFromOperation(op models.FileOperation) domain.FileOpKind {
+	switch op {
+	case models.FileOperationReplace:
+		return domain.FileOpReplace
+	case models.FileOperationRemove:
+		return domain.FileOpRemove
+	default:
+		return domain.FileOpAdd
+	}
 }
 
 func (r *Repo) resolveBranchView(ctx context.Context, datasetID uuid.UUID, requested *models.RuntimeBranch, at *time.Time) (*models.RuntimeBranch, []string, []viewTransactionRecord, error) {

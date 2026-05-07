@@ -1,6 +1,7 @@
 # dataset-versioning-service Rust → Go parity inventory
 
 Date: 2026-05-07
+Last updated: 2026-05-08 (DV-10: pure view replay + parameterized union SQL composer extracted to `internal/domain`; `RefreshDatasetView` now wraps the row write in a pgx tx with `SELECT … FOR UPDATE` on `datasets`)
 
 This inventory tracks the 1:1 migration of `services/dataset-versioning-service` into `openfoundry-go/services/dataset-versioning-service`. It is documentation-only: no runtime behavior is changed here.
 
@@ -196,11 +197,11 @@ Go now carries Rust-compatible wire structs in `openfoundry-go/services/dataset-
 | `src/handlers/compare.rs`, `handlers/foundry.rs` | `TransactionSummary`, `ConflictingFile`, `BranchCompareResponse`, `CompareOut`, `FileDiff`, `FileChange` | same Go wire structs | implemented |
 | `src/models/transaction.rs`, `storage/runtime.rs`, `handlers/conformance.rs` | `DatasetTransaction`, `RuntimeTransaction`, transaction action/list bodies, batch 207 envelopes | `DatasetTransaction`, `RuntimeTransaction`, `StartTransactionBody`, `BatchGetTransactionsRequest`, `BatchItemResult`, `ErrorEnvelope` | implemented |
 | `src/models/schema.rs`, `handlers/schema.rs`, `data_asset_catalog/handlers/schema_validate.rs` | Foundry schema model, schema response/upsert, validation reports | `DatasetSchema`, `Field`, `CsvOptions`, `CustomMetadata`, `SchemaResponse`, `PutSchemaBody`, `ValidateRequest`, `ValidateResponse` | implemented |
-| `src/domain/views.rs`, `data_asset_catalog/models/view.rs`, `handlers/preview.rs` | view rows, computed views, file ops, preview/data query shapes | `DatasetView`, `ViewOut`, `RuntimeViewFile`, `PreviewQuery`, `PreviewDataResponse`, `RuntimeTransactionFile` | implemented |
+| `src/domain/views.rs`, `data_asset_catalog/models/view.rs`, `handlers/preview.rs` | view rows, computed views, file ops, preview/data query shapes | `DatasetView`, `ViewOut`, `RuntimeViewFile`, `PreviewQuery`, `PreviewDataResponse`, `RuntimeTransactionFile`; pure replay loop in `internal/domain.ComputeView` (DV-10) consumed by repo | implemented |
 | `src/handlers/files.rs`, `data_asset_catalog/models/dataset_model.rs` | file list/download/upload-url/storage-details, permissions, lineage, file index, rich model | `DatasetFileOut`, `ListFilesOut`, `UploadUrlBody`, `UploadUrlOut`, `StorageDetailsOut`, `DatasetRichModel`, `DatasetPermissionEdge`, `DatasetLineageLink`, `DatasetFileIndexEntry` | implemented |
 | `src/dataset_quality/models/*` | quality, lint and health models | `DatasetQuality*`, `DatasetLint*`, `DatasetHealth*` structs | implemented |
 | `src/domain/branch_events.rs`, `domain/retention_worker.rs` | branch events and retention worker results | `BranchEnvelope`, `RetentionWorkerResult` | implemented for wire/event payloads |
-| `src/domain/parameterized_view.rs`, storage/Iceberg write payloads | union view and backing filesystem/write payloads | `UnionViewSpec`, `IcebergTableRef`, `IcebergWritePayload`, `ResolvedDatasetSource`, staged/runtime file payloads | implemented for wire payloads |
+| `src/domain/parameterized_view.rs`, storage/Iceberg write payloads | union view and backing filesystem/write payloads | `UnionViewSpec`, `IcebergTableRef`, `IcebergWritePayload`, `ResolvedDatasetSource`, staged/runtime file payloads; pure SQL composer in `internal/domain.ComposeUnionViewSQL` (DV-10) | implemented |
 
 Compatibility fixtures live under `internal/models/testdata/` and are round-tripped by `internal/models/*_test.go`.
 
