@@ -952,7 +952,7 @@ func currentSparkClient() (sparkpkg.SparkClient, bool) {
 func writeKubeUnavailable(w http.ResponseWriter) {
 	writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 		"error":  "kube_client_unavailable",
-		"detail": "SparkApplication endpoints require an in-cluster kubeconfig (Go port: pending)",
+		"detail": "SparkApplication endpoints require KUBERNETES_API_URL or an in-cluster/kubeconfig Kubernetes client",
 	})
 }
 

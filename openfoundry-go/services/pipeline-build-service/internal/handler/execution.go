@@ -19,6 +19,7 @@ import (
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/domain/executor"
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/domain/runners"
+	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/iceberg"
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/models"
 	runtimepkg "github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/runtime"
 )
@@ -59,6 +60,57 @@ type ExecutionPorts struct {
 	Committer    executor.OutputCommitter
 	Audit        executor.AuditSink
 	Parallelism  int
+}
+
+// ConfigGatedOutputCommitter routes Foundry Iceberg outputs to the ADR-0041
+// catalog adapter and fails with stable configuration errors when the catalog
+// URL is unset or when the URL is present but the transaction-store adapter is
+// not wired. Non-Iceberg outputs continue to use the metadata committer.
+type ConfigGatedOutputCommitter struct {
+	Metadata          executor.OutputCommitter
+	Iceberg           executor.OutputCommitter
+	CatalogConfigured bool
+}
+
+func (c ConfigGatedOutputCommitter) Commit(ctx context.Context, tx executor.OutputTransaction) error {
+	if iceberg.Handles(tx.DatasetRID) {
+		if c.Iceberg == nil {
+			if c.CatalogConfigured {
+				return errors.New("foundry_iceberg_catalog_adapter_not_configured: FOUNDRY_ICEBERG_CATALOG_URL is set but the Iceberg transaction store is not wired")
+			}
+			return errors.New("foundry_iceberg_catalog_not_configured: set FOUNDRY_ICEBERG_CATALOG_URL to commit Iceberg outputs")
+		}
+		return c.Iceberg.Commit(ctx, tx)
+	}
+	if c.Metadata == nil {
+		return nil
+	}
+	return c.Metadata.Commit(ctx, tx)
+}
+
+// ConfigGatedTransactionManager mirrors ConfigGatedOutputCommitter for aborts
+// so failed/cancelled Iceberg nodes roll back through the catalog adapter when
+// it is wired and otherwise surface the same stable config error.
+type ConfigGatedTransactionManager struct {
+	Metadata          executor.TransactionManager
+	Iceberg           executor.TransactionManager
+	CatalogConfigured bool
+}
+
+func (m ConfigGatedTransactionManager) Abort(ctx context.Context, tx executor.OutputTransaction) error {
+	if iceberg.Handles(tx.DatasetRID) {
+		if m.Iceberg == nil {
+			if m.CatalogConfigured {
+				return errors.New("foundry_iceberg_catalog_adapter_not_configured: FOUNDRY_ICEBERG_CATALOG_URL is set but the Iceberg transaction store is not wired")
+			}
+			return errors.New("foundry_iceberg_catalog_not_configured: set FOUNDRY_ICEBERG_CATALOG_URL to abort Iceberg outputs")
+		}
+		return m.Iceberg.Abort(ctx, tx)
+	}
+	if m.Metadata == nil {
+		return nil
+	}
+	return m.Metadata.Abort(ctx, tx)
 }
 
 type executionSlot struct{ ports ExecutionPorts }
@@ -384,7 +436,10 @@ func (r runtimeNodeRunner) Run(ctx context.Context, node executor.NodeContext) (
 	}
 	transformType := metadataString(node.Node.Metadata, "transform_type")
 	payload := metadataRaw(node.Node.Metadata, "logic_payload")
-	if transformType == "python" && r.Python != nil {
+	if transformType == "python" {
+		if r.Python == nil {
+			return executor.NodeResult{}, errors.New("python_sidecar_not_configured: set PYTHON_SIDECAR_BINARY to execute Python transforms")
+		}
 		return r.runPython(ctx, node, payload)
 	}
 	if r.JobRunner == nil {

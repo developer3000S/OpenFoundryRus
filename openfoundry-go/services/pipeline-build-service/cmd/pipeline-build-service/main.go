@@ -95,7 +95,7 @@ func main() {
 		}
 		repo := postgres.NewRepositoryFromPool(pool)
 		handler.SetBuildLifecyclePorts(handler.BuildLifecyclePorts{JobSpecs: repo, Versioning: repo, Locks: repo, Builds: repo})
-		handler.SetExecutionPorts(handler.ExecutionPorts{Plans: repo, Runs: repo, Python: pythonRuntime, Transactions: repo, Committer: repo, Audit: repo, Parallelism: cfg.DistributedPipelineWorkers})
+		handler.SetExecutionPorts(handler.ExecutionPorts{Plans: repo, Runs: repo, Python: pythonRuntime, Transactions: handler.ConfigGatedTransactionManager{Metadata: repo, CatalogConfigured: cfg.FoundryIcebergCatalogURL != ""}, Committer: handler.ConfigGatedOutputCommitter{Metadata: repo, CatalogConfigured: cfg.FoundryIcebergCatalogURL != ""}, Audit: repo, Parallelism: cfg.DistributedPipelineWorkers})
 		handler.SetBuildQueryRepository(repo)
 		handler.SetPipelineAuthoringRepository(repo)
 		handler.SetSparkSubmissionRepository(repo)
