@@ -12,13 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/openfoundry/openfoundry-go/libs/ai-kernel-go/domain/llm"
+	aimodels "github.com/openfoundry/openfoundry-go/libs/ai-kernel-go/models"
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
 )
 
 func TestCreateChatCompletionUsesRuntimeSuccess(t *testing.T) {
 	t.Parallel()
 	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "agent answer", PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12}}
-	h := &Handlers{Runtime: runtime}
+	h := &Handlers{Runtime: runtime, AllowFakeLLMProvider: true}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"model":"fake-model","messages":[{"role":"system","content":"be helpful"},{"role":"user","content":"hello"}]}`))
 	w := httptest.NewRecorder()
 
@@ -37,9 +38,63 @@ func TestCreateChatCompletionUsesRuntimeSuccess(t *testing.T) {
 	assert.Equal(t, "hello", runtime.Calls[0].UserPrompt)
 }
 
+func TestCreateChatCompletionNoProviderFakeDisabledReturnsConfigurationError(t *testing.T) {
+	t.Parallel()
+	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "should not run"}}
+	h := &Handlers{Runtime: runtime}
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
+	w := httptest.NewRecorder()
+
+	h.CreateChatCompletion(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Contains(t, w.Body.String(), "configuration error")
+	assert.Contains(t, w.Body.String(), "ALLOW_FAKE_LLM_PROVIDER")
+	assert.Empty(t, runtime.Calls)
+}
+
+func TestCreateChatCompletionNoProviderFakeEnabledUsesDefaultFake(t *testing.T) {
+	t.Parallel()
+	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "fake allowed", TotalTokens: 1}}
+	h := &Handlers{Runtime: runtime, AllowFakeLLMProvider: true}
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
+	w := httptest.NewRecorder()
+
+	h.CreateChatCompletion(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, runtime.Calls, 1)
+	require.NotNil(t, runtime.Calls[0].Provider)
+	assert.Equal(t, "agent-runtime-fake", runtime.Calls[0].Provider.Name)
+}
+
+func TestCreateChatCompletionInjectedProviderDoesNotUseFake(t *testing.T) {
+	t.Parallel()
+	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "real provider", TotalTokens: 1}}
+	provider := &aimodels.LlmProvider{
+		Name:            "real-provider",
+		ProviderType:    "openai",
+		ModelName:       "real-model",
+		APIMode:         "chat_completions",
+		MaxOutputTokens: 256,
+		RouteRules:      aimodels.DefaultProviderRoutingRules(),
+	}
+	h := &Handlers{Runtime: runtime, Provider: provider}
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
+	w := httptest.NewRecorder()
+
+	h.CreateChatCompletion(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, runtime.Calls, 1)
+	assert.Same(t, provider, runtime.Calls[0].Provider)
+	assert.Equal(t, "real-provider", runtime.Calls[0].Provider.Name)
+	assert.NotEqual(t, "agent-runtime-fake", runtime.Calls[0].Provider.Name)
+}
+
 func TestCreateChatCompletionProviderError(t *testing.T) {
 	t.Parallel()
-	h := &Handlers{Runtime: &llm.FakeRuntime{Err: errors.New("provider down")}}
+	h := &Handlers{Runtime: &llm.FakeRuntime{Err: errors.New("provider down")}, AllowFakeLLMProvider: true}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
 	w := httptest.NewRecorder()
 
@@ -64,7 +119,7 @@ func TestCreateChatCompletionRejectsEmptyUserMessage(t *testing.T) {
 func TestAskCopilotUsesRuntimeHappyPath(t *testing.T) {
 	t.Parallel()
 	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "copilot says reroute", PromptTokens: 11, CompletionTokens: 5, TotalTokens: 16}}
-	h := &Handlers{Runtime: runtime}
+	h := &Handlers{Runtime: runtime, AllowFakeLLMProvider: true}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"question":"How do I reroute overloaded providers with SQL?"}`))
 	w := httptest.NewRecorder()
 
@@ -87,7 +142,7 @@ func TestAskCopilotUsesRuntimeHappyPath(t *testing.T) {
 
 func TestAskCopilotRejectsMissingQuestion(t *testing.T) {
 	t.Parallel()
-	h := &Handlers{Runtime: &llm.FakeRuntime{}}
+	h := &Handlers{Runtime: &llm.FakeRuntime{}, AllowFakeLLMProvider: true}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"question":"   "}`))
 	w := httptest.NewRecorder()
 
@@ -99,7 +154,7 @@ func TestAskCopilotRejectsMissingQuestion(t *testing.T) {
 
 func TestAskCopilotProviderError(t *testing.T) {
 	t.Parallel()
-	h := &Handlers{Runtime: &llm.FakeRuntime{Err: errors.New("copilot provider down")}}
+	h := &Handlers{Runtime: &llm.FakeRuntime{Err: errors.New("copilot provider down")}, AllowFakeLLMProvider: true}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"question":"How should I debug this?"}`))
 	w := httptest.NewRecorder()
 
@@ -112,7 +167,7 @@ func TestAskCopilotProviderError(t *testing.T) {
 func TestAskCopilotPassesRequestContextToRuntime(t *testing.T) {
 	t.Parallel()
 	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "context-aware answer"}}
-	h := &Handlers{Runtime: runtime}
+	h := &Handlers{Runtime: runtime, AllowFakeLLMProvider: true}
 	body := `{
 		"question":"Map this to an ontology object",
 		"purpose_justification":"incident response",
@@ -138,7 +193,7 @@ func TestAskCopilotPassesRequestContextToRuntime(t *testing.T) {
 func TestAskCopilotKnowledgeContextPlaceholderAndOptions(t *testing.T) {
 	t.Parallel()
 	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "no extras"}}
-	h := &Handlers{Runtime: runtime}
+	h := &Handlers{Runtime: runtime, AllowFakeLLMProvider: true}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"question":"Summarize provider status","include_sql":false,"include_pipeline_plan":false,"knowledge_base_ids":["44444444-4444-4444-4444-444444444444"]}`))
 	w := httptest.NewRecorder()
 
@@ -158,7 +213,7 @@ func TestAskCopilotKnowledgeContextPlaceholderAndOptions(t *testing.T) {
 func TestCreateChatCompletionJSONContract(t *testing.T) {
 	t.Parallel()
 	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "contract answer", PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5}}
-	h := &Handlers{Runtime: runtime}
+	h := &Handlers{Runtime: runtime, AllowFakeLLMProvider: true}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"model":"contract-model","messages":[{"role":"user","content":"hello"}],"temperature":0.1,"max_tokens":64}`))
 	w := httptest.NewRecorder()
 
@@ -218,7 +273,7 @@ func TestCreateChatCompletionPurposeCheckpointAllow(t *testing.T) {
 	defer checkpoint.Close()
 
 	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "allowed", TotalTokens: 1}}
-	h := &Handlers{Runtime: runtime, PurposeCheckpoint: authmw.NewPurposeCheckpointClient(checkpoint.URL)}
+	h := &Handlers{Runtime: runtime, AllowFakeLLMProvider: true, PurposeCheckpoint: authmw.NewPurposeCheckpointClient(checkpoint.URL)}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}],"require_private_network":true,"purpose_justification":"incident response"}`))
 	w := httptest.NewRecorder()
 
@@ -242,7 +297,7 @@ func TestCreateChatCompletionPurposeCheckpointDeny(t *testing.T) {
 	defer checkpoint.Close()
 
 	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "should not run"}}
-	h := &Handlers{Runtime: runtime, PurposeCheckpoint: authmw.NewPurposeCheckpointClient(checkpoint.URL)}
+	h := &Handlers{Runtime: runtime, AllowFakeLLMProvider: true, PurposeCheckpoint: authmw.NewPurposeCheckpointClient(checkpoint.URL)}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}],"require_private_network":true}`))
 	w := httptest.NewRecorder()
 
@@ -261,7 +316,7 @@ func TestCreateChatCompletionPurposeCheckpointServiceError(t *testing.T) {
 	defer checkpoint.Close()
 
 	runtime := &llm.FakeRuntime{Result: llm.CompletionResult{Text: "should not run"}}
-	h := &Handlers{Runtime: runtime, PurposeCheckpoint: authmw.NewPurposeCheckpointClient(checkpoint.URL)}
+	h := &Handlers{Runtime: runtime, AllowFakeLLMProvider: true, PurposeCheckpoint: authmw.NewPurposeCheckpointClient(checkpoint.URL)}
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}],"require_private_network":true,"purpose_justification":"incident response"}`))
 	w := httptest.NewRecorder()
 

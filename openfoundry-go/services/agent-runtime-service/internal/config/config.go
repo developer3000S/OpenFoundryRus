@@ -25,6 +25,7 @@ type Config struct {
 	JWTSecret            string
 	KafkaBootstrap       string
 	PurposeCheckpointURL string
+	AllowFakeLLMProvider bool
 }
 
 func FromEnv() (*Config, error) {
@@ -40,6 +41,7 @@ func FromEnv() (*Config, error) {
 		os.Getenv("AUTHORIZATION_POLICY_SERVICE_URL"),
 		os.Getenv("PURPOSE_CHECKPOINT_URL"),
 	)
+	cfg.AllowFakeLLMProvider = parseBool(os.Getenv("ALLOW_FAKE_LLM_PROVIDER"), false)
 	if cfg.DatabaseURL == "" {
 		return nil, &MissingEnvError{Key: "DATABASE_URL"}
 	}
@@ -82,4 +84,15 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseBool(v string, fallback bool) bool {
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

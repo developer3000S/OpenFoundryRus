@@ -21,10 +21,11 @@ import (
 )
 
 type Handlers struct {
-	Repo              *repo.Repo
-	Runtime           llm.Runtime
-	Provider          *aimodels.LlmProvider
-	PurposeCheckpoint *authmw.PurposeCheckpointClient
+	Repo                 *repo.Repo
+	Runtime              llm.Runtime
+	Provider             *aimodels.LlmProvider
+	AllowFakeLLMProvider bool
+	PurposeCheckpoint    *authmw.PurposeCheckpointClient
 }
 
 func (h *Handlers) completionRuntime() llm.Runtime {
@@ -34,12 +35,17 @@ func (h *Handlers) completionRuntime() llm.Runtime {
 	return llm.HTTPRuntime{}
 }
 
-func (h *Handlers) completionProvider() *aimodels.LlmProvider {
+var errFakeLLMProviderDisabled = errors.New("configuration error: no LLM provider configured and ALLOW_FAKE_LLM_PROVIDER is not true")
+
+func (h *Handlers) completionProvider() (*aimodels.LlmProvider, error) {
 	if h.Provider != nil {
-		return h.Provider
+		return h.Provider, nil
+	}
+	if !h.AllowFakeLLMProvider {
+		return nil, errFakeLLMProviderDisabled
 	}
 	provider := fakeAgentRuntimeProvider()
-	return &provider
+	return &provider, nil
 }
 
 func fakeAgentRuntimeProvider() aimodels.LlmProvider {
@@ -263,9 +269,9 @@ func (h *Handlers) SubmitHumanApproval(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateChatCompletion exposes an OpenAI-compatible chat completion route
-// backed by libs/ai-kernel-go's provider runtime. In local/test wiring, a
-// fake provider can be supplied (or the default fake provider is used);
-// production wiring can inject any real LlmProvider + HTTPRuntime.
+// backed by libs/ai-kernel-go's provider runtime. Production wiring must
+// inject a real LlmProvider unless ALLOW_FAKE_LLM_PROVIDER explicitly enables
+// the local/test fake provider fallback.
 func (h *Handlers) CreateChatCompletion(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Model    string `json:"model"`
@@ -305,7 +311,11 @@ func (h *Handlers) CreateChatCompletion(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "chat completion requires a user message")
 		return
 	}
-	provider := h.completionProvider()
+	provider, err := h.completionProvider()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	model := provider.ModelName
 	if strings.TrimSpace(body.Model) != "" {
 		model = body.Model
@@ -353,7 +363,11 @@ func (h *Handlers) AskCopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	provider := h.completionProvider()
+	provider, err := h.completionProvider()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	citedKnowledge := []aimodels.KnowledgeSearchResult{}
 	draft := copilot.Assist(
 		body.Question,
