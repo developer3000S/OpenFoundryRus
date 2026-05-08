@@ -39,6 +39,22 @@ The table-writer adapter is responsible for writing Parquet data files and
 committing the Iceberg snapshot atomically. A successful 2xx response means the
 Kafka runtime may commit offsets.
 
+## Adapter dependency and in-repo contract
+
+This repository includes the OpenFoundry table-writer adapter in
+`services/iceberg-catalog-service`: the append route is
+`POST /openfoundry/iceberg/v1/append` in
+`services/iceberg-catalog-service/internal/server/server.go`, and the request
+model is documented in `services/iceberg-catalog-service/internal/models/models.go`.
+The audit-sink writer contract tests pin the exact JSON payload sent to that
+route, including table identity, field IDs, layout, and row encoding.
+
+Deployments must run or proxy that adapter at `ICEBERG_CATALOG_URL` for
+`audit-sink`; unlike `ai-sink`, audit-sink currently has no separate
+`*_TABLE_WRITER_URL` override. If the adapter is deployed out-of-process, the
+external service must implement the same route and error contract before
+Iceberg mode is considered production-equivalent.
+
 ## Explicit JSONL dev mode
 
 JSONL is an opt-in development/staging fallback only. Set
@@ -49,6 +65,15 @@ append will be attempted.
 Unset `AUDIT_SINK_JSONL_PATH` in production. With JSONL unset,
 `ICEBERG_CATALOG_URL` is required and the default writer is the Iceberg HTTP
 adapter, not the legacy stub.
+
+Required environment for the real Iceberg writer:
+
+```sh
+KAFKA_BOOTSTRAP_SERVERS=...          # required Kafka bootstrap list
+ICEBERG_CATALOG_URL=http://lakekeeper-or-adapter:8181
+ICEBERG_WAREHOUSE=...               # optional; forwarded in the append spec when set
+AUDIT_SINK_JSONL_PATH=              # must be unset/empty in production Iceberg mode
+```
 
 ## Failure mode
 

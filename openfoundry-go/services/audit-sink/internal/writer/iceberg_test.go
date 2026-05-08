@@ -2,8 +2,8 @@ package writer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -113,41 +113,13 @@ func TestHTTPTableWriterAdapterAuditContract(t *testing.T) {
 			t.Fatalf("Content-Type = %q", got)
 		}
 
-		var batch AppendBatch
-		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
-			t.Fatalf("decode request: %v", err)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request: %v", err)
 		}
-		wantSpec := TableSpec{
-			Catalog:            auditCatalog,
-			CatalogURL:         serverURL,
-			Warehouse:          "warehouse-1",
-			Namespace:          "of_audit",
-			Table:              "events",
-			PartitionTransform: "day(at)",
-			SortOrder:          "at ASC",
-			Schema:             auditSchema(),
-		}
-		if !reflect.DeepEqual(batch.Spec, wantSpec) {
-			t.Fatalf("spec = %#v, want %#v", batch.Spec, wantSpec)
-		}
-		if len(batch.Rows) != 1 {
-			t.Fatalf("rows = %#v", batch.Rows)
-		}
-		row := batch.Rows[0]
-		if row["event_id"] != "00000000-0000-7000-8000-000000000001" {
-			t.Fatalf("event_id = %#v", row["event_id"])
-		}
-		if row["at"] != float64(1700000000000000) {
-			t.Fatalf("at = %#v", row["at"])
-		}
-		if row["correlation_id"] != corr {
-			t.Fatalf("correlation_id = %#v", row["correlation_id"])
-		}
-		if row["kind"] != "auth.login.ok" {
-			t.Fatalf("kind = %#v", row["kind"])
-		}
-		if row["payload"] != `{"ok":true}` {
-			t.Fatalf("payload = %#v", row["payload"])
+		wantPayload := `{"spec":{"catalog":"lakekeeper","catalog_url":"` + serverURL + `","warehouse":"warehouse-1","namespace":"of_audit","table":"events","partition_transform":"day(at)","sort_order":"at ASC","schema":[{"id":1,"name":"event_id","type":"uuid","required":true},{"id":2,"name":"at","type":"timestamptz","required":true},{"id":3,"name":"correlation_id","type":"string","required":false},{"id":4,"name":"kind","type":"string","required":true},{"id":5,"name":"payload","type":"string","required":true}]},"rows":[{"at":1700000000000000,"correlation_id":"corr-1","event_id":"00000000-0000-7000-8000-000000000001","kind":"auth.login.ok","payload":"{\"ok\":true}"}]}`
+		if string(body) != wantPayload {
+			t.Fatalf("request payload mismatch\nwant: %s\n got: %s", wantPayload, body)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))

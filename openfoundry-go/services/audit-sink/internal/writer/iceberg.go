@@ -70,8 +70,8 @@ type IcebergTableAppender interface {
 // adapter because iceberg-go does not yet provide a stable, complete
 // write-side path equivalent to Rust's `append_record_batches`. The adapter
 // must atomically write Parquet data files and commit the Iceberg snapshot;
-// HTTP 404 maps to ErrTableNotFound, 409 to ErrSchemaMismatch, and all other
-// non-2xx responses to ErrCommitFailed. Tests can inject a fake catalog with
+// HTTP 404 maps to ErrTableNotFound, 409/422 to ErrSchemaMismatch, and
+// all other non-2xx responses to ErrCommitFailed. Tests can inject a fake catalog with
 // NewIcebergWriterWithCatalog.
 type IcebergWriter struct {
 	CatalogURL string

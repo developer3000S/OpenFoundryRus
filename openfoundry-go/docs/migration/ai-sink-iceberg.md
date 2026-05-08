@@ -25,6 +25,21 @@ The adapter request contains:
 
 The adapter must load the target Lakekeeper table, write Parquet data files, commit the Iceberg snapshot atomically, and return success only after the commit is durable.
 
+## Adapter dependency and in-repo contract
+
+This repository includes the OpenFoundry table-writer adapter in
+`services/iceberg-catalog-service`: the append route is
+`POST /openfoundry/iceberg/v1/append` in
+`services/iceberg-catalog-service/internal/server/server.go`, and the request
+model is documented in `services/iceberg-catalog-service/internal/models/models.go`.
+The ai-sink writer contract tests pin the exact JSON payload sent to that route,
+including table identity, field IDs, layout, and row encoding.
+
+Deployments may point `AI_SINK_TABLE_WRITER_URL` (or the shared
+`ICEBERG_TABLE_WRITER_URL` fallback) at that service. If an external adapter is
+used instead, it must implement the same route and error contract before
+Iceberg mode is considered production-equivalent.
+
 ## Configuration
 
 Required for Iceberg mode:
@@ -33,7 +48,9 @@ Required for Iceberg mode:
 KAFKA_BOOTSTRAP_SERVERS=...
 ICEBERG_CATALOG_URL=http://lakekeeper:8181
 AI_SINK_TABLE_WRITER_URL=http://ai-table-writer:8080 # optional when co-located/proxied
-ICEBERG_WAREHOUSE=...                               # optional
+ICEBERG_TABLE_WRITER_URL=http://table-writer:8080    # optional shared fallback
+ICEBERG_WAREHOUSE=...                                # optional
+AI_SINK_JSONL_DIR=                                   # must be unset/empty in production Iceberg mode
 ```
 
 `AI_SINK_TABLE_WRITER_URL` defaults to `ICEBERG_TABLE_WRITER_URL` and then to `ICEBERG_CATALOG_URL` for deployments that proxy the table-writer endpoint next to the catalog.

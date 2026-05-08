@@ -2,8 +2,8 @@ package writer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -159,50 +159,13 @@ func TestHTTPTableWriterAdapterAIContract(t *testing.T) {
 			t.Fatalf("Content-Type = %q", got)
 		}
 
-		var batch AppendBatch
-		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
-			t.Fatalf("decode request: %v", err)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request: %v", err)
 		}
-		wantSpec := TableSpec{
-			Catalog:            aiCatalog,
-			CatalogURL:         catalogURL,
-			Warehouse:          "warehouse-1",
-			Namespace:          "of_ai",
-			Table:              envelope.TableResponses,
-			PartitionTransform: "day(at)",
-			SortOrder:          "at ASC",
-			Schema:             aiSchema(),
-		}
-		if !reflect.DeepEqual(batch.Spec, wantSpec) {
-			t.Fatalf("spec = %#v, want %#v", batch.Spec, wantSpec)
-		}
-		if len(batch.Rows) != 1 {
-			t.Fatalf("rows = %#v", batch.Rows)
-		}
-		row := batch.Rows[0]
-		if row["event_id"] != "00000000-0000-7000-8000-000000000001" {
-			t.Fatalf("event_id = %#v", row["event_id"])
-		}
-		if row["at"] != float64(1700000000000000) {
-			t.Fatalf("at = %#v", row["at"])
-		}
-		if row["kind"] != "response" {
-			t.Fatalf("kind = %#v", row["kind"])
-		}
-		if row["run_id"] != runID.String() {
-			t.Fatalf("run_id = %#v", row["run_id"])
-		}
-		if row["trace_id"] != traceID {
-			t.Fatalf("trace_id = %#v", row["trace_id"])
-		}
-		if row["producer"] != "agent-runtime-service" {
-			t.Fatalf("producer = %#v", row["producer"])
-		}
-		if row["schema_version"] != float64(1) {
-			t.Fatalf("schema_version = %#v", row["schema_version"])
-		}
-		if row["payload"] != `{"tokens":42}` {
-			t.Fatalf("payload = %#v", row["payload"])
+		wantPayload := `{"spec":{"catalog":"lakekeeper","catalog_url":"http://lakekeeper:8181","warehouse":"warehouse-1","namespace":"of_ai","table":"responses","partition_transform":"day(at)","sort_order":"at ASC","schema":[{"id":1,"name":"event_id","type":"uuid","required":true},{"id":2,"name":"at","type":"timestamptz","required":true},{"id":3,"name":"kind","type":"string","required":true},{"id":4,"name":"run_id","type":"uuid","required":false},{"id":5,"name":"trace_id","type":"string","required":false},{"id":6,"name":"producer","type":"string","required":true},{"id":7,"name":"schema_version","type":"uint32","required":true},{"id":8,"name":"payload","type":"string","required":true}]},"rows":[{"at":1700000000000000,"event_id":"00000000-0000-7000-8000-000000000001","kind":"response","payload":"{\"tokens\":42}","producer":"agent-runtime-service","run_id":"00000000-0000-7000-8000-000000000123","schema_version":1,"trace_id":"trace-1"}]}`
+		if string(body) != wantPayload {
+			t.Fatalf("request payload mismatch\nwant: %s\n got: %s", wantPayload, body)
 		}
 		w.WriteHeader(http.StatusAccepted)
 	}))
