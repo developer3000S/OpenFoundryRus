@@ -16,7 +16,7 @@ Generated route baseline:
 cd openfoundry-go && go run ./tools/route-audit -services connector-management-service
 ```
 
-Current route-audit result after this parity slice: 47 Rust routes and 59 Go routes, with **0 Rust routes reported as `missing`**. The audit classifies 48 routes as implemented; remaining 501/config-gated/empty-envelope items are outside this encrypted-credential/vending parity slice (dev-auth, optional media/webhook runtime depth, and heuristic Iceberg empty-envelope classification for the synthetic table metadata response). The extra Go routes are existing foundation/read-update helpers (`PATCH /connections/{id}`, `GET/PATCH /data-connection/syncs/{id}`, media-set get/update/run, and the Go virtual-table primitive surface). The audit canonicalizes connector-management Rust routes mounted inside Rust's `/api/v1` closure so the comparison reflects the externally effective HTTP surface.
+Current route-audit result after this parity slice: 47 Rust routes and 59 Go routes, with **0 Rust routes reported as `missing`**. The audit classifies 48 routes as implemented; remaining 501/config-gated/empty-envelope items are outside this sync-runtime parity slice (dev-auth, optional media/webhook runtime depth, and heuristic Iceberg empty-envelope classification for the synthetic table metadata response). The extra Go routes are existing foundation/read-update helpers (`PATCH /connections/{id}`, `GET/PATCH /data-connection/syncs/{id}`, media-set get/update/run, and the Go virtual-table primitive surface). The audit canonicalizes connector-management Rust routes mounted inside Rust's `/api/v1` closure so the comparison reflects the externally effective HTTP surface.
 
 ## Status vocabulary
 
@@ -153,7 +153,7 @@ Go now carries Rust-parity source policy binding handlers over `source_policy_bi
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/v1/data-connection/sources/{id}/syncs` | `handlers::data_connection::list_syncs` | `/api/v1/data-connection/sources/{id}/syncs` | `h.ListSyncJobs` | partial | `batch_sync_defs`; `20260430120000_data_connection_mvp.sql` | dataset versioning/sync tests |
 | POST | `/api/v1/data-connection/syncs` | `handlers::data_connection::create_sync` | `/api/v1/data-connection/syncs` | `h.CreateSyncJob` | partial | `batch_sync_defs`; `20260430120000_data_connection_mvp.sql` | dataset versioning/sync tests |
-| POST | `/api/v1/data-connection/syncs/{id}/run` | `handlers::data_connection::run_sync` | `/api/v1/data-connection/syncs/{id}/run` | `h.RunSyncJob` | runtime-pending | `batch_sync_defs`, `sync_runs`; `20260430120000_data_connection_mvp.sql`, `20260430140000_sync_runs_ingest_job_id.sql`, `20260501100000_sync_runs_dataset_version.sql` | `src/domain/dataset_versioning.rs`, `src/ingestion_bridge.rs`, connector integration tests |
+| POST | `/api/v1/data-connection/syncs/{id}/run` | `handlers::data_connection::run_sync` | `/api/v1/data-connection/syncs/{id}/run` | `h.RunSyncJob` | implemented (port-backed dispatch) | `batch_sync_defs`, `sync_runs`; `20260430120000_data_connection_mvp.sql`, `20260430140000_sync_runs_ingest_job_id.sql`, `20260501100000_sync_runs_dataset_version.sql` | `src/domain/dataset_versioning.rs`, `src/ingestion_bridge.rs`, connector integration tests |
 | GET | `/api/v1/data-connection/syncs/{id}/runs` | `handlers::data_connection::list_runs` | `/api/v1/data-connection/syncs/{id}/runs` | `h.ListRuns` | implemented (local run ledger) | `sync_runs`; `20260430120000_data_connection_mvp.sql` | dataset versioning/sync tests |
 
 ### media-set syncs
@@ -258,7 +258,7 @@ No Rust routes are mounted directly under adapter modules, but Rust request hand
 | HTTP handler contracts | `src/handlers/*.rs` | router tests cover mounted routes, auth-required behavior, and dev-auth env gating | Credentials, egress, sync run listing, full connector adapter dispatch, and dev-auth behavior remain. |
 | Persistence migrations | Rust migrations | Go migrations mirror filenames | Need repo methods for all carried tables and outbox writes. |
 | Connector behavior | `src/connectors/*.rs`, `src/virtual_table/connectors/*.rs` | contract fixture test and mounted pending endpoints | Need adapter-level unit/integration parity. |
-| Runtime dispatch | `ingestion_bridge`, `dataset_versioning`, media-set runtime | Go DB-only sync run plus media-set HTTP runtime | Need ingestion-replication dispatch, dataset version recording, run listing/status semantics. |
+| Runtime dispatch | `ingestion_bridge`, `dataset_versioning`, media-set runtime | Go port-backed sync run dispatch plus media-set HTTP runtime | `run_sync` now materializes deterministic ingestion payloads, dispatches to ingestion-replication through a testable port, persists terminal run state, and records dataset versions/content hashes; remaining work is broader connector adapter coverage and production auth propagation for remote service calls. |
 | Background workers | `domain/*` schedulers | none found | Need worker ports, tests, config gates. |
 
 ## Prioritized PR/slices to close migration
@@ -267,7 +267,7 @@ No Rust routes are mounted directly under adapter modules, but Rust request hand
 2. **Partial — connection test/capabilities slice**: capability matrix and a non-dispatching `test_connection` response are present; per-connector runtime dispatch remains.
 3. **Credential storage/vending slice**: port encrypted `source_credentials` CRUD and vended credential helpers, including key derivation/encryption compatibility tests.
 4. **Done — egress policy slice**: source policy binding handlers and Rust-compatible URL/allowlist/private-network validation are ported; network-boundary enforcement remains external by design.
-5. **Sync runtime slice**: complete `run_sync` parity by dispatching to ingestion-replication, materializing payloads, recording dataset versions/content hashes, and implementing `GET /syncs/{id}/runs`.
+5. **Done — sync runtime slice**: `run_sync` dispatches to ingestion-replication through a port, materializes payloads/content hashes, records dataset versions when available, persists terminal `sync_runs`, and `GET /syncs/{id}/runs` returns the run ledger.
 6. **Media-set parity slice**: reconcile Rust-only create/list vs Go extended run/get/update API, then wire runtime config and filter/classification parity tests.
 7. **Done/partial — virtual registrations slice**: list/discover/bulk/preview/delete/query/Arrow endpoints and repo methods over `connection_registrations` are present; full adapter-backed query and audit-table writes remain.
 8. **Auto-registration/update-detection workers slice**: replace status/update 501s plus scheduler/update-detection workers and config gates.

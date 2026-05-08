@@ -322,6 +322,55 @@ func (r *Repo) RunSyncJob(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) 
 	return v, err
 }
 
+func (r *Repo) CompleteSyncRun(ctx context.Context, runID uuid.UUID, ownerID uuid.UUID, status string, bytesWritten int64, filesWritten int64, errMsg *string, ingestJobID *string, datasetVersionID *uuid.UUID, contentHash *string) (*models.SyncRun, error) {
+	row := r.Pool.QueryRow(ctx,
+		`UPDATE sync_runs r
+		    SET status = $2,
+		        finished_at = NOW(),
+		        bytes_written = $3,
+		        files_written = $4,
+		        error = $5,
+		        ingest_job_id = $6,
+		        dataset_version_id = $7,
+		        content_hash = $8
+		   FROM batch_sync_defs d
+		   JOIN connections c ON c.id = d.source_id
+		  WHERE r.sync_def_id = d.id AND r.id = $1 AND c.owner_id = $9
+		  RETURNING r.id, r.sync_def_id, r.status, r.started_at, r.finished_at, r.bytes_written,
+		            r.files_written, r.error, r.ingest_job_id, r.dataset_version_id, r.content_hash`,
+		runID, status, bytesWritten, filesWritten, errMsg, ingestJobID, datasetVersionID, contentHash, ownerID,
+	)
+	v, err := scanSyncRun(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func (r *Repo) PreviousDatasetVersionForHash(ctx context.Context, syncDefID uuid.UUID, contentHash string) (*uuid.UUID, error) {
+	row := r.Pool.QueryRow(ctx,
+		`SELECT dataset_version_id
+		   FROM sync_runs
+		  WHERE sync_def_id = $1 AND content_hash = $2 AND dataset_version_id IS NOT NULL
+		  ORDER BY started_at DESC
+		  LIMIT 1`, syncDefID, contentHash)
+	var id uuid.UUID
+	if err := row.Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &id, nil
+}
+
+func (r *Repo) RecordDatasetVersionOnRun(ctx context.Context, runID uuid.UUID, datasetVersionID uuid.UUID, contentHash string) error {
+	_, err := r.Pool.Exec(ctx,
+		`UPDATE sync_runs SET dataset_version_id = $2, content_hash = $3 WHERE id = $1`,
+		runID, datasetVersionID, contentHash)
+	return err
+}
+
 func (r *Repo) ListSyncRuns(ctx context.Context, syncID uuid.UUID, ownerID uuid.UUID) ([]models.SyncRun, error) {
 	rows, err := r.Pool.Query(ctx,
 		`SELECT r.id, r.sync_def_id, r.status, r.started_at, r.finished_at, r.bytes_written,

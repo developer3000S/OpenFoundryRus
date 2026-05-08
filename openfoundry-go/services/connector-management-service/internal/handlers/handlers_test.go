@@ -18,6 +18,7 @@ import (
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/handlers"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/models"
+	cmruntime "github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/runtime"
 )
 
 func TestConnectionJSONShape(t *testing.T) {
@@ -185,6 +186,47 @@ func (f *fakeStore) RunSyncJob(_ context.Context, id uuid.UUID, ownerID uuid.UUI
 }
 func (f *fakeStore) ListSyncRuns(_ context.Context, syncID uuid.UUID, _ uuid.UUID) ([]models.SyncRun, error) {
 	return f.runs[syncID], nil
+}
+func (f *fakeStore) CompleteSyncRun(_ context.Context, runID uuid.UUID, _ uuid.UUID, status string, bytesWritten int64, filesWritten int64, errMsg *string, ingestJobID *string, datasetVersionID *uuid.UUID, contentHash *string) (*models.SyncRun, error) {
+	for syncID, runs := range f.runs {
+		for i := range runs {
+			if runs[i].ID == runID {
+				now := time.Now().UTC()
+				runs[i].Status = status
+				runs[i].FinishedAt = &now
+				runs[i].BytesWritten = bytesWritten
+				runs[i].FilesWritten = filesWritten
+				runs[i].Error = errMsg
+				runs[i].IngestJobID = ingestJobID
+				runs[i].DatasetVersionID = datasetVersionID
+				runs[i].ContentHash = contentHash
+				f.runs[syncID] = runs
+				return &runs[i], nil
+			}
+		}
+	}
+	return nil, nil
+}
+func (f *fakeStore) PreviousDatasetVersionForHash(_ context.Context, syncDefID uuid.UUID, contentHash string) (*uuid.UUID, error) {
+	for _, run := range f.runs[syncDefID] {
+		if run.ContentHash != nil && *run.ContentHash == contentHash && run.DatasetVersionID != nil {
+			return run.DatasetVersionID, nil
+		}
+	}
+	return nil, nil
+}
+func (f *fakeStore) RecordDatasetVersionOnRun(_ context.Context, runID uuid.UUID, datasetVersionID uuid.UUID, contentHash string) error {
+	for syncID, runs := range f.runs {
+		for i := range runs {
+			if runs[i].ID == runID {
+				runs[i].DatasetVersionID = &datasetVersionID
+				runs[i].ContentHash = &contentHash
+				f.runs[syncID] = runs
+				return nil
+			}
+		}
+	}
+	return nil
 }
 func (f *fakeStore) ListCredentials(_ context.Context, sourceID uuid.UUID, ownerID uuid.UUID) ([]models.CredentialResponse, error) {
 	if c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID); c == nil {
@@ -954,4 +996,111 @@ func TestConnectionWebhookAndIcebergHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.IcebergLoadTable(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}
+
+type fakeIngestionPort struct {
+	requests []cmruntime.IngestionRequest
+	result   cmruntime.IngestionResult
+	err      error
+}
+
+func (f *fakeIngestionPort) Dispatch(_ context.Context, req cmruntime.IngestionRequest) (*cmruntime.IngestionResult, error) {
+	f.requests = append(f.requests, req)
+	if f.err != nil {
+		return nil, f.err
+	}
+	result := f.result
+	if result.IngestJobID == "" {
+		result.IngestJobID = "ingest-" + req.RunID.String()
+	}
+	if result.Payload == nil {
+		result.Payload = req.Materialized
+	}
+	if result.BytesWritten == 0 {
+		result.BytesWritten = int64(len(result.Payload))
+	}
+	if result.FilesWritten == 0 {
+		result.FilesWritten = 1
+	}
+	return &result, nil
+}
+
+type fakeDatasetVersioningPort struct {
+	requests []cmruntime.DatasetVersionRequest
+	id       uuid.UUID
+	err      error
+}
+
+func (f *fakeDatasetVersioningPort) Register(_ context.Context, req cmruntime.DatasetVersionRequest) (*cmruntime.DatasetVersionResult, error) {
+	f.requests = append(f.requests, req)
+	if f.err != nil {
+		return nil, f.err
+	}
+	id := f.id
+	if id == uuid.Nil {
+		id = uuid.New()
+	}
+	return &cmruntime.DatasetVersionResult{DatasetVersionID: id}, nil
+}
+
+func TestRunSyncJobDispatchesIngestionAndRegistersDatasetVersion(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	job, err := store.CreateSyncJob(context.Background(), &models.CreateSyncJobRequest{SourceID: store.connections[0].ID, OutputDatasetID: uuid.New()}, owner)
+	require.NoError(t, err)
+	ingestion := &fakeIngestionPort{result: cmruntime.IngestionResult{RowsWritten: 7, Payload: []byte(`{"rows":7}`)}}
+	versionID := uuid.New()
+	versions := &fakeDatasetVersioningPort{id: versionID}
+	h := &handlers.Handlers{Repo: store, IngestionRuntime: ingestion, DatasetVersioning: versions}
+
+	req := withRouteParam(authedReq(http.MethodPost, "/syncs/"+job.ID.String()+"/run", "", owner), "sync_id", job.ID.String())
+	rec := httptest.NewRecorder()
+	h.RunSyncJob(rec, req)
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+
+	var run models.SyncRun
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &run))
+	assert.Equal(t, "succeeded", run.Status)
+	assert.NotNil(t, run.FinishedAt)
+	assert.NotNil(t, run.IngestJobID)
+	assert.Equal(t, versionID, *run.DatasetVersionID)
+	assert.NotEmpty(t, *run.ContentHash)
+	require.Len(t, ingestion.requests, 1)
+	assert.Equal(t, job.ID, ingestion.requests[0].SyncDefID)
+	require.Len(t, versions.requests, 1)
+	assert.Equal(t, job.OutputDatasetID, versions.requests[0].OutputDatasetID)
+	assert.Equal(t, *run.ContentHash, versions.requests[0].ContentHash)
+
+	req = withRouteParam(authedReq(http.MethodGet, "/syncs/"+job.ID.String()+"/runs", "", owner), "sync_id", job.ID.String())
+	rec = httptest.NewRecorder()
+	h.ListRuns(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var runs []models.SyncRun
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &runs))
+	require.Len(t, runs, 1)
+	assert.Equal(t, "succeeded", runs[0].Status)
+}
+
+func TestRunSyncJobReusesDatasetVersionForSameContentHash(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	job, err := store.CreateSyncJob(context.Background(), &models.CreateSyncJobRequest{SourceID: store.connections[0].ID, OutputDatasetID: uuid.New()}, owner)
+	require.NoError(t, err)
+	payload := []byte(`stable-payload`)
+	ingestion := &fakeIngestionPort{result: cmruntime.IngestionResult{Payload: payload, BytesWritten: int64(len(payload)), FilesWritten: 1}}
+	versions := &fakeDatasetVersioningPort{id: uuid.New()}
+	h := &handlers.Handlers{Repo: store, IngestionRuntime: ingestion, DatasetVersioning: versions}
+
+	for range 2 {
+		req := withRouteParam(authedReq(http.MethodPost, "/syncs/"+job.ID.String()+"/run", "", owner), "sync_id", job.ID.String())
+		rec := httptest.NewRecorder()
+		h.RunSyncJob(rec, req)
+		require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+	}
+	require.Len(t, versions.requests, 1, "second run should reuse the recorded dataset version for the same content hash")
+	runs := store.runs[job.ID]
+	require.Len(t, runs, 2)
+	require.NotNil(t, runs[0].DatasetVersionID)
+	require.NotNil(t, runs[1].DatasetVersionID)
+	assert.Equal(t, *runs[0].DatasetVersionID, *runs[1].DatasetVersionID)
 }

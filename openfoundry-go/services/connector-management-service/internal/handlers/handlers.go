@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -19,8 +20,10 @@ import (
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/domain"
+	syncdomain "github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/domain/sync"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/models"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/repo"
+	cmruntime "github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/runtime"
 )
 
 type Store interface {
@@ -59,6 +62,18 @@ type Store interface {
 	ListIcebergTables(ctx context.Context, connectionID uuid.UUID) ([]models.ConnectionRegistration, error)
 }
 
+type syncRunCompleter interface {
+	CompleteSyncRun(ctx context.Context, runID uuid.UUID, ownerID uuid.UUID, status string, bytesWritten int64, filesWritten int64, errMsg *string, ingestJobID *string, datasetVersionID *uuid.UUID, contentHash *string) (*models.SyncRun, error)
+}
+
+type previousDatasetVersionLookup interface {
+	PreviousDatasetVersionForHash(ctx context.Context, syncDefID uuid.UUID, contentHash string) (*uuid.UUID, error)
+}
+
+type datasetVersionRecorder interface {
+	RecordDatasetVersionOnRun(ctx context.Context, runID uuid.UUID, datasetVersionID uuid.UUID, contentHash string) error
+}
+
 type RuntimeConfig struct {
 	DatasetServiceURL            string
 	PipelineServiceURL           string
@@ -78,9 +93,11 @@ type RuntimeConfig struct {
 }
 
 type Handlers struct {
-	Repo            Store
-	MediaSetRuntime MediaSetRuntime
-	Config          RuntimeConfig
+	Repo              Store
+	MediaSetRuntime   MediaSetRuntime
+	IngestionRuntime  cmruntime.IngestionPort
+	DatasetVersioning cmruntime.DatasetVersioningPort
+	Config            RuntimeConfig
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -624,16 +641,135 @@ func (h *Handlers) RunSyncJob(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusBadRequest, "invalid "+param)
 		return
 	}
-	v, err := h.Repo.RunSyncJob(r.Context(), id, claims.Sub)
+	job, err := h.Repo.GetSyncJob(r.Context(), id, claims.Sub)
 	if err != nil {
 		writeJSONErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if v == nil {
+	if job == nil {
 		writeJSONErr(w, http.StatusNotFound, "sync job not found")
 		return
 	}
-	writeJSON(w, http.StatusAccepted, v)
+	conn, err := h.Repo.GetConnectionForOwner(r.Context(), job.SourceID, claims.Sub)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if conn == nil {
+		writeJSONErr(w, http.StatusNotFound, "source not found")
+		return
+	}
+	run, err := h.Repo.RunSyncJob(r.Context(), id, claims.Sub)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if run == nil {
+		writeJSONErr(w, http.StatusNotFound, "sync job not found")
+		return
+	}
+	ingestion := h.ingestionPort()
+	if ingestion == nil {
+		writeJSON(w, http.StatusAccepted, run)
+		return
+	}
+	completed := h.dispatchSyncRun(r.Context(), claims.Sub, run, job, conn, ingestion)
+	writeJSON(w, http.StatusAccepted, completed)
+}
+
+func (h *Handlers) ingestionPort() cmruntime.IngestionPort {
+	if h.IngestionRuntime != nil {
+		return h.IngestionRuntime
+	}
+	if strings.TrimSpace(h.Config.IngestionReplicationGRPCURL) == "" {
+		return nil
+	}
+	return cmruntime.HTTPIngestionClient{BaseURL: h.Config.IngestionReplicationGRPCURL}
+}
+
+func (h *Handlers) datasetVersioningPort() cmruntime.DatasetVersioningPort {
+	if h.DatasetVersioning != nil {
+		return h.DatasetVersioning
+	}
+	if strings.TrimSpace(h.Config.DatasetServiceURL) == "" {
+		return nil
+	}
+	return cmruntime.HTTPDatasetVersioningClient{BaseURL: h.Config.DatasetServiceURL}
+}
+
+func (h *Handlers) dispatchSyncRun(ctx context.Context, ownerID uuid.UUID, run *models.SyncRun, job *models.SyncJob, conn *models.Connection, ingestion cmruntime.IngestionPort) *models.SyncRun {
+	materialized, err := cmruntime.Materialize(run.ID, job, conn)
+	if err != nil {
+		return h.completeRun(ctx, ownerID, run, syncdomain.RunStatusFailed, 0, 0, err, nil, nil, nil)
+	}
+	result, err := ingestion.Dispatch(ctx, materialized)
+	if err != nil {
+		return h.completeRun(ctx, ownerID, run, syncdomain.RunStatusFailed, 0, 0, err, nil, nil, &materialized.ContentHash)
+	}
+	contentHash := materialized.ContentHash
+	if len(result.Payload) > 0 {
+		digest := sha256.Sum256(result.Payload)
+		contentHash = fmt.Sprintf("%x", digest[:])
+	}
+	datasetVersionID := h.registerDatasetVersion(ctx, run.ID, job, conn, result, contentHash)
+	ingestJobID := strings.TrimSpace(result.IngestJobID)
+	var ingestJobIDPtr *string
+	if ingestJobID != "" {
+		ingestJobIDPtr = &ingestJobID
+	}
+	return h.completeRun(ctx, ownerID, run, syncdomain.RunStatusSucceeded, result.BytesWritten, result.FilesWritten, nil, ingestJobIDPtr, datasetVersionID, &contentHash)
+}
+
+func (h *Handlers) registerDatasetVersion(ctx context.Context, runID uuid.UUID, job *models.SyncJob, conn *models.Connection, result *cmruntime.IngestionResult, contentHash string) *uuid.UUID {
+	if lookup, ok := h.Repo.(previousDatasetVersionLookup); ok {
+		previous, err := lookup.PreviousDatasetVersionForHash(ctx, job.ID, contentHash)
+		if err == nil && previous != nil {
+			if recorder, ok := h.Repo.(datasetVersionRecorder); ok {
+				_ = recorder.RecordDatasetVersionOnRun(ctx, runID, *previous, contentHash)
+			}
+			return previous
+		}
+	}
+	port := h.datasetVersioningPort()
+	if port == nil {
+		return nil
+	}
+	version, err := port.Register(ctx, cmruntime.DatasetVersionRequest{SyncDefID: job.ID, RunID: runID, SourceID: conn.ID, OutputDatasetID: job.OutputDatasetID, ContentHash: contentHash, RowCount: result.RowsWritten, SizeBytes: result.BytesWritten, Schema: json.RawMessage(`{}`), Message: "connector sync " + job.ID.String()})
+	if err != nil || version == nil || version.DatasetVersionID == uuid.Nil {
+		if err != nil {
+			slog.Warn("dataset version registration failed", slog.String("error", err.Error()), slog.String("sync_run_id", runID.String()))
+		}
+		return nil
+	}
+	return &version.DatasetVersionID
+}
+
+func (h *Handlers) completeRun(ctx context.Context, ownerID uuid.UUID, run *models.SyncRun, status string, bytesWritten int64, filesWritten int64, runErr error, ingestJobID *string, datasetVersionID *uuid.UUID, contentHash *string) *models.SyncRun {
+	var errMsg *string
+	if runErr != nil {
+		msg := runErr.Error()
+		errMsg = &msg
+	}
+	if completer, ok := h.Repo.(syncRunCompleter); ok {
+		updated, err := completer.CompleteSyncRun(ctx, run.ID, ownerID, status, bytesWritten, filesWritten, errMsg, ingestJobID, datasetVersionID, contentHash)
+		if err == nil && updated != nil {
+			return updated
+		}
+		if err != nil {
+			slog.Error("complete sync run", slog.String("error", err.Error()), slog.String("sync_run_id", run.ID.String()))
+		}
+	}
+	now := time.Now().UTC()
+	copy := *run
+	copy.Status = status
+	copy.FinishedAt = &now
+	copy.BytesWritten = bytesWritten
+	copy.FilesWritten = filesWritten
+	copy.Error = errMsg
+	copy.IngestJobID = ingestJobID
+	copy.DatasetVersionID = datasetVersionID
+	copy.ContentHash = contentHash
+	return &copy
 }
 
 func (h *Handlers) EnableVirtualTableSource(w http.ResponseWriter, r *http.Request) {
