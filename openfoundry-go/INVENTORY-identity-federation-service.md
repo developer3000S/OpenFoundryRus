@@ -128,20 +128,65 @@ services/identity-federation-service/src/
 - `20260503000000_jwks_keys.sql` — JWKS key store.
 - `20260503002000_scim_external_ids.sql` — SCIM external-id mapping.
 
+## Go implementation audit (2026-05-08)
+
+The original inventory below is historical planning material. Current code review
+shows the Go service is partly ahead of the slice plan at package level but not
+fully wired at runtime:
+
+### Completed and wired
+
+- Auth/register/login/refresh-token flow, MFA, WebAuthn, OIDC SSO, RBAC CRUD,
+  restricted-view CRUD, health, and metrics are mounted in `internal/server`.
+- Refresh tokens remain Postgres-backed in the active `service.Issuer`.
+
+### Completed as packages but not wired into the active router/binary
+
+- SAML helpers and tests exist (`internal/saml`), and SSO has SAML start/ACS
+  methods, but `cmd/.../main.go` does not build a `saml.Registry`; default
+  runtime behavior is OIDC-only.
+- SCIM 2.0 handlers/stores/tests exist under `internal/scim`, but `/scim/v2/*`
+  is not mounted and Cedar is not applied to a live SCIM route.
+- Cedar identity-admin policy bootstrap and `AdminGuard` exist under
+  `internal/cedarauthz`, with tests for JWKS and SCIM allow/deny decisions, but
+  no mounted routes currently use it.
+- JWKS rotation, Postgres key-store, JWKS document builders, and Vault Transit
+  signer are implemented and tested under `internal/jwksrotation`, but the
+  binary does not construct them and no JWKS endpoint/admin route is mounted.
+- Cassandra session support exists as `internal/sessionscassandra` with only
+  `auth_runtime.user_session` and `auth_runtime.refresh_token` DDL plus adapter
+  methods. It is not the active backend.
+
+### Pending end-to-end work
+
+- Flip sessions/refresh tokens from Postgres to Cassandra only after Scylla/CQL
+  dev infrastructure exists.
+- Add runtime SAML provider loading and wire the registry into `handlers.SSO`.
+- Mount `/scim/v2/*` and guard mutations with `internal/cedarauthz.AdminGuard`.
+- Mount JWKS publication/rotation endpoints and construct the Vault/JWKS services
+  in `cmd/.../main.go`.
+- Finish control-panel scoped-session governance, Redis rate limiting, and Kafka
+  audit publishing.
+
 ## Cassandra schema (`auth_runtime` keyspace)
 
-Ported via `sessions_cassandra::SessionsAdapter::migrate()`. Tables:
+Current Go adapter status (2026-05-08): `internal/sessionscassandra` ports only
+the session/refresh-token subset and is not wired into the active binary. Its
+embedded migrations create:
 
-- `sessions` (TTL = access TTL).
-- `refresh_tokens` (TTL = refresh TTL, family-id'd for replay detection).
-- `oauth_pending_auth` (TTL = 10 min).
-- `session_revocations` (TTL = lifetime + grace).
-- `webauthn_credentials` (no TTL — credentials persist).
+- `user_session` (30 minute sliding TTL).
+- `refresh_token` (30 day TTL, family-id'd for replay detection).
+
+Historical Rust inventory also listed `oauth_pending_auth`,
+`session_revocations`, and `webauthn_credentials`; those Cassandra tables are not
+part of the current Go identity-service runtime. Postgres remains the active
+backend for refresh tokens, OIDC state, WebAuthn, SCIM, SAML config, and JWKS
+rows until the Cassandra/Scylla wiring follow-up lands.
 
 ## Tier-2 lib dependencies (must be ported in parallel)
 
-- **`cassandra-kernel`** — used by `sessions_cassandra` + every `*_cassandra.rs`. Currently NOT yet in `openfoundry-go/libs/`. **PORT ALONGSIDE THIS SERVICE.**
-- **`authz-cedar`** — used by `cedar_authz.rs`. Cedar has a Go SDK ([cedar-go](https://github.com/cedar-policy/cedar-go), AWS-official). **STOP-AND-ASK** before relying on it (the user has flagged it as a hard architectural decision). The Cedar checks in identity-federation are admin-only (`/jwks/rotate`, SCIM ops); slices 1–6 below can land **without** Cedar by gating on bearer-JWT + role checks instead, with Cedar wired in slice 8.
+- **`cassandra-kernel`** — now present in `openfoundry-go/libs/cassandra-kernel`; the identity service has an `internal/sessionscassandra` adapter, but it is not wired as the active backend.
+- **`authz-cedar-go`** — adopted per the 2026-05-06 Cedar decision. `libs/authz-cedar-go` is implemented with local conformance tests; identity `internal/cedarauthz` is implemented/tested but not mounted on live routes yet.
 - **`event-bus-data`** + **`event-bus-control`** — already ported.
 
 ## Recommended porting plan — 8 vertical slices
@@ -209,8 +254,8 @@ Each slice lands in its own iteration with its own commit. After slice 8 the ser
 
 ### Slice 8 — Hardening + Cedar + JWKS + Vault + SCIM (target ~3000 LOC Go, will split)
 
-- **STOP-AND-ASK on Cedar**: confirm cedar-go SDK is viable before continuing. If not viable, bypass with role-based checks documented as a regression. The Rust crate gates `/jwks/rotate` + SCIM mutations on Cedar.
-- `cedar_authz.rs` → Go (using `cedar-go` if approved).
+- **Cedar decision resolved**: use `github.com/cedar-policy/cedar-go`. `libs/authz-cedar-go` and identity `internal/cedarauthz` are now implemented/tested; remaining work is route wiring. The Rust crate gates `/jwks/rotate` + SCIM mutations on Cedar.
+- `cedar_authz.rs` → Go (using `cedar-go`).
 - `hardening/jwks_rotation.rs` (818 LOC) — 90/14-day JWKS rotation, Postgres-backed key store.
 - `hardening/vault_signer.rs` (759 LOC) — Vault Transit signing. Use `hashicorp/vault/api` Go SDK.
 - `hardening/audit_topic.rs` (421 LOC) — Kafka publisher; reuse `libs/event-bus-data`.
@@ -230,14 +275,14 @@ Each slice lands in its own iteration with its own commit. After slice 8 the ser
 | 5     | ~3000    | ~4000          | SAML XML signing, OIDC server-side                |
 | 6     | ~1100    | ~1500          | nothing exotic                                    |
 | 7     | ~1700    | ~2300          | ABAC evaluator, scoped session policies           |
-| 8     | ~5500    | ~7500          | Cedar (STOP-AND-ASK), Vault, SCIM 2.0, JWKS       |
+| 8     | ~5500    | ~7500          | cedar-go wiring, Vault, SCIM 2.0, JWKS            |
 | **Total** | **~15800** | **~21000+**  | (with the 22,738 LOC Rust → ~30k Go ceiling)      |
 
 ## Decisions deferred for human review
 
-1. **`cedar_authz.rs` & cedar-go**: confirm AWS `cedar-go` SDK is policy-compatible with the bundled `policies/identity_admin.cedar`. If not, the gateway-level role checks (`x-openfoundry-auth-*` headers) become the only enforcement on admin endpoints — that's a regression worth being explicit about. Until confirmed, slices 1–6 land without Cedar.
-2. **Vault Transit signer** (`hardening/vault_signer.rs`, 759 LOC): the production wiring depends on Vault PKI / Transit secrets engine. The dev fallback uses ed25519 from env. Slice 8 can land with the env fallback initially and gate Vault behind a feature flag — but Vault is required for ASVS L2 in production.
-3. **SCIM 2.0**: `handlers/scim.rs` is 1951 LOC. The Go ecosystem has `elimity-com/scim` and `imulab/go-scim`. Both are partial RFC implementations. May need a hand-rolled RFC 7643/7644 envelope per the operator runbook — flag as a separate decision.
+1. **`cedar_authz.rs` & cedar-go**: resolved 2026-05-06 — use `github.com/cedar-policy/cedar-go`. The Go wrapper and identity-admin policy tests now pass local conformance-style fixtures; remaining work is route/binary wiring, not SDK selection.
+2. **Vault Transit signer** (`hardening/vault_signer.rs`, 759 LOC): Go signer/config/retry logic is implemented under `internal/jwksrotation`, but the binary does not construct it yet. Production still depends on Vault PKI / Transit secrets-engine configuration.
+3. **SCIM 2.0**: Go has a hand-rolled RFC 7643/7644 package with handlers/stores/tests under `internal/scim`. Pending work is mounting `/scim/v2/*`, attaching persistence/runtime config, and applying Cedar mutation guards.
 4. **OAuth integration data-side** (`oauth_integration/`): per ADR-0030 the data-side connectors will be extracted to `connector-management-service` as a follow-up. The Go port should keep the auth-side here and skip the data-side until that extraction lands.
 
 ## Wire-compat tests to add (after slice 1)

@@ -51,10 +51,11 @@ files.
 
 ### Phase 3 breakdown
 
-- **identity-federation-service** — slices 1, 2, 3, 4, 5a, 6, 7a ✅
-  - 5b (SAML 2.0 + XML signing) — pending follow-up
+- **identity-federation-service** — active runtime wires auth, MFA, WebAuthn, OIDC, RBAC, restricted views ✅
+  - 2b (Cassandra sessions) — adapter exists; active backend remains Postgres
+  - 5b (SAML 2.0 + XML signing) — helper package/tests exist; runtime registry wiring pending
   - 7b (control panel + ABAC + scoped sessions admin) — pending follow-up
-  - 8 (Cedar + JWKS rotation + Vault + SCIM) — **STOP-and-ask** on Cedar
+  - 8 (Cedar + JWKS rotation + Vault + SCIM) — Cedar/JWKS/Vault/SCIM packages exist and are tested; route/binary wiring pending
 - **tenancy-organizations-service** — slices 1, 2, 3 ✅; full active
   surface complete. Spaces / projects / trash / resource_resolve are
   RETIRED upstream (verified via Rust `src/main.rs`) and deferred unless
@@ -122,15 +123,20 @@ stable writes.
 
 ### 4. SAML 2.0 (identity-federation slice 5b, non-blocking)
 
-XML signing infrastructure (crewjam/saml + russellhaering/goxmldsig in
-Go) ports cleanly but needs IdP test certs + metadata fixtures to
-validate end-to-end. Pending until dev infra ships SAML test rig.
+Current audit (2026-05-08): `internal/saml` includes AuthnRequest,
+metadata parsing, response/signature validation, registry, and test
+fixtures. `handlers.SSO` has SAML start/ACS methods and the ACS route is
+mounted, but `cmd/.../main.go` does not construct a `saml.Registry`; the
+default binary remains OIDC-only. Pending work is runtime provider
+config/loading and true end-to-end SAML login wiring.
 
 ### 5. Sessions Cassandra wiring (identity-federation slice 2b, non-blocking)
 
-`libs/cassandra-kernel` and the `sessionscassandra` adapter are
-scaffolded. The active backend remains Postgres; flipping the switch is
-a one-line config change, gated on Scylla being in dev infrastructure.
+Current audit (2026-05-08): `libs/cassandra-kernel` exists and
+`internal/sessionscassandra` has DDL + adapter methods for
+`auth_runtime.user_session` and `auth_runtime.refresh_token`. The active
+`Issuer` still uses Postgres refresh tokens. Flipping the backend remains
+gated on Scylla/CQL dev infrastructure and runtime wiring.
 
 ### 6. Ontology actions (Phase 4, non-blocking)
 
@@ -145,17 +151,14 @@ across the workspace at HEAD (1b259f38).
 
 ## Resume protocol
 
-When the human signs off on Cedar strategy:
+Cedar strategy is already signed off (Option A: cedar-go). Next steps:
 
-1. Update todos: pick a Cedar option (A/B/C) and unblock either
-   authorization-policy-service migration or the cedar_authz slice 8.
-2. If Option A (cedar-go): port `libs/authz-cedar-go` first, mirror
-   AWS's cedar conformance tests, only then port handlers/domain in
-   slices.
-3. If Option B (sidecar): write the 50-LOC tonic Rust sidecar + Go gRPC
-   client; flip authorization-policy-service to call out.
-4. If Option C (wait): mark the todo deferred to Phase 6 and continue
-   with audit-compliance-service (the next non-Cedar Phase 3 service).
+1. Continue extending `libs/authz-cedar-go` conformance fixtures before
+   cedar-go upgrades.
+2. Wire identity `internal/cedarauthz.AdminGuard` onto live JWKS/SCIM
+   routes when those routes are mounted.
+3. Continue authorization-policy-service migration against the Go Cedar
+   wrapper.
 
 Other unblocked work that doesn't need Cedar:
 
@@ -347,10 +350,10 @@ Service ports queued (after libs):
 - model-deployment-service (after libs/ml-kernel-go).
 
 Phase 3 follow-ups deferred by user choice:
-- identity-federation slices 2b (Cassandra sessions), 5b (SAML),
-  7b (control panel + ABAC), 8 (Cedar + JWKS rotation + Vault + SCIM).
+- identity-federation Cassandra active wiring, SAML runtime registry,
+  control panel + ABAC, and JWKS/Vault/SCIM route wiring.
 - tenancy-organizations RETIRED follow-ups.
-- libs/authz-cedar-go AWS Cedar conformance suite mirror.
+- Continue extending the libs/authz-cedar-go conformance mirror.
 
 Phase 4: ontology-actions-service (pyo3 STOP-and-ask).
 Phase 5: pyo3 sidecars (notebook-runtime, pipeline-build,
@@ -956,11 +959,11 @@ What remains are integration items:
    instead.
 2. **pyo3 sidecars** (notebook-runtime, pipeline-build,
    ontology-actions) — STOP-and-ask, gRPC sidecar pattern.
-3. **Phase 3 follow-ups** — identity-federation slices (2b
-   Cassandra sessions, 5b SAML, 7b control panel + ABAC, 8 Cedar +
-   JWKS rotation + Vault + SCIM); tenancy-organizations RETIRED
-   spaces / projects / trash / resource_resolve; authz-cedar-go AWS
-   Cedar conformance suite mirror.
+3. **Phase 3 follow-ups** — identity-federation Cassandra active
+   wiring, SAML runtime registry, 7b control panel + ABAC, and JWKS/
+   Vault/SCIM route wiring; tenancy-organizations RETIRED spaces /
+   projects / trash / resource_resolve; continue extending the
+   authz-cedar-go conformance mirror.
 4. **Phase 6 per-service runtime slices** — media-transform image
    decoding, entity-resolution engine, ontology-exploratory
    views/maps, reindex/lineage/workflow-automation runtime,

@@ -153,6 +153,146 @@ func TestCedarConformancePolicyRequestEntityFixtures(t *testing.T) {
 	}
 }
 
+func TestCedarConformancePermitForbidAndHierarchyFixtures(t *testing.T) {
+	t.Parallel()
+
+	// Adapted to the OpenFoundry schema from the AWS Cedar conformance shape:
+	// a complete policy set, request tuple, and entity graph per fixture. This
+	// covers Cedar's key evaluation invariants that the service depends on:
+	// default deny, parent-graph membership, and forbid-overrides-permit.
+	policies := []cedarauthz.PolicyRecord{
+		{
+			ID:      "permit-role-read-same-tenant",
+			Version: 1,
+			Source: `
+				permit(
+				  principal in Role::"reader",
+				  action == Action::"read",
+				  resource is Dataset
+				) when {
+				  principal.tenant == resource.tenant
+				};
+			`,
+		},
+		{
+			ID:      "forbid-pii-without-break-glass",
+			Version: 1,
+			Source: `
+				forbid(
+				  principal,
+				  action == Action::"read",
+				  resource is Dataset
+				) when {
+				  resource.markings.contains(Marking::"pii") &&
+				  !(principal in Role::"break_glass")
+				};
+			`,
+		},
+	}
+
+	publicMark := types.NewEntityUID("Marking", "public")
+	piiMark := types.NewEntityUID("Marking", "pii")
+	readerRole := types.NewEntityUID("Role", "reader")
+	breakGlassRole := types.NewEntityUID("Role", "break_glass")
+	readAction := types.NewEntityUID("Action", "read")
+
+	type fixture struct {
+		name        string
+		principal   cedar.EntityUID
+		resource    cedar.EntityUID
+		entities    cedar.EntityMap
+		want        cedar.Decision
+		wantReasons []string
+	}
+
+	cases := []fixture{
+		{
+			name:      "default deny when principal is not in reader role",
+			principal: types.NewEntityUID("User", "no-role"),
+			resource:  types.NewEntityUID("Dataset", "ds-public"),
+			entities: mkEntities(t,
+				mkMarking(publicMark, "public"),
+				mkRole(readerRole, "reader"),
+				mkUserWithParents(types.NewEntityUID("User", "no-role"), "acme", []cedar.EntityUID{publicMark}, nil),
+				mkDataset(types.NewEntityUID("Dataset", "ds-public"), "ri.dataset.acme.ds-public", "acme", []cedar.EntityUID{publicMark}),
+			),
+			want: cedar.Deny,
+		},
+		{
+			name:      "permit when role parent and tenant match",
+			principal: types.NewEntityUID("User", "reader"),
+			resource:  types.NewEntityUID("Dataset", "ds-public"),
+			entities: mkEntities(t,
+				mkMarking(publicMark, "public"),
+				mkRole(readerRole, "reader"),
+				mkUserWithParents(types.NewEntityUID("User", "reader"), "acme", []cedar.EntityUID{publicMark}, []cedar.EntityUID{readerRole}),
+				mkDataset(types.NewEntityUID("Dataset", "ds-public"), "ri.dataset.acme.ds-public", "acme", []cedar.EntityUID{publicMark}),
+			),
+			want:        cedar.Allow,
+			wantReasons: []string{"permit-role-read-same-tenant"},
+		},
+		{
+			name:      "forbid overrides a matching permit for pii",
+			principal: types.NewEntityUID("User", "reader-pii"),
+			resource:  types.NewEntityUID("Dataset", "ds-pii"),
+			entities: mkEntities(t,
+				mkMarking(publicMark, "public"),
+				mkMarking(piiMark, "pii"),
+				mkRole(readerRole, "reader"),
+				mkUserWithParents(types.NewEntityUID("User", "reader-pii"), "acme", []cedar.EntityUID{publicMark, piiMark}, []cedar.EntityUID{readerRole}),
+				mkDataset(types.NewEntityUID("Dataset", "ds-pii"), "ri.dataset.acme.ds-pii", "acme", []cedar.EntityUID{publicMark, piiMark}),
+			),
+			want:        cedar.Deny,
+			wantReasons: []string{"forbid-pii-without-break-glass"},
+		},
+		{
+			name:      "break glass parent prevents forbid so permit can allow",
+			principal: types.NewEntityUID("User", "reader-break-glass"),
+			resource:  types.NewEntityUID("Dataset", "ds-pii"),
+			entities: mkEntities(t,
+				mkMarking(publicMark, "public"),
+				mkMarking(piiMark, "pii"),
+				mkRole(readerRole, "reader"),
+				mkRole(breakGlassRole, "break_glass"),
+				mkUserWithParents(types.NewEntityUID("User", "reader-break-glass"), "acme", []cedar.EntityUID{publicMark, piiMark}, []cedar.EntityUID{readerRole, breakGlassRole}),
+				mkDataset(types.NewEntityUID("Dataset", "ds-pii"), "ri.dataset.acme.ds-pii", "acme", []cedar.EntityUID{publicMark, piiMark}),
+			),
+			want:        cedar.Allow,
+			wantReasons: []string{"permit-role-read-same-tenant"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			store, err := cedarauthz.NewWithPolicies(policies)
+			require.NoError(t, err)
+			eng := cedarauthz.NewEngineNoopAudit(store)
+
+			out, err := eng.Authorize(context.Background(), tc.principal, readAction, tc.resource, cedar.NewRecord(cedar.RecordMap{}), tc.entities)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, out.Decision)
+			assert.ElementsMatch(t, tc.wantReasons, out.PolicyIDs)
+		})
+	}
+}
+
+func mkRole(uid cedar.EntityUID, id string) cedar.Entity {
+	return cedar.Entity{
+		UID: uid,
+		Attributes: cedar.NewRecord(cedar.RecordMap{
+			"id": cedar.String(id),
+		}),
+	}
+}
+
+func mkUserWithParents(uid cedar.EntityUID, tenant string, clearances []cedar.EntityUID, parents []cedar.EntityUID) cedar.Entity {
+	user := mkUser(uid, tenant, clearances, nil)
+	user.Parents = types.NewEntityUIDSet(parents...)
+	return user
+}
+
 func TestCedarConformanceInvalidPolicyFixtureRejected(t *testing.T) {
 	t.Parallel()
 	store, err := cedarauthz.NewEmpty()
