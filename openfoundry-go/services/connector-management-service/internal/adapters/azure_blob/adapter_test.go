@@ -81,8 +81,24 @@ func TestUnsupportedCapabilitiesReturnNotImplemented(t *testing.T) {
 	if _, err := a.StreamArrow(context.Background(), conn, &adapters.Query{}, ""); !errors.Is(err, adapters.ErrNotImplemented) {
 		t.Fatalf("StreamArrow err = %v", err)
 	}
-	if _, err := a.BuildIngestSpec(context.Background(), conn, &adapters.Source{}); !errors.Is(err, adapters.ErrNotImplemented) {
-		t.Fatalf("BuildIngestSpec err = %v", err)
+}
+
+func TestBuildIngestSpecEmitsAzureDescriptor(t *testing.T) {
+	t.Parallel()
+	conn := &models.Connection{Name: "azure-sync", ConnectorType: ConnectorType, Config: json.RawMessage(`{"account_name":"a","account_key":"k","iceberg_tables":[{"selector":"db.t","metadata_location":"abfss://c@a.dfs/x.json"}]}`)}
+	spec, err := New().BuildIngestSpec(context.Background(), conn, &adapters.Source{Selector: "db.t", SourceKind: "azure_iceberg_table"})
+	if err != nil {
+		t.Fatalf("BuildIngestSpec: %v", err)
+	}
+	if spec.Source != ConnectorType {
+		t.Fatalf("source = %q", spec.Source)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(spec.Config, &cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if cfg["account_name"] != "a" || cfg["selector"] != "db.t" {
+		t.Fatalf("config = %#v", cfg)
 	}
 }
 

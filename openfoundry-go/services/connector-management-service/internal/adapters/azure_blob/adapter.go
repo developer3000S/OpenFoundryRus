@@ -114,8 +114,34 @@ func (a *Adapter) StreamArrow(_ context.Context, _ *models.Connection, _ *adapte
 	return nil, fmt.Errorf("%w: azure_blob arrow streaming", adapters.ErrNotImplemented)
 }
 
-// BuildIngestSpec is unsupported — azure_blob is a zero-copy source, so
-// ingestion-replication-service is not in the path.
-func (a *Adapter) BuildIngestSpec(_ context.Context, _ *models.Connection, _ *adapters.Source) (*adapters.IngestSpec, error) {
-	return nil, fmt.Errorf("%w: azure_blob ingest spec", adapters.ErrNotImplemented)
+// BuildIngestSpec emits the object-storage descriptor forwarded to
+// ingestion-replication-service for the selected Azure Blob source.
+func (a *Adapter) BuildIngestSpec(_ context.Context, c *models.Connection, src *adapters.Source) (*adapters.IngestSpec, error) {
+	if c == nil {
+		return nil, errors.New("azure_blob: connection is nil")
+	}
+	if src == nil {
+		return nil, errors.New("azure_blob: source is nil")
+	}
+	if err := ValidateConfig(c.Config); err != nil {
+		return nil, err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(c.Config, &cfg); err != nil {
+		return nil, fmt.Errorf("azure_blob: invalid config: %w", err)
+	}
+	specCfg := map[string]any{"selector": src.Selector, "source_kind": src.SourceKind}
+	for _, k := range []string{"account_name", "account_key", "sas_token", "oauth_token", "container_name"} {
+		if v, ok := cfg[k]; ok {
+			specCfg[k] = v
+		}
+	}
+	if len(src.Metadata) > 0 {
+		specCfg["metadata"] = json.RawMessage(src.Metadata)
+	}
+	raw, err := json.Marshal(specCfg)
+	if err != nil {
+		return nil, fmt.Errorf("azure_blob: marshal ingest spec: %w", err)
+	}
+	return &adapters.IngestSpec{Name: c.Name, Namespace: "default", Source: ConnectorType, Config: raw}, nil
 }

@@ -43,6 +43,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters/catalogbridge"
@@ -64,6 +65,23 @@ const (
 // reused across calls.
 type Adapter struct {
 	bridge *catalogbridge.Bridge
+	lister objectLister
+}
+
+type ObjectInfo struct {
+	Location     string
+	Size         int64
+	ETag         *string
+	LastModified time.Time
+}
+
+type ObjectListing struct {
+	CommonPrefixes []string
+	Objects        []ObjectInfo
+}
+
+type objectLister interface {
+	ListObjects(ctx context.Context, prefix string) (*ObjectListing, error)
 }
 
 // New returns a gcs [Adapter] backed by [http.DefaultClient].
@@ -86,6 +104,10 @@ func (a *Adapter) SetHTTPClient(client *http.Client) {
 	if client != nil {
 		a.bridge.HTTPClient = client
 	}
+}
+
+func (a *Adapter) SetObjectLister(lister objectLister) {
+	a.lister = lister
 }
 
 type gcsConfig struct {
@@ -123,7 +145,7 @@ func ValidateConfig(raw json.RawMessage) error {
 // branch of Rust's `discover_sources`, including the "must declare at
 // least one table" failure mode (the live bucket-listing branch is out
 // of scope for the Go port — see package doc).
-func (a *Adapter) DiscoverSources(_ context.Context, c *models.Connection, _ string) ([]adapters.Source, error) {
+func (a *Adapter) DiscoverSources(ctx context.Context, c *models.Connection, _ string) ([]adapters.Source, error) {
 	if c == nil {
 		return nil, errors.New("gcs: connection is nil")
 	}
@@ -134,10 +156,37 @@ func (a *Adapter) DiscoverSources(_ context.Context, c *models.Connection, _ str
 	if err != nil {
 		return nil, fmt.Errorf("gcs: %w", err)
 	}
+	listing, err := a.ListObjects(ctx, c)
+	if err != nil {
+		if len(sources) > 0 {
+			return sources, nil
+		}
+		return nil, fmt.Errorf("gcs list_with_delimiter failed: %w", err)
+	}
+	sources = append(sources, objectSources(c.Config, listing)...)
 	if len(sources) == 0 {
-		return nil, errors.New("gcs source did not expose any virtual tables; declare 'iceberg_tables[]' or 'delta_tables[]'")
+		return nil, errors.New("gcs source did not expose any virtual tables, prefixes or objects")
 	}
 	return sources, nil
+}
+
+func (a *Adapter) ListObjects(ctx context.Context, c *models.Connection) (*ObjectListing, error) {
+	if c == nil {
+		return nil, errors.New("gcs: connection is nil")
+	}
+	if a.lister == nil {
+		return nil, errors.New("gcs object lister is not configured")
+	}
+	var cfg struct {
+		Prefix    string `json:"prefix"`
+		Subfolder string `json:"subfolder"`
+	}
+	_ = json.Unmarshal(c.Config, &cfg)
+	prefix := strings.TrimSpace(cfg.Prefix)
+	if prefix == "" {
+		prefix = strings.TrimSpace(cfg.Subfolder)
+	}
+	return a.lister.ListObjects(ctx, prefix)
 }
 
 // QueryVirtualTable delegates to [catalogbridge.Bridge.QueryVirtualTable].
@@ -162,9 +211,71 @@ func (a *Adapter) StreamArrow(_ context.Context, _ *models.Connection, _ *adapte
 	return nil, fmt.Errorf("%w: gcs arrow streaming", adapters.ErrNotImplemented)
 }
 
-// BuildIngestSpec is deferred (CMA-8 explicitly defers the gcs ingest
-// variant). The dispatcher translates this into the existing "ingest is
-// not supported for connector type: gcs" envelope.
-func (a *Adapter) BuildIngestSpec(_ context.Context, _ *models.Connection, _ *adapters.Source) (*adapters.IngestSpec, error) {
-	return nil, fmt.Errorf("%w: gcs ingest spec", adapters.ErrNotImplemented)
+// BuildIngestSpec emits the object-storage descriptor forwarded to
+// ingestion-replication-service for the selected GCS source.
+func (a *Adapter) BuildIngestSpec(_ context.Context, c *models.Connection, src *adapters.Source) (*adapters.IngestSpec, error) {
+	if c == nil {
+		return nil, errors.New("gcs: connection is nil")
+	}
+	if src == nil {
+		return nil, errors.New("gcs: source is nil")
+	}
+	if err := ValidateConfig(c.Config); err != nil {
+		return nil, err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(c.Config, &cfg); err != nil {
+		return nil, fmt.Errorf("gcs: invalid config: %w", err)
+	}
+	specCfg := map[string]any{"selector": src.Selector, "source_kind": src.SourceKind}
+	for _, k := range []string{"bucket", "prefix", "subfolder", "access_token", "service_account_json", "application_default"} {
+		if v, ok := cfg[k]; ok {
+			specCfg[k] = v
+		}
+	}
+	if len(src.Metadata) > 0 {
+		specCfg["metadata"] = json.RawMessage(src.Metadata)
+	}
+	raw, err := json.Marshal(specCfg)
+	if err != nil {
+		return nil, fmt.Errorf("gcs: marshal ingest spec: %w", err)
+	}
+	return &adapters.IngestSpec{Name: c.Name, Namespace: "default", Source: ConnectorType, Config: raw}, nil
+}
+
+func objectSources(raw json.RawMessage, listing *ObjectListing) []adapters.Source {
+	if listing == nil {
+		return nil
+	}
+	var cfg struct {
+		Bucket string `json:"bucket"`
+	}
+	_ = json.Unmarshal(raw, &cfg)
+	out := make([]adapters.Source, 0, len(listing.CommonPrefixes)+len(listing.Objects))
+	for _, prefix := range listing.CommonPrefixes {
+		selector := prefix
+		meta, _ := json.Marshal(map[string]any{"bucket": cfg.Bucket, "uri": "gs://" + cfg.Bucket + "/" + selector, "kind": "prefix"})
+		out = append(out, adapters.Source{Selector: selector, DisplayName: selector, SourceKind: storePrefix + "_prefix", SupportsSync: true, SupportsZeroCopy: false, Metadata: meta})
+	}
+	for _, object := range listing.Objects {
+		selector := object.Location
+		format := detectFormat(selector)
+		meta, _ := json.Marshal(map[string]any{"bucket": cfg.Bucket, "uri": "gs://" + cfg.Bucket + "/" + selector, "size": object.Size, "format": format, "last_modified": object.LastModified.UTC().Format(time.RFC3339)})
+		out = append(out, adapters.Source{Selector: selector, DisplayName: selector, SourceKind: storePrefix + "_object", SupportsSync: true, SupportsZeroCopy: format == "csv" || format == "json", SourceSignature: object.ETag, Metadata: meta})
+	}
+	return out
+}
+
+func detectFormat(selector string) string {
+	lowered := strings.ToLower(selector)
+	switch {
+	case strings.HasSuffix(lowered, ".parquet"):
+		return "parquet"
+	case strings.HasSuffix(lowered, ".csv") || strings.HasSuffix(lowered, ".csv.gz"):
+		return "csv"
+	case strings.HasSuffix(lowered, ".json") || strings.HasSuffix(lowered, ".ndjson") || strings.HasSuffix(lowered, ".jsonl"):
+		return "json"
+	default:
+		return "binary"
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/models"
@@ -88,7 +89,7 @@ func TestDiscoveryFailsWhenNoTablesDeclared(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error when no inline tables declared")
 	}
-	if !strings.Contains(err.Error(), "did not expose any virtual tables") {
+	if !strings.Contains(err.Error(), "list_with_delimiter failed") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -129,11 +130,11 @@ func TestQueryVirtualTableFetchesRemoteCatalogResource(t *testing.T) {
 	defer server.Close()
 
 	cfgJSON, err := json.Marshal(map[string]any{
-		"bucket":                  "b",
-		"access_token":            "t",
-		"base_url":                server.URL,
-		"dataset_path_template":   "/datasets/{selector}",
-		"tables":                  []map[string]any{{"selector": "orders"}},
+		"bucket":                "b",
+		"access_token":          "t",
+		"base_url":              server.URL,
+		"dataset_path_template": "/datasets/{selector}",
+		"tables":                []map[string]any{{"selector": "orders"}},
 	})
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
@@ -164,6 +165,49 @@ func TestQueryVirtualTableValidatesGCSConfig(t *testing.T) {
 	}
 }
 
+func TestDiscoveryListsObjectsWithFakeClient(t *testing.T) {
+	t.Parallel()
+	etag := "abc"
+	a := New()
+	a.SetObjectLister(fakeLister{listing: &ObjectListing{
+		CommonPrefixes: []string{"raw/"},
+		Objects:        []ObjectInfo{{Location: "raw/orders.csv", Size: 12, ETag: &etag, LastModified: time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC)}},
+	}})
+	conn := &models.Connection{ConnectorType: ConnectorType, Config: json.RawMessage(`{"bucket":"b","access_token":"t","prefix":"raw"}`)}
+	got, err := a.DiscoverSources(context.Background(), conn, "")
+	if err != nil {
+		t.Fatalf("DiscoverSources: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].SourceKind != "gcs_prefix" || got[1].SourceKind != "gcs_object" {
+		t.Fatalf("source kinds = %q, %q", got[0].SourceKind, got[1].SourceKind)
+	}
+	if !got[1].SupportsZeroCopy || got[1].SourceSignature == nil || *got[1].SourceSignature != etag {
+		t.Fatalf("unexpected object source: %+v", got[1])
+	}
+}
+
+func TestBuildIngestSpecEmitsGCSDescriptor(t *testing.T) {
+	t.Parallel()
+	conn := &models.Connection{Name: "gcs-sync", ConnectorType: ConnectorType, Config: json.RawMessage(`{"bucket":"b","access_token":"t"}`)}
+	spec, err := New().BuildIngestSpec(context.Background(), conn, &adapters.Source{Selector: "raw/orders.csv", SourceKind: "gcs_object"})
+	if err != nil {
+		t.Fatalf("BuildIngestSpec: %v", err)
+	}
+	if spec.Source != ConnectorType {
+		t.Fatalf("source = %q", spec.Source)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(spec.Config, &cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if cfg["bucket"] != "b" || cfg["selector"] != "raw/orders.csv" {
+		t.Fatalf("config = %#v", cfg)
+	}
+}
+
 func TestUnsupportedCapabilitiesReturnNotImplemented(t *testing.T) {
 	t.Parallel()
 	a := New()
@@ -171,9 +215,15 @@ func TestUnsupportedCapabilitiesReturnNotImplemented(t *testing.T) {
 	if _, err := a.StreamArrow(context.Background(), conn, &adapters.Query{}, ""); !errors.Is(err, adapters.ErrNotImplemented) {
 		t.Fatalf("StreamArrow err = %v", err)
 	}
-	if _, err := a.BuildIngestSpec(context.Background(), conn, &adapters.Source{}); !errors.Is(err, adapters.ErrNotImplemented) {
-		t.Fatalf("BuildIngestSpec err = %v", err)
-	}
+}
+
+type fakeLister struct {
+	listing *ObjectListing
+	err     error
+}
+
+func (f fakeLister) ListObjects(context.Context, string) (*ObjectListing, error) {
+	return f.listing, f.err
 }
 
 func TestFactoryReturnsConnectorAdapter(t *testing.T) {

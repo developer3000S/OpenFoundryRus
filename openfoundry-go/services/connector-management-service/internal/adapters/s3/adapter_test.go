@@ -21,14 +21,14 @@ func TestValidateConfigRejectsMissingIdentity(t *testing.T) {
 	}
 }
 
-func TestValidateConfigRequiresInlineOpenTableCatalog(t *testing.T) {
+func TestValidateConfigRequiresCatalog(t *testing.T) {
 	t.Parallel()
 	cfg := json.RawMessage(`{"url":"s3://bucket/prefix/"}`)
 	err := ValidateConfig(cfg)
 	if err == nil {
 		t.Fatalf("expected error when iceberg_tables/delta_tables are missing")
 	}
-	if !strings.Contains(err.Error(), "iceberg_tables") {
+	if !strings.Contains(err.Error(), "inline catalog") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -115,18 +115,47 @@ func TestDiscoveryFailsWhenNoTablesDeclared(t *testing.T) {
 	}
 }
 
+func TestQueryVirtualTableServesInlineSampleRows(t *testing.T) {
+	t.Parallel()
+	cfg := json.RawMessage(`{
+		"url":"s3://bucket/prefix/",
+		"tables":[{"selector":"orders","sample_rows":[{"id":1},{"id":2}]}]
+	}`)
+	conn := &models.Connection{ConnectorType: ConnectorType, Config: cfg}
+	res, err := New().QueryVirtualTable(context.Background(), conn, &adapters.Query{Selector: "orders"}, "")
+	if err != nil {
+		t.Fatalf("QueryVirtualTable: %v", err)
+	}
+	if res.RowCount != 2 {
+		t.Fatalf("RowCount = %d, want 2", res.RowCount)
+	}
+}
+
 func TestUnsupportedCapabilitiesReturnNotImplemented(t *testing.T) {
 	t.Parallel()
 	a := New()
 	conn := &models.Connection{}
-	if _, err := a.QueryVirtualTable(context.Background(), conn, &adapters.Query{}, ""); !errors.Is(err, adapters.ErrNotImplemented) {
-		t.Fatalf("QueryVirtualTable err = %v", err)
-	}
 	if _, err := a.StreamArrow(context.Background(), conn, &adapters.Query{}, ""); !errors.Is(err, adapters.ErrNotImplemented) {
 		t.Fatalf("StreamArrow err = %v", err)
 	}
-	if _, err := a.BuildIngestSpec(context.Background(), conn, &adapters.Source{}); !errors.Is(err, adapters.ErrNotImplemented) {
-		t.Fatalf("BuildIngestSpec err = %v", err)
+}
+
+func TestBuildIngestSpecEmitsS3Descriptor(t *testing.T) {
+	t.Parallel()
+	conn := &models.Connection{Name: "s3-sync", ConnectorType: ConnectorType, Config: json.RawMessage(`{"url":"s3://bucket/prefix/","iceberg_tables":[{"selector":"db.t","metadata_location":"s3://bucket/x.json"}]}`)}
+	spec, err := New().BuildIngestSpec(context.Background(), conn, &adapters.Source{Selector: "db.t", SourceKind: "s3_iceberg_table"})
+	if err != nil {
+		t.Fatalf("BuildIngestSpec: %v", err)
+	}
+	if spec.Source != ConnectorType {
+		t.Fatalf("source = %q", spec.Source)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(spec.Config, &cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if cfg["url"] != "s3://bucket/prefix/" || cfg["selector"] != "db.t" {
+		t.Fatalf("config = %#v", cfg)
 	}
 }
 

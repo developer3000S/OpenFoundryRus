@@ -48,6 +48,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters/catalogbridge"
@@ -69,6 +70,23 @@ const (
 // reused across calls.
 type Adapter struct {
 	bridge *catalogbridge.Bridge
+	lister objectLister
+}
+
+type ObjectInfo struct {
+	Location     string
+	Size         int64
+	ETag         *string
+	LastModified time.Time
+}
+
+type ObjectListing struct {
+	CommonPrefixes []string
+	Objects        []ObjectInfo
+}
+
+type objectLister interface {
+	ListObjects(ctx context.Context, prefix string) (*ObjectListing, error)
 }
 
 // New returns a onelake [Adapter] backed by [http.DefaultClient].
@@ -91,6 +109,10 @@ func (a *Adapter) SetHTTPClient(client *http.Client) {
 	if client != nil {
 		a.bridge.HTTPClient = client
 	}
+}
+
+func (a *Adapter) SetObjectLister(lister objectLister) {
+	a.lister = lister
 }
 
 type onelakeConfig struct {
@@ -134,7 +156,7 @@ func ValidateConfig(raw json.RawMessage) error {
 // branch of Rust's `discover_sources`, including the "must declare at
 // least one table" failure mode (the live ABFS-listing branch is out
 // of scope for the Go port — see package doc).
-func (a *Adapter) DiscoverSources(_ context.Context, c *models.Connection, _ string) ([]adapters.Source, error) {
+func (a *Adapter) DiscoverSources(ctx context.Context, c *models.Connection, _ string) ([]adapters.Source, error) {
 	if c == nil {
 		return nil, errors.New("onelake: connection is nil")
 	}
@@ -145,10 +167,41 @@ func (a *Adapter) DiscoverSources(_ context.Context, c *models.Connection, _ str
 	if err != nil {
 		return nil, fmt.Errorf("onelake: %w", err)
 	}
+	listing, err := a.ListObjects(ctx, c)
+	if err != nil {
+		if len(sources) > 0 {
+			return sources, nil
+		}
+		return nil, fmt.Errorf("onelake list_with_delimiter failed: %w", err)
+	}
+	sources = append(sources, objectSources(c.Config, listing)...)
 	if len(sources) == 0 {
-		return nil, errors.New("onelake source did not expose any virtual tables; declare 'iceberg_tables[]' or 'delta_tables[]'")
+		return nil, errors.New("onelake source did not expose any virtual tables, prefixes or objects")
 	}
 	return sources, nil
+}
+
+func (a *Adapter) ListObjects(ctx context.Context, c *models.Connection) (*ObjectListing, error) {
+	if c == nil {
+		return nil, errors.New("onelake: connection is nil")
+	}
+	if a.lister == nil {
+		return nil, errors.New("onelake object lister is not configured")
+	}
+	var cfg struct {
+		Namespace string `json:"namespace"`
+		Prefix    string `json:"prefix"`
+	}
+	_ = json.Unmarshal(c.Config, &cfg)
+	ns := strings.TrimSpace(cfg.Namespace)
+	if ns == "" {
+		ns = "Files"
+	}
+	prefix := ns
+	if extra := strings.TrimLeft(strings.TrimSpace(cfg.Prefix), "/"); extra != "" {
+		prefix += "/" + extra
+	}
+	return a.lister.ListObjects(ctx, prefix)
 }
 
 // QueryVirtualTable delegates to [catalogbridge.Bridge.QueryVirtualTable].
@@ -172,9 +225,73 @@ func (a *Adapter) StreamArrow(_ context.Context, _ *models.Connection, _ *adapte
 	return nil, fmt.Errorf("%w: onelake arrow streaming", adapters.ErrNotImplemented)
 }
 
-// BuildIngestSpec is deferred (CMA-8 explicitly defers the onelake
-// ingest variant). The dispatcher translates this into the existing
-// "ingest is not supported for connector type: onelake" envelope.
-func (a *Adapter) BuildIngestSpec(_ context.Context, _ *models.Connection, _ *adapters.Source) (*adapters.IngestSpec, error) {
-	return nil, fmt.Errorf("%w: onelake ingest spec", adapters.ErrNotImplemented)
+// BuildIngestSpec emits the object-storage descriptor forwarded to
+// ingestion-replication-service for the selected OneLake source.
+func (a *Adapter) BuildIngestSpec(_ context.Context, c *models.Connection, src *adapters.Source) (*adapters.IngestSpec, error) {
+	if c == nil {
+		return nil, errors.New("onelake: connection is nil")
+	}
+	if src == nil {
+		return nil, errors.New("onelake: source is nil")
+	}
+	if err := ValidateConfig(c.Config); err != nil {
+		return nil, err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(c.Config, &cfg); err != nil {
+		return nil, fmt.Errorf("onelake: invalid config: %w", err)
+	}
+	specCfg := map[string]any{"selector": src.Selector, "source_kind": src.SourceKind}
+	for _, k := range []string{"workspace", "lakehouse", "namespace", "prefix", "oauth_token", "tenant_id", "client_id", "client_secret"} {
+		if v, ok := cfg[k]; ok {
+			specCfg[k] = v
+		}
+	}
+	if len(src.Metadata) > 0 {
+		specCfg["metadata"] = json.RawMessage(src.Metadata)
+	}
+	raw, err := json.Marshal(specCfg)
+	if err != nil {
+		return nil, fmt.Errorf("onelake: marshal ingest spec: %w", err)
+	}
+	return &adapters.IngestSpec{Name: c.Name, Namespace: "default", Source: ConnectorType, Config: raw}, nil
+}
+
+func objectSources(raw json.RawMessage, listing *ObjectListing) []adapters.Source {
+	if listing == nil {
+		return nil
+	}
+	var cfg struct {
+		Workspace string `json:"workspace"`
+		Lakehouse string `json:"lakehouse"`
+	}
+	_ = json.Unmarshal(raw, &cfg)
+	root := "abfss://" + cfg.Workspace + "@onelake.dfs.fabric.microsoft.com/" + cfg.Lakehouse + ".Lakehouse"
+	out := make([]adapters.Source, 0, len(listing.CommonPrefixes)+len(listing.Objects))
+	for _, prefix := range listing.CommonPrefixes {
+		selector := prefix
+		meta, _ := json.Marshal(map[string]any{"uri": root + "/" + selector, "kind": "prefix"})
+		out = append(out, adapters.Source{Selector: selector, DisplayName: selector, SourceKind: storePrefix + "_prefix", SupportsSync: true, SupportsZeroCopy: false, Metadata: meta})
+	}
+	for _, object := range listing.Objects {
+		selector := object.Location
+		format := detectFormat(selector)
+		meta, _ := json.Marshal(map[string]any{"uri": root + "/" + selector, "size": object.Size, "format": format, "last_modified": object.LastModified.UTC().Format(time.RFC3339)})
+		out = append(out, adapters.Source{Selector: selector, DisplayName: selector, SourceKind: storePrefix + "_object", SupportsSync: true, SupportsZeroCopy: format == "csv" || format == "json", SourceSignature: object.ETag, Metadata: meta})
+	}
+	return out
+}
+
+func detectFormat(selector string) string {
+	lowered := strings.ToLower(selector)
+	switch {
+	case strings.HasSuffix(lowered, ".parquet"):
+		return "parquet"
+	case strings.HasSuffix(lowered, ".csv") || strings.HasSuffix(lowered, ".csv.gz"):
+		return "csv"
+	case strings.HasSuffix(lowered, ".json") || strings.HasSuffix(lowered, ".ndjson") || strings.HasSuffix(lowered, ".jsonl"):
+		return "json"
+	default:
+		return "binary"
+	}
 }
