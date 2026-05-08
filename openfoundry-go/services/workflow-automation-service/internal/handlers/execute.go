@@ -179,7 +179,10 @@ func DispatchRun(ctx context.Context, s *state.AppState, workflow *models.Workfl
 	if workflow.Status != "active" && triggerType != "manual" {
 		return nil, errors.New("workflow must be active for automatic execution")
 	}
-	correlationID := uuid.New()
+	correlationID, err := uuid.NewV7()
+	if err != nil {
+		return nil, err
+	}
 	runID := event.DeriveRunID(workflow.ID, correlationID)
 	tenantIDStr := workflowTenantID(workflow)
 
@@ -304,13 +307,13 @@ func acceptedRun(workflowID, runID uuid.UUID, triggerType string, startedBy *uui
 		context = json.RawMessage(`{}`)
 	}
 	return &models.WorkflowRun{
-		ID:           runID,
-		WorkflowID:   workflowID,
-		TriggerType:  triggerType,
-		Status:       "running",
-		StartedBy:    startedBy,
-		Context:      context,
-		StartedAt:    time.Now().UTC(),
+		ID:          runID,
+		WorkflowID:  workflowID,
+		TriggerType: triggerType,
+		Status:      "running",
+		StartedBy:   startedBy,
+		Context:     context,
+		StartedAt:   time.Now().UTC(),
 	}
 }
 
