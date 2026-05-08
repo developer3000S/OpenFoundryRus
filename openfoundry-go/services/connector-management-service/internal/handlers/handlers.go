@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
+	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/domain"
 	syncdomain "github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/domain/sync"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/models"
@@ -94,6 +95,7 @@ type RuntimeConfig struct {
 
 type Handlers struct {
 	Repo              Store
+	AdapterRegistry   *adapters.Registry
 	MediaSetRuntime   MediaSetRuntime
 	IngestionRuntime  cmruntime.IngestionPort
 	DatasetVersioning cmruntime.DatasetVersioningPort

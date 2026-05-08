@@ -8,6 +8,17 @@ import (
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/models"
 )
 
+// ConnectionTestResult mirrors Rust's `connectors::ConnectionTestResult`
+// and is returned by adapters that can actively validate a configured
+// connection. Details is a raw JSON value so connector-specific payloads
+// pass through without the dispatcher knowing their schema.
+type ConnectionTestResult struct {
+	Success   bool            `json:"success"`
+	Message   string          `json:"message"`
+	LatencyMS int64           `json:"latency_ms"`
+	Details   json.RawMessage `json:"details,omitempty"`
+}
+
 // Source is the discovered-source descriptor returned by
 // [ConnectorAdapter.DiscoverSources]. It is an alias for
 // [models.DiscoveredSource] so callers can pass adapter results directly

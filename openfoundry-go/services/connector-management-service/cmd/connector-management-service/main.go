@@ -19,6 +19,8 @@ import (
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
 	"github.com/openfoundry/openfoundry-go/libs/observability"
+	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters"
+	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters/kafka"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/config"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/handlers"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/repo"
@@ -83,8 +85,12 @@ func main() {
 	}
 
 	jwt := authmw.NewJWTConfig(cfg.JWTSecret)
+	adapterRegistry := adapters.NewRegistry()
+	adapterRegistry.MustRegister("kafka", kafka.Factory())
+
 	h := &handlers.Handlers{
 		Repo:            store,
+		AdapterRegistry: adapterRegistry,
 		MediaSetRuntime: &handlers.HTTPMediaSetRuntime{MediaSetsBaseURL: cfg.MediaSetsServiceURL},
 		Config: handlers.RuntimeConfig{
 			DatasetServiceURL:            cfg.DatasetServiceURL,

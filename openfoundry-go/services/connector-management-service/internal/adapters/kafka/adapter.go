@@ -55,15 +55,6 @@ const sourceKindTopic = "kafka_topic"
 // matching Rust's `LIVE_PROBE_TIMEOUT` (5 s).
 const LiveProbeTimeout = 5 * time.Second
 
-// ConnectionTestResult mirrors Rust's `ConnectionTestResult` struct
-// (services/connector-management-service/src/connectors/mod.rs).
-type ConnectionTestResult struct {
-	Success   bool            `json:"success"`
-	Message   string          `json:"message"`
-	LatencyMS int64           `json:"latency_ms"`
-	Details   json.RawMessage `json:"details,omitempty"`
-}
-
 // SyncPayload mirrors Rust's `SyncPayload` (mod.rs) — the bytes the
 // sync runtime hands to dataset-versioning-service for a new dataset
 // version.
@@ -114,29 +105,29 @@ func ValidateConfig(raw json.RawMessage) error {
 // `bootstrap_servers` configured, it dials the broker for cluster
 // metadata; otherwise it returns a catalog-backed success summarising
 // the configured topic count.
-func (a *Adapter) TestConnection(ctx context.Context, raw json.RawMessage) (ConnectionTestResult, error) {
+func (a *Adapter) TestConnection(ctx context.Context, raw json.RawMessage) (adapters.ConnectionTestResult, error) {
 	if err := ValidateConfig(raw); err != nil {
-		return ConnectionTestResult{}, err
+		return adapters.ConnectionTestResult{}, err
 	}
 	topics, err := controlbus.ParseTopicEntries(raw, connectorLabel)
 	if err != nil {
-		return ConnectionTestResult{}, err
+		return adapters.ConnectionTestResult{}, err
 	}
 	bootstrap, hasBootstrap := controlbus.BootstrapServers(raw)
 	if hasBootstrap {
 		outcome, err := controlbus.TestConnection(ctx, bootstrap, a.timeout())
 		if err != nil {
-			return ConnectionTestResult{}, err
+			return adapters.ConnectionTestResult{}, err
 		}
 		details := mustMarshalJSON(map[string]any{
-			"bootstrap_servers":       bootstrap,
-			"broker_count":            outcome.BrokerCount,
-			"cluster_topic_count":     outcome.TopicCount,
-			"originating_broker":      outcome.OriginatingBroker,
-			"configured_topic_count":  len(topics),
-			"mode":                    "live",
+			"bootstrap_servers":      bootstrap,
+			"broker_count":           outcome.BrokerCount,
+			"cluster_topic_count":    outcome.TopicCount,
+			"originating_broker":     outcome.OriginatingBroker,
+			"configured_topic_count": len(topics),
+			"mode":                   "live",
 		})
-		return ConnectionTestResult{
+		return adapters.ConnectionTestResult{
 			Success: true,
 			Message: fmt.Sprintf(
 				"connected to kafka cluster (%d broker(s), %d topic(s))",
@@ -151,7 +142,7 @@ func (a *Adapter) TestConnection(ctx context.Context, raw json.RawMessage) (Conn
 		"topic_count":       len(topics),
 		"mode":              "catalog_backed",
 	})
-	return ConnectionTestResult{
+	return adapters.ConnectionTestResult{
 		Success:   true,
 		Message:   fmt.Sprintf("validated kafka catalog with %d topic(s)", len(topics)),
 		LatencyMS: 0,
@@ -178,9 +169,9 @@ func (a *Adapter) DiscoverSources(ctx context.Context, c *models.Connection, _ s
 		out := make([]adapters.Source, 0, len(topics))
 		for _, t := range topics {
 			meta := mustMarshalJSON(map[string]any{
-				"topic":           t.Name,
-				"partitions":      t.Partitions,
-				"discovered_via":  "kafka_metadata",
+				"topic":          t.Name,
+				"partitions":     t.Partitions,
+				"discovered_via": "kafka_metadata",
 			})
 			out = append(out, basicDiscoveredSource(t.Name, t.Name, sourceKindTopic, meta))
 		}
@@ -470,4 +461,3 @@ func mustMarshalJSON(v any) json.RawMessage {
 	}
 	return b
 }
-

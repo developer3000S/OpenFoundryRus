@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/domain"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/models"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/workers"
@@ -621,6 +623,10 @@ func materializeArrowStream(columns []string, rows []json.RawMessage) ([]byte, e
 	return buf.Bytes(), nil
 }
 
+type connectionTestAdapter interface {
+	TestConnection(ctx context.Context, raw json.RawMessage) (adapters.ConnectionTestResult, error)
+}
+
 func (h *Handlers) TestConnection(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireClaims(w, r); !ok {
 		return
@@ -639,13 +645,37 @@ func (h *Handlers) TestConnection(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusNotFound, "connection not found")
 		return
 	}
-	ok := c.ConnectorType != ""
+
+	result := adapters.ConnectionTestResult{
+		Success:   false,
+		Message:   fmt.Sprintf("unsupported connector type: %s", c.ConnectorType),
+		LatencyMS: 0,
+	}
+	if h.AdapterRegistry != nil {
+		adapter, err := h.AdapterRegistry.Lookup(c.ConnectorType)
+		if err != nil {
+			result.Message = err.Error()
+		} else if tester, ok := adapter.(connectionTestAdapter); ok {
+			if tested, err := tester.TestConnection(r.Context(), c.Config); err != nil {
+				result.Message = err.Error()
+			} else {
+				result = tested
+			}
+		} else {
+			result.Message = fmt.Sprintf("test_connection is not supported for connector type: %s", c.ConnectorType)
+		}
+	}
+
 	status := "error"
-	if ok {
+	if result.Success {
 		status = "connected"
 	}
 	_, _ = h.Repo.UpdateConnection(r.Context(), id, &models.UpdateConnectionRequest{Status: &status})
-	writeJSON(w, http.StatusOK, map[string]any{"success": ok, "message": "connection configuration accepted", "latency_ms": 0, "details": map[string]any{"connector_type": c.ConnectorType}})
+	var latency any
+	if result.Success || result.LatencyMS != 0 {
+		latency = result.LatencyMS
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": result.Success, "message": result.Message, "latency_ms": latency, "details": result.Details})
 }
 
 func (h *Handlers) InvokeWebhook(w http.ResponseWriter, r *http.Request) {

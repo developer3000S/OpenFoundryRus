@@ -51,6 +51,11 @@ Machine-readable pending errors use this shape:
 
 
 
+
+## 2026-05-08 TestConnection adapter dispatch update
+
+This slice closes the `partial` state for the connection test route shape without touching ingestion-replication. Go now carries a shared `ConnectionTestResult` adapter contract and `h.TestConnection` dispatches to a registered adapter when it implements `TestConnection`. Adapter successes and failures both return HTTP 200 with the Rust-compatible `success`, `message`, `latency_ms`, and `details` envelope, and the stored connection status is updated to `connected` or `error`. The production binary wires the Kafka adapter, whose catalog-backed and live broker probes were already ported; connectors without a registered test adapter now produce an explicit failed test result instead of the previous optimistic stub.
+
 ## 2026-05-08 background workers update
 
 This slice ports the Rust background-worker primitives for connector-management-service:
@@ -127,7 +132,7 @@ Remaining non-parity gaps are connector-runtime depth rather than HTTP route ava
 | POST | `/api/v1/data-connection/sources` | `handlers::connections::create_connection` | `/api/v1/data-connection/sources` | `h.CreateConnection` | implemented | `connections`; `20260419100002_initial_connectors.sql` | connection handler tests |
 | GET | `/api/v1/data-connection/sources/{id}` | `handlers::connections::get_connection` | `/api/v1/data-connection/sources/{id}` | `h.GetConnection` | implemented | `connections`; `20260419100002_initial_connectors.sql` | connection handler tests |
 | DELETE | `/api/v1/data-connection/sources/{id}` | `handlers::connections::delete_connection` | `/api/v1/data-connection/sources/{id}` | `h.DeleteConnection` | implemented | `connections`; `20260419100002_initial_connectors.sql` | connection handler tests |
-| POST | `/api/v1/data-connection/sources/{id}/test-connection` | `handlers::connections::test_connection` | `/api/v1/data-connection/sources/{id}/test-connection` | `h.TestConnection` | partial | `connections`; connector adapter modules | connector adapter tests, real-broker/minio/e2e tests |
+| POST | `/api/v1/data-connection/sources/{id}/test-connection` | `handlers::connections::test_connection` | `/api/v1/data-connection/sources/{id}/test-connection` | `h.TestConnection` | implemented (adapter-backed for registered test adapters; unsupported connectors return Rust-compatible failed test result) | `connections`; connector adapter modules | connector adapter tests, real-broker/minio/e2e tests |
 | GET | `/api/v1/data-connection/sources/{id}/capabilities` | `handlers::catalog::get_connection_capabilities` | `/api/v1/data-connection/sources/{id}/capabilities` | `h.GetConnectionCapabilities` | implemented | `connections`, connector catalog | connector/domain capability tests |
 
 ### credentials vending/storage
@@ -206,7 +211,7 @@ Go now carries Rust-parity source policy binding handlers over `source_policy_bi
 | POST | `/api/v1/connections` | `handlers::connections::create_connection` | `/api/v1/connections` | `h.CreateConnection` | implemented | `connections`; `20260419100002_initial_connectors.sql` | connection handler tests |
 | GET | `/api/v1/connections/{id}` | `handlers::connections::get_connection` | `/api/v1/connections/{id}` | `h.GetConnection` | implemented | `connections`; `20260419100002_initial_connectors.sql` | connection handler tests |
 | DELETE | `/api/v1/connections/{id}` | `handlers::connections::delete_connection` | `/api/v1/connections/{id}` | `h.DeleteConnection` | implemented | `connections`; `20260419100002_initial_connectors.sql` | connection handler tests |
-| POST | `/api/v1/connections/{id}/test` | `handlers::connections::test_connection` | `/api/v1/connections/{id}/test` | `h.TestConnection` | partial | `connections`, connector adapters | connector adapter tests |
+| POST | `/api/v1/connections/{id}/test` | `handlers::connections::test_connection` | `/api/v1/connections/{id}/test` | `h.TestConnection` | implemented (adapter-backed for registered test adapters; unsupported connectors return Rust-compatible failed test result) | `connections`, connector adapters | connector adapter tests |
 
 ### webhooks
 

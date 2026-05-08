@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
+	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/handlers"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/models"
 	cmruntime "github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/runtime"
@@ -75,6 +76,82 @@ func TestListConnectionsRequiresAuth(t *testing.T) {
 	assert.Equal(t, 401, rec.Code)
 }
 
+type testConnectionAdapter struct {
+	result adapters.ConnectionTestResult
+	err    error
+}
+
+func (a testConnectionAdapter) TestConnection(_ context.Context, _ json.RawMessage) (adapters.ConnectionTestResult, error) {
+	return a.result, a.err
+}
+func (a testConnectionAdapter) DiscoverSources(context.Context, *models.Connection, string) ([]adapters.Source, error) {
+	return nil, adapters.ErrNotImplemented
+}
+func (a testConnectionAdapter) QueryVirtualTable(context.Context, *models.Connection, *adapters.Query, string) (*adapters.Result, error) {
+	return nil, adapters.ErrNotImplemented
+}
+func (a testConnectionAdapter) StreamArrow(context.Context, *models.Connection, *adapters.Query, string) (adapters.ArrowStream, error) {
+	return adapters.EmptyArrowStream{}, adapters.ErrNotImplemented
+}
+func (a testConnectionAdapter) BuildIngestSpec(context.Context, *models.Connection, *adapters.Source) (*adapters.IngestSpec, error) {
+	return nil, adapters.ErrNotImplemented
+}
+
+func TestTestConnectionUsesAdapterResultAndUpdatesStatus(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	store.connections[0].ConnectorType = "kafka"
+	store.connections[0].Status = "disconnected"
+	registry := adapters.NewRegistry()
+	registry.MustRegister("kafka", adapters.SingletonFactory(testConnectionAdapter{result: adapters.ConnectionTestResult{
+		Success:   true,
+		Message:   "validated kafka catalog with 1 topic(s)",
+		LatencyMS: 7,
+		Details:   json.RawMessage(`{"mode":"catalog_backed","topic_count":1}`),
+	}}))
+	h := &handlers.Handlers{Repo: store, AdapterRegistry: registry}
+	req := httptest.NewRequest(http.MethodPost, "/connections/"+store.connections[0].ID.String()+"/test", nil)
+	req = req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner}))
+	rec := httptest.NewRecorder()
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", store.connections[0].ID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	h.TestConnection(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "connected", store.connections[0].Status)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, true, body["success"])
+	assert.Equal(t, "validated kafka catalog with 1 topic(s)", body["message"])
+	assert.Equal(t, float64(7), body["latency_ms"])
+	assert.Equal(t, map[string]any{"mode": "catalog_backed", "topic_count": float64(1)}, body["details"])
+}
+
+func TestTestConnectionAdapterErrorMarksConnectionError(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	store.connections[0].ConnectorType = "kafka"
+	registry := adapters.NewRegistry()
+	registry.MustRegister("kafka", adapters.SingletonFactory(testConnectionAdapter{err: assert.AnError}))
+	h := &handlers.Handlers{Repo: store, AdapterRegistry: registry}
+	req := httptest.NewRequest(http.MethodPost, "/connections/"+store.connections[0].ID.String()+"/test", nil)
+	req = req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner}))
+	rec := httptest.NewRecorder()
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", store.connections[0].ID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	h.TestConnection(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "error", store.connections[0].Status)
+	assert.Contains(t, rec.Body.String(), assert.AnError.Error())
+}
+
 type fakeStore struct {
 	connections   []models.Connection
 	syncJobs      map[uuid.UUID][]models.SyncJob
@@ -114,8 +191,22 @@ func (f *fakeStore) CreateConnection(_ context.Context, body *models.CreateConne
 	c := models.Connection{ID: uuid.New(), Name: body.Name, ConnectorType: body.ConnectorType, Config: body.Config, OwnerID: ownerID}
 	return &c, nil
 }
-func (f *fakeStore) UpdateConnection(_ context.Context, id uuid.UUID, _ *models.UpdateConnectionRequest) (*models.Connection, error) {
-	return f.GetConnection(context.Background(), id)
+func (f *fakeStore) UpdateConnection(_ context.Context, id uuid.UUID, body *models.UpdateConnectionRequest) (*models.Connection, error) {
+	for i := range f.connections {
+		if f.connections[i].ID == id {
+			if body.Status != nil {
+				f.connections[i].Status = *body.Status
+			}
+			if body.Name != nil {
+				f.connections[i].Name = *body.Name
+			}
+			if body.Config != nil {
+				f.connections[i].Config = body.Config
+			}
+			return &f.connections[i], nil
+		}
+	}
+	return nil, nil
 }
 func (f *fakeStore) DeleteConnection(_ context.Context, id uuid.UUID) (bool, error) {
 	c, _ := f.GetConnection(context.Background(), id)
