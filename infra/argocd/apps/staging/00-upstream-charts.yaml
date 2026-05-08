@@ -1,0 +1,93 @@
+# Upstream Helm chart releases for the `staging` environment.
+# See infra/argocd/apps/dev/00-upstream-charts.yaml for the structural
+# explanation; only the list of releases differs.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: openfoundry-upstream-staging
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - list:
+        elements:
+          - name: cert-manager
+            namespace: cert-manager
+            wave: "0"
+            chart: cert-manager
+            chartRepo: https://charts.jetstack.io
+            chartVersion: v1.20.2
+            valuesPath: infra/helm/operators/cert-manager/values.yaml
+
+          - name: cnpg
+            namespace: cnpg-system
+            wave: "0"
+            chart: cloudnative-pg
+            chartRepo: https://cloudnative-pg.github.io/charts
+            chartVersion: "0.28.0"
+            valuesPath: infra/helm/operators/cnpg/values.yaml
+
+          - name: k8ssandra-operator
+            namespace: k8ssandra-operator
+            wave: "0"
+            chart: k8ssandra-operator
+            chartRepo: https://helm.k8ssandra.io/stable
+            chartVersion: "1.32.0"
+            valuesPath: infra/helm/operators/k8ssandra/values.yaml
+
+          - name: strimzi-operator
+            namespace: kafka
+            wave: "0"
+            chart: strimzi-kafka-operator
+            chartRepo: https://strimzi.io/charts
+            chartVersion: "1.0.0"
+            valuesPath: infra/helm/operators/strimzi/values.yaml
+
+          - name: kite
+            namespace: kite
+            wave: "5"
+            chart: kite
+            chartRepo: https://kite-org.github.io/kite/
+            chartVersion: "0.11.0"
+            valuesPath: infra/helm/infra/kite/values.yaml
+
+  template:
+    metadata:
+      name: '{{ .name }}'
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{ .wave }}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: openfoundry
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ .namespace }}'
+      sources:
+        - chart: '{{ .chart }}'
+          repoURL: '{{ .chartRepo }}'
+          targetRevision: '{{ .chartVersion }}'
+          helm:
+            releaseName: '{{ .name }}'
+            valueFiles:
+              - $values/{{ .valuesPath }}
+        - repoURL: https://github.com/DioCrafts/OpenFoundry.git
+          targetRevision: main
+          ref: values
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - ApplyOutOfSyncOnly=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 10m

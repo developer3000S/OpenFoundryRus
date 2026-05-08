@@ -1,0 +1,199 @@
+# Values for the upstream argo/argo-cd Helm chart.
+#
+# Consumed by infra/scripts/argocd-bootstrap.sh on first install and
+# afterwards by the self-managed Application defined in
+# bootstrap/argocd-self-managed.yaml.
+#
+# Chart docs: https://github.com/argoproj/argo-helm/tree/main/charts/argo-cd
+
+global:
+  domain: argocd.openfoundry.local
+
+crds:
+  install: true
+  keep: true
+
+configs:
+  params:
+    # TLS terminated by the ingress; keep the server itself plaintext to
+    # avoid double-encryption and self-signed cert headaches in dev.
+    server.insecure: "true"
+    # Auto-detect the right ApplicationSet shard count.
+    applicationsetcontroller.enable.progressive.syncs: "true"
+    controller.diff.server.side: "true"
+
+  cm:
+    # Identify resources by annotation, not by label, so we don't fight
+    # other tools that already use labels.
+    application.resourceTrackingMethod: annotation
+    timeout.reconciliation: 60s
+    timeout.hard.reconciliation: 0s
+
+    # Allow the openfoundry namespace to host Applications too (we keep
+    # ours in `argocd`, but this lets users add per-tenant Applications
+    # later without re-bootstrapping).
+    application.namespaces: "argocd,openfoundry"
+
+    # Server-side apply by default for everything ArgoCD manages.
+    resource.compareoptions: |
+      ignoreAggregatedRoles: true
+
+    # Enable the Web Terminal only for the admin role; off otherwise.
+    exec.enabled: "false"
+
+    # Status badges (consumed by README/dashboards).
+    statusbadge.enabled: "true"
+
+    # Helm + Kustomize build options.
+    kustomize.buildOptions: --enable-helm --load-restrictor=LoadRestrictionsNone
+    helm.valuesFileSchemes: >-
+      secrets+gpg-import, secrets+gpg-import-kubernetes,
+      secrets+age-import, secrets+age-import-kubernetes,
+      secrets, https, http
+
+  rbac:
+    policy.default: role:readonly
+    policy.csv: |
+      p, role:openfoundry-admin, applications, *, openfoundry/*, allow
+      p, role:openfoundry-admin, projects, *, openfoundry, allow
+      p, role:openfoundry-admin, repositories, *, *, allow
+      p, role:openfoundry-admin, clusters, *, *, allow
+      g, openfoundry-admin, role:openfoundry-admin
+    scopes: "[groups,email]"
+
+  secret:
+    # The chart creates the bootstrap admin secret when this is true.
+    # Rotate after first login; long-term auth should go through SSO.
+    createSecret: true
+
+# ─── server ──────────────────────────────────────────────────────────
+server:
+  replicas: 2
+
+  # Drop privileges hard.
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  ingress:
+    enabled: false  # opt in per-environment; off by default to avoid
+                    # accidentally exposing a fresh install.
+
+# ─── repoServer ──────────────────────────────────────────────────────
+repoServer:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ─── applicationSet ──────────────────────────────────────────────────
+applicationSet:
+  enabled: true
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ─── controller ──────────────────────────────────────────────────────
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+# ─── redis ───────────────────────────────────────────────────────────
+redis:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ─── dex ─────────────────────────────────────────────────────────────
+# Off by default. Enable + configure when wiring SSO (OIDC/SAML).
+dex:
+  enabled: false
+
+# ─── notifications ───────────────────────────────────────────────────
+notifications:
+  enabled: true
+  # Slack webhook is read from the argocd-notifications-secret created
+  # by the bootstrap script (empty by default, notifications no-op until
+  # the user populates it). Templates and triggers are configured in
+  # infra/argocd/notifications/.
+  argocdUrl: https://argocd.openfoundry.local
+
+  # Subscriptions defined globally so any Application that opts in via
+  # the `notifications.argoproj.io/subscribe.<trigger>.<destination>`
+  # annotation gets routed correctly. Per-Application subscriptions
+  # can be added later.
+  notifiers:
+    service.slack: |
+      token: $slack-token
+  triggers:
+    trigger.on-sync-failed: |
+      - description: Application sync has failed
+        send: [app-sync-failed]
+        when: app.status.operationState.phase in ['Error', 'Failed']
+    trigger.on-health-degraded: |
+      - description: Application became unhealthy
+        send: [app-health-degraded]
+        when: app.status.health.status == 'Degraded'
+    trigger.on-sync-succeeded: |
+      - description: Application sync completed successfully
+        send: [app-sync-succeeded]
+        when: app.status.operationState.phase in ['Succeeded']
+  templates:
+    template.app-sync-failed: |
+      message: |
+        :x: Application *{{.app.metadata.name}}* sync failed at {{.app.status.operationState.finishedAt}}.
+        Project: {{.app.spec.project}}
+        Repo: {{.app.spec.source.repoURL}}
+        Revision: {{.app.status.sync.revision}}
+        Reason: {{.app.status.operationState.message}}
+      slack:
+        attachments: |
+          [{
+            "title": "{{ .app.metadata.name}}",
+            "title_link":"{{.context.argocdUrl}}/applications/{{.app.metadata.name}}",
+            "color": "#E96D76",
+            "fields": [
+              { "title": "Sync Status", "value": "{{.app.status.sync.status}}", "short": true },
+              { "title": "Repository", "value": "{{.app.spec.source.repoURL}}", "short": true }
+            ]
+          }]
+    template.app-health-degraded: |
+      message: |
+        :warning: Application *{{.app.metadata.name}}* is degraded.
+        Project: {{.app.spec.project}}
+    template.app-sync-succeeded: |
+      message: |
+        :white_check_mark: *{{.app.metadata.name}}* sync ok @ revision {{.app.status.sync.revision}}.

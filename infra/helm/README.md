@@ -1,8 +1,15 @@
 # `infra/helm/` — single Helm tree
 
-Everything OpenFoundry runs on Kubernetes is defined here, orchestrated
-by **one** [`helmfile.yaml.gotmpl`](helmfile.yaml.gotmpl). No Flux, no
-ArgoCD, no separate "platform" vs "apps" Helmfiles.
+Every Helm chart OpenFoundry runs on Kubernetes is defined here. The
+**default** way to deploy this tree is GitOps via Argo CD — see
+[`infra/argocd/README.md`](../argocd/README.md). One command
+(`make gitops-bootstrap`) bootstraps the cluster, after which every
+commit to `main` is reconciled automatically.
+
+The legacy [`helmfile.yaml.gotmpl`](helmfile.yaml.gotmpl) is kept as a
+**break-glass** path: useful for offline `template`/`diff`, for the
+very first cluster bring-up before Argo CD itself is healthy, and for
+local testing without an Argo CD install.
 
 ## Tree
 

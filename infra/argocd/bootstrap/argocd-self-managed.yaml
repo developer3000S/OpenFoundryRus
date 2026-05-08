@@ -1,0 +1,56 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    # Lowest wave — ArgoCD itself reconciles before the rest of the
+    # platform. Any change to argocd-helm-values.yaml in Git is picked
+    # up automatically.
+    argocd.argoproj.io/sync-wave: "-100"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: openfoundry
+  sources:
+    - chart: argo-cd
+      repoURL: https://argoproj.github.io/argo-helm
+      targetRevision: 7.7.10
+      helm:
+        releaseName: argocd
+        valueFiles:
+          - $values/infra/argocd/argocd-helm-values.yaml
+    - repoURL: https://github.com/DioCrafts/OpenFoundry.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ApplyOutOfSyncOnly=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m
+  ignoreDifferences:
+    # Helm chart re-stamps these fields on every release; they create
+    # noise in the diff but no behaviour change.
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: ""
+      kind: Secret
+      name: argocd-secret
+      jsonPointers:
+        - /data/admin.password
+        - /data/admin.passwordMtime

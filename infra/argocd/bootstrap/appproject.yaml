@@ -1,0 +1,130 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: openfoundry
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: |
+    OpenFoundry root project. Owns every operator, infrastructure cluster
+    and application release reconciled by Argo CD. Whitelists below define
+    the only repositories, clusters and namespaces this project is allowed
+    to deploy from / to.
+
+  # ── Source whitelist ─────────────────────────────────────────────
+  # Git repositories Argo CD is allowed to read manifests from.
+  sourceRepos:
+    - https://github.com/DioCrafts/OpenFoundry.git
+    - https://github.com/DioCrafts/OpenFoundry
+    # Upstream Helm chart registries used by operators / dependencies.
+    - https://charts.jetstack.io
+    - https://cloudnative-pg.github.io/charts
+    - https://helm.k8ssandra.io/stable
+    - https://strimzi.io/charts
+    - https://charts.rook.io/release
+    - https://downloads.apache.org/flink/flink-kubernetes-operator-1.13.0/
+    - https://lakekeeper.github.io/lakekeeper-charts
+    - https://kite-org.github.io/kite/
+    - https://argoproj.github.io/argo-helm
+
+  # ── Destination whitelist ────────────────────────────────────────
+  # Cluster + namespace pairs Argo CD is allowed to write into.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: openfoundry
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+    - server: https://kubernetes.default.svc
+      namespace: cert-manager
+    - server: https://kubernetes.default.svc
+      namespace: cnpg-system
+    - server: https://kubernetes.default.svc
+      namespace: k8ssandra-operator
+    - server: https://kubernetes.default.svc
+      namespace: kafka
+    - server: https://kubernetes.default.svc
+      namespace: rook-ceph
+    - server: https://kubernetes.default.svc
+      namespace: flink
+    - server: https://kubernetes.default.svc
+      namespace: lakekeeper
+    - server: https://kubernetes.default.svc
+      namespace: trino
+    - server: https://kubernetes.default.svc
+      namespace: spark-operator
+    - server: https://kubernetes.default.svc
+      namespace: observability
+    - server: https://kubernetes.default.svc
+      namespace: registry
+    - server: https://kubernetes.default.svc
+      namespace: kite
+
+  # ── Resource whitelists ──────────────────────────────────────────
+  # Cluster-scoped resources allowed (operators install CRDs and RBAC).
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+    - group: storage.k8s.io
+      kind: StorageClass
+    - group: scheduling.k8s.io
+      kind: PriorityClass
+    - group: policy
+      kind: PodSecurityPolicy
+    - group: cert-manager.io
+      kind: ClusterIssuer
+    - group: networking.k8s.io
+      kind: IngressClass
+    - group: gateway.networking.k8s.io
+      kind: GatewayClass
+    - group: security-profiles-operator.x-k8s.io
+      kind: ProfileBinding
+    - group: argoproj.io
+      kind: ClusterWorkflowTemplate
+
+  # Namespaced resources allowed (everything by default).
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  # ── Roles ────────────────────────────────────────────────────────
+  # Per-project roles for fine-grained automation tokens.
+  roles:
+    - name: read-only
+      description: Read access to all openfoundry Applications.
+      policies:
+        - p, proj:openfoundry:read-only, applications, get, openfoundry/*, allow
+        - p, proj:openfoundry:read-only, projects, get, openfoundry, allow
+      groups:
+        - openfoundry-readers
+
+    - name: ci-syncer
+      description: CI bot that can trigger syncs after a successful pipeline.
+      policies:
+        - p, proj:openfoundry:ci-syncer, applications, get, openfoundry/*, allow
+        - p, proj:openfoundry:ci-syncer, applications, sync, openfoundry/*, allow
+
+  # Forbid any orphan resource (Argo CD will warn on resources outside
+  # an Application).
+  orphanedResources:
+    warn: true
+
+  # Sync windows: prod is locked outside business hours by default.
+  # Override or remove this when 24/7 deployment is desired.
+  syncWindows:
+    - kind: allow
+      schedule: "* * * * *"
+      duration: 24h
+      applications:
+        - "*"
+      manualSync: true

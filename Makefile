@@ -108,3 +108,46 @@ ci: tidy vet lint test ## Run the full CI gate locally.
 .PHONY: clean
 clean: ## Remove build artifacts.
 	rm -rf $(BIN_DIR) $(COVERAGE_FILE) coverage.html
+
+# ---------------------------------------------------------------------------
+# GitOps (ArgoCD)
+# ---------------------------------------------------------------------------
+GITOPS_ENV ?= dev
+
+.PHONY: gitops-bootstrap
+gitops-bootstrap: ## Install ArgoCD + register the app-of-apps for $$GITOPS_ENV (default dev).
+	./infra/scripts/argocd-bootstrap.sh $(GITOPS_ENV)
+
+.PHONY: gitops-status
+gitops-status: ## Show every Application + ApplicationSet managed by ArgoCD.
+	@command -v kubectl >/dev/null 2>&1 || { echo "kubectl not found"; exit 1; }
+	@echo ">>> Applications:"
+	@kubectl -n argocd get applications -o wide || true
+	@echo
+	@echo ">>> ApplicationSets:"
+	@kubectl -n argocd get applicationsets -o wide || true
+
+.PHONY: gitops-sync
+gitops-sync: ## Force-sync every Application (refresh + sync). Useful after a Git push.
+	@command -v kubectl >/dev/null 2>&1 || { echo "kubectl not found"; exit 1; }
+	@for app in $$(kubectl -n argocd get applications -o name); do \
+		echo ">>> refreshing $$app"; \
+		kubectl -n argocd annotate $$app argocd.argoproj.io/refresh=hard --overwrite >/dev/null; \
+	done
+	@echo "Refresh requested. Watch progress with: make gitops-status"
+
+.PHONY: gitops-ui
+gitops-ui: ## Port-forward the ArgoCD UI to https://localhost:8080.
+	@echo ">>> ArgoCD UI: https://localhost:8080"
+	@echo ">>> admin password: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+	kubectl -n argocd port-forward svc/argocd-server 8080:443
+
+.PHONY: gitops-uninstall
+gitops-uninstall: ## Remove ArgoCD + the app-of-apps. Does NOT delete the workloads ArgoCD synced.
+	-kubectl -n argocd delete application openfoundry-root --wait=false 2>/dev/null
+	-kubectl -n argocd delete applicationsets --all --wait=false 2>/dev/null
+	-kubectl -n argocd delete applications --all --wait=false 2>/dev/null
+	-kubectl -n argocd delete appproject openfoundry --wait=false 2>/dev/null
+	-helm -n argocd uninstall argocd 2>/dev/null
+	-kubectl delete namespace argocd --wait=false 2>/dev/null
+	@echo "ArgoCD removed. Workloads it deployed are still in the cluster (use helm/kubectl to clean them)."

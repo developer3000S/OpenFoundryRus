@@ -1,0 +1,184 @@
+# In-tree Helm chart releases for the `dev` environment.
+#
+# Each list entry references a chart living under `infra/helm/{infra,apps}/`
+# in this repository. The Helm chart and the values files come from the
+# same repo, so we use a single source pointed at the chart path and
+# reference profile-wide overlays via the `$values` ref.
+#
+# `templatePatch` is required (instead of putting the source block in
+# `template`) because we iterate over a per-element list of value files
+# whose length differs between releases — straight `template:` cannot
+# express a dynamic-length list.
+#
+# Sync waves:
+#   10 — infra clusters / CRs (postgres, cassandra, kafka, lakekeeper, …)
+#   20 — of-platform (gateway, identity, authz, tenancy)
+#   30 — of-data-engine, of-ontology, of-ml-aip, of-apps-ops (in parallel)
+#   40 — of-web (depends on the gateway being reachable)
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: openfoundry-intree-dev
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - list:
+        elements:
+          # ─── Layer 2: infra clusters / CRs ─────────────────────
+          - name: postgres-clusters
+            namespace: openfoundry
+            wave: "10"
+            chartPath: infra/helm/infra/postgres-clusters
+            valueFiles:
+              - values.yaml
+              - values-dev.yaml
+            extraValueRefs: []
+
+          - name: cassandra-cluster
+            namespace: k8ssandra-operator
+            wave: "10"
+            chartPath: infra/helm/infra/cassandra-cluster
+            valueFiles:
+              - values.yaml
+              - values-dev.yaml
+            extraValueRefs: []
+
+          - name: kafka-cluster
+            namespace: kafka
+            wave: "10"
+            chartPath: infra/helm/infra/kafka-cluster
+            valueFiles:
+              - values.yaml
+              - values-dev.yaml
+            extraValueRefs: []
+
+          - name: lakekeeper
+            namespace: lakekeeper
+            wave: "10"
+            chartPath: infra/helm/infra/lakekeeper
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: debezium
+            namespace: kafka
+            wave: "10"
+            chartPath: infra/helm/infra/debezium
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: local-registry
+            namespace: registry
+            wave: "10"
+            chartPath: infra/helm/infra/local-registry
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          # ─── Layer 3: OpenFoundry application charts ───────────
+          - name: of-platform
+            namespace: openfoundry
+            wave: "20"
+            chartPath: infra/helm/apps/of-platform
+            valueFiles:
+              - values.yaml
+              - values-dev.yaml
+            extraValueRefs:
+              - infra/helm/profiles/values-dev.yaml
+
+          - name: of-data-engine
+            namespace: openfoundry
+            wave: "30"
+            chartPath: infra/helm/apps/of-data-engine
+            valueFiles:
+              - values.yaml
+              - values-dev.yaml
+            extraValueRefs:
+              - infra/helm/profiles/values-dev.yaml
+
+          - name: of-ontology
+            namespace: openfoundry
+            wave: "30"
+            chartPath: infra/helm/apps/of-ontology
+            valueFiles:
+              - values.yaml
+              - values-dev.yaml
+            extraValueRefs:
+              - infra/helm/profiles/values-dev.yaml
+
+          - name: of-ml-aip
+            namespace: openfoundry
+            wave: "30"
+            chartPath: infra/helm/apps/of-ml-aip
+            valueFiles:
+              - values.yaml
+              - values-dev.yaml
+            extraValueRefs:
+              - infra/helm/profiles/values-dev.yaml
+
+          - name: of-apps-ops
+            namespace: openfoundry
+            wave: "30"
+            chartPath: infra/helm/apps/of-apps-ops
+            valueFiles:
+              - values.yaml
+              - values-dev.yaml
+            extraValueRefs:
+              - infra/helm/profiles/values-dev.yaml
+
+          - name: of-web
+            namespace: openfoundry
+            wave: "40"
+            chartPath: infra/helm/apps/of-web
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+  template:
+    metadata:
+      name: '{{ .name }}'
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{ .wave }}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: openfoundry
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ .namespace }}'
+      # `sources` is fully overridden by templatePatch below.
+      sources: []
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - ApplyOutOfSyncOnly=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 10m
+
+  templatePatch: |
+    spec:
+      sources:
+        - repoURL: https://github.com/DioCrafts/OpenFoundry.git
+          targetRevision: main
+          path: '{{ .chartPath }}'
+          helm:
+            releaseName: '{{ .name }}'
+            valueFiles:
+              {{- range .valueFiles }}
+              - {{ . }}
+              {{- end }}
+              {{- range .extraValueRefs }}
+              - $values/{{ . }}
+              {{- end }}
+        - repoURL: https://github.com/DioCrafts/OpenFoundry.git
+          targetRevision: main
+          ref: values

@@ -1,0 +1,213 @@
+# In-tree Helm chart releases for the `prod` environment.
+# See infra/argocd/apps/dev/10-intree-charts.yaml for the structural
+# explanation. Prod is the full superset (every release on, no
+# local-registry).
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: openfoundry-intree-prod
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - list:
+        elements:
+          # ─── Layer 2: infra clusters / CRs ─────────────────────
+          - name: postgres-clusters
+            namespace: openfoundry
+            wave: "10"
+            chartPath: infra/helm/infra/postgres-clusters
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: cassandra-cluster
+            namespace: k8ssandra-operator
+            wave: "10"
+            chartPath: infra/helm/infra/cassandra-cluster
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: kafka-cluster
+            namespace: kafka
+            wave: "10"
+            chartPath: infra/helm/infra/kafka-cluster
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: ceph-cluster
+            namespace: rook-ceph
+            wave: "10"
+            chartPath: infra/helm/infra/ceph-cluster
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: lakekeeper
+            namespace: lakekeeper
+            wave: "10"
+            chartPath: infra/helm/infra/lakekeeper
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: debezium
+            namespace: kafka
+            wave: "10"
+            chartPath: infra/helm/infra/debezium
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: flink-jobs
+            namespace: flink
+            wave: "15"
+            chartPath: infra/helm/infra/flink-jobs
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: vespa
+            namespace: openfoundry
+            wave: "10"
+            chartPath: infra/helm/infra/vespa
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: trino
+            namespace: trino
+            wave: "10"
+            chartPath: infra/helm/infra/trino
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: spark-operator
+            namespace: spark-operator
+            wave: "10"
+            chartPath: infra/helm/infra/spark-operator
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: spark-jobs
+            namespace: spark-operator
+            wave: "15"
+            chartPath: infra/helm/infra/spark-jobs
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: mimir
+            namespace: observability
+            wave: "10"
+            chartPath: infra/helm/infra/mimir
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          - name: observability
+            namespace: openfoundry
+            wave: "10"
+            chartPath: infra/helm/infra/observability
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+          # ─── Layer 3: OpenFoundry application charts ───────────
+          - name: of-platform
+            namespace: openfoundry
+            wave: "20"
+            chartPath: infra/helm/apps/of-platform
+            valueFiles:
+              - values.yaml
+              - values-prod.yaml
+            extraValueRefs:
+              - infra/helm/profiles/values-prod.yaml
+
+          - name: of-data-engine
+            namespace: openfoundry
+            wave: "30"
+            chartPath: infra/helm/apps/of-data-engine
+            valueFiles:
+              - values.yaml
+              - values-prod.yaml
+            extraValueRefs:
+              - infra/helm/profiles/values-prod.yaml
+
+          - name: of-ontology
+            namespace: openfoundry
+            wave: "30"
+            chartPath: infra/helm/apps/of-ontology
+            valueFiles:
+              - values.yaml
+              - values-prod.yaml
+            extraValueRefs:
+              - infra/helm/profiles/values-prod.yaml
+
+          - name: of-ml-aip
+            namespace: openfoundry
+            wave: "30"
+            chartPath: infra/helm/apps/of-ml-aip
+            valueFiles:
+              - values.yaml
+              - values-prod.yaml
+            extraValueRefs:
+              - infra/helm/profiles/values-prod.yaml
+
+          - name: of-apps-ops
+            namespace: openfoundry
+            wave: "30"
+            chartPath: infra/helm/apps/of-apps-ops
+            valueFiles:
+              - values.yaml
+              - values-prod.yaml
+            extraValueRefs:
+              - infra/helm/profiles/values-prod.yaml
+
+          - name: of-web
+            namespace: openfoundry
+            wave: "40"
+            chartPath: infra/helm/apps/of-web
+            valueFiles: [values.yaml]
+            extraValueRefs: []
+
+  template:
+    metadata:
+      name: '{{ .name }}'
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{ .wave }}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: openfoundry
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ .namespace }}'
+      sources: []
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - ApplyOutOfSyncOnly=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 10m
+
+  templatePatch: |
+    spec:
+      sources:
+        - repoURL: https://github.com/DioCrafts/OpenFoundry.git
+          targetRevision: main
+          path: '{{ .chartPath }}'
+          helm:
+            releaseName: '{{ .name }}'
+            valueFiles:
+              {{- range .valueFiles }}
+              - {{ . }}
+              {{- end }}
+              {{- range .extraValueRefs }}
+              - $values/{{ . }}
+              {{- end }}
+        - repoURL: https://github.com/DioCrafts/OpenFoundry.git
+          targetRevision: main
+          ref: values
