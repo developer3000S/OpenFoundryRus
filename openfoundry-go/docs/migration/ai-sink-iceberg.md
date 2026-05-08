@@ -57,3 +57,11 @@ Before enabling Iceberg mode against Lakekeeper, provision these tables under na
 - `traces`
 
 All tables must have the eight shared fields, stable field IDs 1-8, partition transform `day(at)`, and sort order `at ASC`. Schema mismatches should surface as typed writer errors and stop Kafka offset commits so operators can fix the table definition without losing data.
+
+## Adapter error contract
+
+The Go adapter client treats any HTTP `2xx` response as durable append success.
+HTTP `404` maps to `ErrTableNotFound`; HTTP `409` and `422` map
+to `ErrSchemaMismatch`; network errors and all other non-2xx statuses map to
+`ErrCommitFailed`. The runtime commits Kafka offsets only after every non-empty
+table group in the flushed batch receives a successful adapter response.

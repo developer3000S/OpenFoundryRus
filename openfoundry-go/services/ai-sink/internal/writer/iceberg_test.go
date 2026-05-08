@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -216,6 +217,19 @@ func TestHTTPTableWriterAdapterAIContract(t *testing.T) {
 	}
 }
 
+func TestHTTPTableWriterAdapterAIAcceptsAny2xx(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPartialContent)
+	}))
+	defer server.Close()
+
+	writer := NewIcebergWriter(server.URL, "warehouse-1", "of_ai")
+	batch := map[string][]envelope.AiEventEnvelope{envelope.TablePrompts: {{EventID: uuid.Nil, At: 1, Kind: envelope.KindPrompt, Producer: "producer", SchemaVersion: 1, Payload: []byte(`{}`)}}}
+	if err := writer.Append(context.Background(), batch); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+}
+
 func TestHTTPTableWriterAdapterAIErrors(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -234,6 +248,7 @@ func TestHTTPTableWriterAdapterAIErrors(t *testing.T) {
 					t.Fatalf("path = %s", r.URL.Path)
 				}
 				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte("adapter detail"))
 			}))
 			defer server.Close()
 
@@ -242,6 +257,9 @@ func TestHTTPTableWriterAdapterAIErrors(t *testing.T) {
 			err := writer.Append(context.Background(), batch)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("Append() error = %v, want %v", err, tc.want)
+			}
+			if !strings.Contains(err.Error(), "adapter detail") {
+				t.Fatalf("Append() error = %v, want table-writer detail", err)
 			}
 		})
 	}

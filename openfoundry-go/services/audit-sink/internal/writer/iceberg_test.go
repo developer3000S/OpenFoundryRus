@@ -101,6 +101,7 @@ func TestIcebergWriterPropagatesCommitFailure(t *testing.T) {
 
 func TestHTTPTableWriterAdapterAuditContract(t *testing.T) {
 	corr := "corr-1"
+	serverURL := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s", r.Method)
@@ -118,6 +119,7 @@ func TestHTTPTableWriterAdapterAuditContract(t *testing.T) {
 		}
 		wantSpec := TableSpec{
 			Catalog:            auditCatalog,
+			CatalogURL:         serverURL,
 			Warehouse:          "warehouse-1",
 			Namespace:          "of_audit",
 			Table:              "events",
@@ -149,6 +151,7 @@ func TestHTTPTableWriterAdapterAuditContract(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
+	serverURL = server.URL
 	defer server.Close()
 
 	writer := NewIcebergWriter(server.URL, "warehouse-1", "of_audit", "events")
@@ -169,6 +172,19 @@ func TestHTTPTableWriterAdapterIsProductionPathNotStub(t *testing.T) {
 	if errors.Is(err, ErrNotImplemented) {
 		t.Fatalf("Append() returned legacy stub error %v", err)
 	}
+	if err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+}
+
+func TestHTTPTableWriterAdapterAuditAcceptsAny2xx(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPartialContent)
+	}))
+	defer server.Close()
+
+	writer := NewIcebergWriter(server.URL, "warehouse-1", "of_audit", "events")
+	err := writer.Append(context.Background(), []envelope.AuditEnvelope{{EventID: uuid.Nil, At: 1, Kind: "kind", Payload: []byte(`{}`)}})
 	if err != nil {
 		t.Fatalf("Append() error = %v", err)
 	}

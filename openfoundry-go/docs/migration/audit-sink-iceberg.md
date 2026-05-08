@@ -32,6 +32,9 @@ content-type: application/json
 ```
 
 The payload contains the pinned table spec plus the rows in the flushed batch.
+The table spec includes `catalog=lakekeeper`, `catalog_url=<ICEBERG_CATALOG_URL>`,
+optional `warehouse=<ICEBERG_WAREHOUSE>`, `namespace=of_audit`, `table=events`,
+field IDs 1-5, partition transform `day(at)`, and sort order `at ASC`.
 The table-writer adapter is responsible for writing Parquet data files and
 committing the Iceberg snapshot atomically. A successful 2xx response means the
 Kafka runtime may commit offsets.

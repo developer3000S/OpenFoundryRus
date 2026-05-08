@@ -36,6 +36,7 @@ type FieldSpec struct {
 
 type TableSpec struct {
 	Catalog            string      `json:"catalog"`
+	CatalogURL         string      `json:"catalog_url,omitempty"`
 	Warehouse          string      `json:"warehouse,omitempty"`
 	Namespace          string      `json:"namespace"`
 	Table              string      `json:"table"`
@@ -131,6 +132,7 @@ func (i *IcebergWriter) Close() error { return nil }
 func (i *IcebergWriter) tableSpec() TableSpec {
 	return TableSpec{
 		Catalog:            auditCatalog,
+		CatalogURL:         i.CatalogURL,
 		Warehouse:          i.Warehouse,
 		Namespace:          i.Namespace,
 		Table:              i.Table,
@@ -151,18 +153,31 @@ func auditSchema() []FieldSpec {
 }
 
 type HTTPTableWriterCatalog struct {
-	baseURL string
-	client  *http.Client
+	baseURL    string
+	catalogURL string
+	warehouse  string
+	client     *http.Client
 }
 
 func NewHTTPTableWriterCatalog(catalogURL, warehouse string) *HTTPTableWriterCatalog {
 	return &HTTPTableWriterCatalog{
-		baseURL: strings.TrimRight(catalogURL, "/"),
-		client:  &http.Client{Timeout: 30 * time.Second},
+		baseURL:    strings.TrimRight(catalogURL, "/"),
+		catalogURL: strings.TrimRight(catalogURL, "/"),
+		warehouse:  warehouse,
+		client:     &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
 func (c *HTTPTableWriterCatalog) LoadTable(_ context.Context, spec TableSpec) (IcebergTableAppender, error) {
+	if c.baseURL == "" {
+		return nil, fmt.Errorf("%w: table-writer URL must be non-empty", ErrCommitFailed)
+	}
+	if spec.CatalogURL == "" {
+		spec.CatalogURL = c.catalogURL
+	}
+	if spec.Warehouse == "" {
+		spec.Warehouse = c.warehouse
+	}
 	if spec.Namespace == "" || spec.Table == "" {
 		return nil, fmt.Errorf("%w: namespace/table must be non-empty", ErrTableNotFound)
 	}
@@ -175,6 +190,15 @@ type httpTableWriter struct {
 }
 
 func (t *httpTableWriter) Append(ctx context.Context, batch AppendBatch) error {
+	if batch.Spec.Catalog == "" || batch.Spec.Namespace == "" || batch.Spec.Table == "" {
+		batch.Spec = t.spec
+	}
+	if batch.Spec.CatalogURL == "" {
+		batch.Spec.CatalogURL = t.spec.CatalogURL
+	}
+	if batch.Spec.Warehouse == "" {
+		batch.Spec.Warehouse = t.spec.Warehouse
+	}
 	payload, err := json.Marshal(batch)
 	if err != nil {
 		return err
@@ -190,7 +214,7 @@ func (t *httpTableWriter) Append(ctx context.Context, batch AppendBatch) error {
 		return fmt.Errorf("%w: %v", ErrCommitFailed, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusNoContent {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
 	detail := tableWriterErrorDetail(resp)
