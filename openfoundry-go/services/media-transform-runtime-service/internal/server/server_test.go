@@ -122,6 +122,11 @@ func TestTransformRustNotImplementedEntriesReturnParityEnvelope(t *testing.T) {
 	srv := newTestServer(t)
 	t.Cleanup(srv.Close)
 
+	// Rust services/media-transform-runtime-service/src/catalog.rs keeps these
+	// AI-kernel-dependent entries as HandlerStatus::NotImplemented rather than
+	// dispatching to a native or external adapter. Pin the wire envelope here so
+	// Go callers observe the same graceful-degradation contract until Rust grows
+	// real handlers for the same keys.
 	cases := map[string]string{
 		"embedding":       "Image embeddings depend on libs/ai-kernel which is not yet wired.",
 		"transcription":   "Transcription depends on libs/ai-kernel (Whisper / VLM) which is not yet wired.",
