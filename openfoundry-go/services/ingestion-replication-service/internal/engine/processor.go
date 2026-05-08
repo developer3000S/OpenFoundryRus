@@ -19,6 +19,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -145,6 +146,9 @@ func (e *Engine) RunTopology(
 	streams []domain.DomainStreamDefinition,
 	windows []domain.WindowDefinition,
 ) (TopologyExecution, error) {
+	if err := e.validateRuntime(topology); err != nil {
+		return TopologyExecution{}, err
+	}
 	startedAt := e.now()
 	checkpointMap, err := e.Runtime.LoadTopologyOffsets(ctx, topology.ID)
 	if err != nil {
@@ -216,6 +220,9 @@ func (e *Engine) PreviewTopologyRuntime(
 	streams []domain.DomainStreamDefinition,
 	windows []domain.WindowDefinition,
 ) (TopologyRuntimeAnalysis, error) {
+	if err := e.validateRuntime(topology); err != nil {
+		return TopologyRuntimeAnalysis{}, err
+	}
 	generatedAt := e.now()
 	checkpointMap, err := e.Runtime.LoadTopologyOffsets(ctx, topology.ID)
 	if err != nil {
@@ -292,6 +299,9 @@ func (e *Engine) ReplayTopology(
 	streamIDs []uuid.UUID,
 	fromSequenceNo *int64,
 ) (int64, error) {
+	if err := e.validateRuntime(topology); err != nil {
+		return 0, err
+	}
 	targets := streamIDs
 	if len(targets) == 0 {
 		targets = append([]uuid.UUID(nil), topology.SourceStreamIDs...)
@@ -309,6 +319,16 @@ func (e *Engine) ReplayTopology(
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+func (e *Engine) validateRuntime(topology *domain.TopologyDefinition) error {
+	if e == nil || e.Runtime == nil {
+		return errors.New("topology runtime store is not configured")
+	}
+	if topology == nil {
+		return errors.New("topology definition is required")
+	}
+	return nil
+}
 
 func (e *Engine) now() time.Time {
 	if e.Now == nil {

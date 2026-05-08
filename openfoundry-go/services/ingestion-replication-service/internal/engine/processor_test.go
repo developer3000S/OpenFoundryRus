@@ -323,6 +323,11 @@ func (f *fakeTopologyStore) AllWindows(context.Context) ([]models.WindowDefiniti
 	return f.windows, nil
 }
 
+type runtimeTopologyStore struct {
+	*fakeTopologyStore
+	*domain.MemoryRuntimeStore
+}
+
 type recordingRecorder struct {
 	mu   sync.Mutex
 	runs []models.TopologyRun
@@ -333,6 +338,23 @@ func (r *recordingRecorder) InsertTopologyRun(_ context.Context, run models.Topo
 	defer r.mu.Unlock()
 	r.runs = append(r.runs, run)
 	return nil
+}
+
+type fakeHandlerEngine struct {
+	runExec        engine.TopologyExecution
+	replayRestored int64
+	runCalls       int
+	replayCalls    int
+}
+
+func (f *fakeHandlerEngine) RunTopology(_ context.Context, _ *domain.TopologyDefinition, _ []domain.DomainStreamDefinition, _ []domain.WindowDefinition) (engine.TopologyExecution, error) {
+	f.runCalls++
+	return f.runExec, nil
+}
+
+func (f *fakeHandlerEngine) ReplayTopology(_ context.Context, _ *domain.TopologyDefinition, _ []uuid.UUID, _ *int64) (int64, error) {
+	f.replayCalls++
+	return f.replayRestored, nil
 }
 
 func writerClaims() *authmw.Claims {
@@ -358,10 +380,10 @@ func withParams(req *http.Request, kv ...string) *http.Request {
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
 
-// TestRunTopologyReturns501WhenEngineNil pins the legacy behaviour: with
-// no engine wired the handler still recognises the topology and returns
-// the stable 501 contract used by callers to detect the wire gap.
-func TestRunTopologyReturns501WhenEngineNil(t *testing.T) {
+// TestRunTopologyReturnsStableErrorWhenEngineNil verifies the handler
+// returns a stable configuration error when neither an explicit engine
+// nor a runtime-store-backed productive engine is available.
+func TestRunTopologyReturnsStableErrorWhenEngineNil(t *testing.T) {
 	t.Parallel()
 	tid := uuid.New()
 	store := &fakeTopologyStore{topologies: map[uuid.UUID]models.TopologyDefinition{
@@ -371,8 +393,101 @@ func TestRunTopologyReturns501WhenEngineNil(t *testing.T) {
 	req := withParams(authedRequest("POST", "/topologies/"+tid.String()+"/run", ""), "id", tid.String())
 	rec := httptest.NewRecorder()
 	h.RunTopology(rec, req)
-	assert.Equal(t, http.StatusNotImplemented, rec.Code, rec.Body.String())
+	assert.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
 	assert.Contains(t, rec.Body.String(), handlers.ErrTopologyRuntimeNotWired)
+}
+
+func TestReplayTopologyReturnsStableErrorWhenEngineNil(t *testing.T) {
+	t.Parallel()
+	tid := uuid.New()
+	streamID := uuid.New()
+	store := &fakeTopologyStore{topologies: map[uuid.UUID]models.TopologyDefinition{
+		tid: {ID: tid, Name: "x", SourceStreamIDs: []uuid.UUID{streamID}},
+	}}
+	h := &handlers.TopologiesHandler{Store: store}
+	req := withParams(authedRequest("POST", "/topologies/"+tid.String()+"/replay", `{}`), "id", tid.String())
+	rec := httptest.NewRecorder()
+	h.ReplayTopology(rec, req)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), handlers.ErrTopologyRuntimeNotWired)
+}
+
+func TestRunTopologySucceedsWithFakeEngine(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	tid := uuid.New()
+	store := &fakeTopologyStore{topologies: map[uuid.UUID]models.TopologyDefinition{
+		tid: {ID: tid, Name: "x", BackpressurePolicy: models.DefaultBackpressurePolicy()},
+	}}
+	fake := &fakeHandlerEngine{runExec: engine.TopologyExecution{
+		Metrics:              domain.TopologyRunMetrics{InputEvents: 7, OutputEvents: 3},
+		StateSnapshot:        domain.StateStoreSnapshot{Backend: "rocksdb", Namespace: "x"},
+		BackpressureSnapshot: domain.BackpressureSnapshot{Status: "healthy"},
+		StartedAt:            now,
+		CompletedAt:          now.Add(time.Second),
+	}}
+	h := &handlers.TopologiesHandler{Store: store, Engine: fake}
+
+	req := withParams(authedRequest("POST", "/topologies/"+tid.String()+"/run", ""), "id", tid.String())
+	rec := httptest.NewRecorder()
+	h.RunTopology(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, fake.runCalls)
+
+	var run models.TopologyRun
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &run))
+	assert.Equal(t, tid, run.TopologyID)
+	assert.Equal(t, "completed", run.Status)
+	var metrics domain.TopologyRunMetrics
+	require.NoError(t, json.Unmarshal(run.Metrics, &metrics))
+	assert.EqualValues(t, 7, metrics.InputEvents)
+}
+
+func TestReplayTopologySucceedsWithFakeEngine(t *testing.T) {
+	t.Parallel()
+	tid := uuid.New()
+	streamID := uuid.New()
+	store := &fakeTopologyStore{topologies: map[uuid.UUID]models.TopologyDefinition{
+		tid: {ID: tid, Name: "x", SourceStreamIDs: []uuid.UUID{streamID}},
+	}}
+	fake := &fakeHandlerEngine{replayRestored: 5}
+	h := &handlers.TopologiesHandler{Store: store, Engine: fake}
+
+	req := withParams(authedRequest("POST", "/topologies/"+tid.String()+"/replay", `{}`), "id", tid.String())
+	rec := httptest.NewRecorder()
+	h.ReplayTopology(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, fake.replayCalls)
+
+	var resp models.ReplayTopologyResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.EqualValues(t, 5, resp.RestoredEventCount)
+	assert.Equal(t, []uuid.UUID{streamID}, resp.StreamIDs)
+}
+
+func TestRunTopologyPersistsRunWhenRecorderConfigured(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	tid := uuid.New()
+	store := &fakeTopologyStore{topologies: map[uuid.UUID]models.TopologyDefinition{
+		tid: {ID: tid, Name: "x", BackpressurePolicy: models.DefaultBackpressurePolicy()},
+	}}
+	recorder := &recordingRecorder{}
+	h := &handlers.TopologiesHandler{
+		Store:       store,
+		Engine:      &fakeHandlerEngine{runExec: engine.TopologyExecution{StartedAt: now, CompletedAt: now.Add(time.Second)}},
+		RunRecorder: recorder,
+	}
+
+	req := withParams(authedRequest("POST", "/topologies/"+tid.String()+"/run", ""), "id", tid.String())
+	rec := httptest.NewRecorder()
+	h.RunTopology(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, recorder.runs, 1)
+	assert.Equal(t, tid, recorder.runs[0].TopologyID)
+	assert.Equal(t, "completed", recorder.runs[0].Status)
+	require.NotNil(t, recorder.runs[0].CompletedAt)
+	assert.Equal(t, now.Add(time.Second), *recorder.runs[0].CompletedAt)
 }
 
 // TestRunTopologyExecutesEngine wires the engine end-to-end through the
@@ -438,6 +553,44 @@ func TestRunTopologyExecutesEngine(t *testing.T) {
 	require.Len(t, recorder.runs, 1)
 	require.Len(t, sink.uploads, 1)
 	assert.Equal(t, dataset, sink.uploads[0].datasetID)
+}
+
+func TestRunTopologyBuildsProductiveEngineFromRuntimeStore(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	rt := domain.NewMemoryRuntimeStore()
+	streamID := uuid.New()
+	_, err := rt.AppendEvent(ctx, streamID, json.RawMessage(`{"value":1}`), time.Now().Add(-time.Second))
+	require.NoError(t, err)
+
+	tid := uuid.New()
+	store := &runtimeTopologyStore{
+		fakeTopologyStore: &fakeTopologyStore{
+			topologies: map[uuid.UUID]models.TopologyDefinition{
+				tid: {
+					ID:                 tid,
+					Name:               "demo",
+					Status:             "active",
+					BackpressurePolicy: models.DefaultBackpressurePolicy(),
+					SourceStreamIDs:    []uuid.UUID{streamID},
+				},
+			},
+			streams: []models.StreamDefinition{{ID: streamID, Name: "orders"}},
+		},
+		MemoryRuntimeStore: rt,
+	}
+	h := &handlers.TopologiesHandler{Store: store}
+
+	req := withParams(authedRequest("POST", "/topologies/"+tid.String()+"/run", ""), "id", tid.String())
+	rec := httptest.NewRecorder()
+	h.RunTopology(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var run models.TopologyRun
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &run))
+	var metrics domain.TopologyRunMetrics
+	require.NoError(t, json.Unmarshal(run.Metrics, &metrics))
+	assert.EqualValues(t, 1, metrics.InputEvents)
 }
 
 // TestReplayTopologyExecutesEngine walks the replay path end-to-end:

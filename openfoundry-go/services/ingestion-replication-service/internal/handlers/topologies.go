@@ -7,10 +7,12 @@ package handlers
 //   POST   /api/v1/streaming/topologies/{id}:run
 //   POST   /api/v1/streaming/topologies/{id}:replay
 //
-// run/replay route into the engine in internal/engine. When the handler
-// is constructed with Engine == nil they fall back to 501 with the
-// stable STREAMING_TOPOLOGY_RUNTIME_NOT_WIRED code so callers can
-// detect the wire gap programmatically.
+// run/replay route into the engine in internal/engine. Production callers
+// can inject Engine directly, or provide a Store that implements the
+// engine.RuntimeStore plus optional sink/lineage interfaces so the handler
+// can construct the in-process engine on demand. When neither path is
+// available, handlers return a stable configuration error instead of
+// panicking.
 
 import (
 	"context"
@@ -23,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/openfoundry/openfoundry-go/services/ingestion-replication-service/internal/domain"
 	"github.com/openfoundry/openfoundry-go/services/ingestion-replication-service/internal/engine"
 	"github.com/openfoundry/openfoundry-go/services/ingestion-replication-service/internal/models"
 )
@@ -53,11 +56,22 @@ type TopologyRunRecorder interface {
 	InsertTopologyRun(ctx context.Context, run models.TopologyRun) error
 }
 
+// TopologyEngine is the runtime surface the HTTP handlers need. The
+// concrete in-process engine.Engine implements it, while tests can inject
+// small fakes without constructing a runtime store.
+type TopologyEngine interface {
+	RunTopology(ctx context.Context, topology *domain.TopologyDefinition, streams []domain.DomainStreamDefinition, windows []domain.WindowDefinition) (engine.TopologyExecution, error)
+	ReplayTopology(ctx context.Context, topology *domain.TopologyDefinition, streamIDs []uuid.UUID, fromSequenceNo *int64) (int64, error)
+}
+
 // TopologiesHandler bundles the dependencies for the topology runtime
-// routes. Engine is optional — when nil, run/replay return 501.
+// routes. Engine is optional when Store implements engine.RuntimeStore;
+// in that case a productive in-process engine is constructed per request.
+// If no engine can be resolved, run/replay return a stable configuration
+// error.
 type TopologiesHandler struct {
 	Store       TopologyStore
-	Engine      *engine.Engine
+	Engine      TopologyEngine
 	RunRecorder TopologyRunRecorder
 }
 
@@ -65,8 +79,8 @@ type TopologiesHandler struct {
 //
 // Loads the topology + window/stream metadata, hands them to the engine,
 // records the resulting run via the optional recorder, and returns the
-// run record. If the engine isn't wired the route returns 501 with the
-// stable STREAMING_TOPOLOGY_RUNTIME_NOT_WIRED code.
+// run record. If the engine cannot be resolved, the route returns a
+// stable STREAMING_TOPOLOGY_RUNTIME_NOT_WIRED configuration error.
 func (h *TopologiesHandler) RunTopology(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireClaims(w, r); !ok {
 		return
@@ -85,9 +99,9 @@ func (h *TopologiesHandler) RunTopology(w http.ResponseWriter, r *http.Request) 
 		writeJSONErr(w, http.StatusNotFound, ErrTopologyNotFound)
 		return
 	}
-	if h.Engine == nil {
-		writeJSONErr(w, http.StatusNotImplemented,
-			ErrTopologyRuntimeNotWired+": in-process topology engine not yet ported to Go")
+	runtimeEngine := h.runtimeEngine()
+	if runtimeEngine == nil {
+		writeTopologyRuntimeNotWired(w)
 		return
 	}
 	streams, err := h.Store.AllStreams(r.Context())
@@ -104,7 +118,7 @@ func (h *TopologiesHandler) RunTopology(w http.ResponseWriter, r *http.Request) 
 	domStreams := engine.FromModelsStreams(streams)
 	domWindows := engine.FromModelsWindows(windows)
 
-	exec, err := h.Engine.RunTopology(r.Context(), &domTopo, domStreams, domWindows)
+	exec, err := runtimeEngine.RunTopology(r.Context(), &domTopo, domStreams, domWindows)
 	if err != nil {
 		slog.Error("run topology", slog.String("error", err.Error()))
 		writeJSONErr(w, http.StatusInternalServerError, "topology execution failed: "+err.Error())
@@ -147,9 +161,9 @@ func (h *TopologiesHandler) ReplayTopology(w http.ResponseWriter, r *http.Reques
 		writeJSONErr(w, http.StatusNotFound, ErrTopologyNotFound)
 		return
 	}
-	if h.Engine == nil {
-		writeJSONErr(w, http.StatusNotImplemented,
-			ErrTopologyRuntimeNotWired+": in-process topology engine not yet ported to Go")
+	runtimeEngine := h.runtimeEngine()
+	if runtimeEngine == nil {
+		writeTopologyRuntimeNotWired(w)
 		return
 	}
 	var body models.ReplayTopologyRequest
@@ -161,7 +175,7 @@ func (h *TopologiesHandler) ReplayTopology(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	domTopo := engine.FromModelsTopology(*t)
-	restored, err := h.Engine.ReplayTopology(r.Context(), &domTopo, body.StreamIDs, body.FromSequenceNo)
+	restored, err := runtimeEngine.ReplayTopology(r.Context(), &domTopo, body.StreamIDs, body.FromSequenceNo)
 	if err != nil {
 		slog.Error("replay topology", slog.String("error", err.Error()))
 		writeJSONErr(w, http.StatusInternalServerError, "topology replay failed: "+err.Error())
@@ -184,3 +198,31 @@ func (h *TopologiesHandler) ReplayTopology(w http.ResponseWriter, r *http.Reques
 // empty bodies which is masked by ContentLength==0), but kept here so a
 // future refactor doesn't have to revisit the matching pattern.
 var errEmptyBody = errors.New("empty body")
+
+// runtimeEngine returns the explicitly configured engine, or builds the
+// productive in-process engine from Store when Store also exposes the
+// engine runtime-store contract. Sink upload and lineage persistence are
+// optional; engine.New supplies no-op implementations when they are absent.
+func (h *TopologiesHandler) runtimeEngine() TopologyEngine {
+	if h.Engine != nil {
+		return h.Engine
+	}
+	rt, ok := h.Store.(engine.RuntimeStore)
+	if !ok || rt == nil {
+		return nil
+	}
+	var sink engine.SinkUploader
+	if s, ok := h.Store.(engine.SinkUploader); ok {
+		sink = s
+	}
+	var lineage engine.LineageWriter
+	if l, ok := h.Store.(engine.LineageWriter); ok {
+		lineage = l
+	}
+	return engine.New(rt, sink, lineage)
+}
+
+func writeTopologyRuntimeNotWired(w http.ResponseWriter) {
+	writeJSONErr(w, http.StatusInternalServerError,
+		ErrTopologyRuntimeNotWired+": topology runtime engine is not configured")
+}
