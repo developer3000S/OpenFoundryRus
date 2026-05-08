@@ -39,40 +39,31 @@ export function FilterBar({ search, dateRange, busy = false, onApply, onReset }:
   return (
     <div
       style={{
-        display: 'grid',
-        gap: 12,
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 8,
         background: '#fff',
         border: '1px solid var(--border-default)',
         borderRadius: 'var(--radius-md)',
-        padding: 16,
+        padding: 8,
         boxShadow: 'var(--shadow-panel)',
       }}
     >
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-        <div>
-          <div className="of-eyebrow">Global Filters</div>
-          <h2 className="of-heading-sm" style={{ marginTop: 4, fontSize: 16 }}>
-            Propagate one filter context across every widget
-          </h2>
-        </div>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <button type="button" className="of-btn" onClick={resetFilters} disabled={busy}>
-            Reset
-          </button>
-          <button type="button" className="of-btn of-btn-primary" onClick={applyFilters} disabled={busy}>
-            {busy ? 'Applying…' : 'Apply Filters'}
-          </button>
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span className="of-eyebrow">Parameters</span>
       </div>
 
-      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)' }}>
+      <div style={{ display: 'flex', flex: 1, flexWrap: 'wrap', gap: 8, minWidth: 260 }}>
         <label
           style={{
             background: '#fff',
             border: '1px solid var(--border-default)',
             borderRadius: 'var(--radius-md)',
-            padding: '8px 12px',
+            padding: '4px 8px',
+            minWidth: 240,
+            flex: '1 1 260px',
           }}
         >
           <div className="of-eyebrow">Search</div>
@@ -80,9 +71,9 @@ export function FilterBar({ search, dateRange, busy = false, onApply, onReset }:
             type="text"
             value={draftSearch}
             onChange={(e) => setDraftSearch(e.target.value)}
-            placeholder="Use {{search}} in widget SQL or rely on table filtering"
+            placeholder="Filter"
             style={{
-              marginTop: 6,
+              marginTop: 3,
               width: '100%',
               border: 0,
               background: 'transparent',
@@ -100,17 +91,13 @@ export function FilterBar({ search, dateRange, busy = false, onApply, onReset }:
         />
       </div>
 
-      <div
-        style={{
-          border: '1px dashed var(--border-default)',
-          borderRadius: 'var(--radius-md)',
-          padding: '8px 12px',
-          fontSize: 12,
-          color: 'var(--text-muted)',
-        }}
-      >
-        Query placeholders available in every widget: <code>{'{{search}}'}</code>,{' '}
-        <code>{'{{date_from}}'}</code>, <code>{'{{date_to}}'}</code>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        <button type="button" className="of-btn" onClick={resetFilters} disabled={busy}>
+          Reset
+        </button>
+        <button type="button" className="of-btn of-btn-primary" onClick={applyFilters} disabled={busy}>
+          {busy ? 'Applying…' : 'Apply'}
+        </button>
       </div>
     </div>
   );

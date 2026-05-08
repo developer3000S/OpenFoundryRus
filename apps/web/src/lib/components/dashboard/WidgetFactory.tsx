@@ -57,33 +57,33 @@ export function WidgetFactory({ widget, filters }: WidgetFactoryProps) {
       style={{
         display: 'flex',
         height: '100%',
-        minHeight: 220,
+        minHeight: 190,
         flexDirection: 'column',
         background: '#fff',
         border: '1px solid var(--border-default)',
         borderRadius: 'var(--radius-md)',
         boxShadow: 'var(--shadow-panel)',
-        padding: 16,
+        padding: 10,
       }}
     >
-      <header style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+      <header style={{ marginBottom: 8, display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <h3 className="of-heading-sm" style={{ fontSize: 16 }}>
+            <h3 className="of-heading-sm" style={{ fontSize: 14 }}>
               {widget.title}
             </h3>
             <span
               className="of-chip"
-              style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase' }}
+              style={{ fontSize: 10, letterSpacing: 0, textTransform: 'uppercase' }}
             >
               {widget.type}
             </span>
           </div>
-          <p className="of-text-muted" style={{ fontSize: 13, marginTop: 4 }}>
+          <p className="of-text-muted" style={{ fontSize: 12, marginTop: 3 }}>
             {widget.description}
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {lastLoadedAt && (
             <span className="of-text-soft" style={{ fontSize: 11 }}>
               {formatDashboardTimestamp(lastLoadedAt)}
@@ -94,7 +94,7 @@ export function WidgetFactory({ widget, filters }: WidgetFactoryProps) {
             className="of-btn"
             onClick={() => void loadData()}
             disabled={loading}
-            style={{ minHeight: 30, fontSize: 12 }}
+            style={{ minHeight: 26, fontSize: 11 }}
           >
             {loading ? 'Refreshing…' : 'Refresh'}
           </button>
@@ -102,7 +102,7 @@ export function WidgetFactory({ widget, filters }: WidgetFactoryProps) {
       </header>
 
       {error && (
-        <div className="of-status-danger" style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13 }}>
+        <div className="of-status-danger" style={{ marginBottom: 8, padding: '7px 8px', borderRadius: 'var(--radius-sm)', fontSize: 12 }}>
           {error}
         </div>
       )}

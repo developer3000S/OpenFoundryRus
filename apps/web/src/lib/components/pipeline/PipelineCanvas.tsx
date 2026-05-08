@@ -190,9 +190,9 @@ export function PipelineCanvas({
   }
 
   function nodeFill(node: PipelineNode) {
-    if (selectedId === node.id) return '#1e40af';
-    if (pendingSourceId === node.id) return '#7c3aed';
-    return '#1f2937';
+    if (selectedId === node.id) return '#e8f1ff';
+    if (pendingSourceId === node.id) return '#fff3df';
+    return '#ffffff';
   }
 
   function nodeStroke(node: PipelineNode) {
@@ -202,8 +202,8 @@ export function PipelineCanvas({
     if (tone === 'INVALID') return '#ef4444';
     if (tone === 'PENDING') return '#eab308';
     if (tone === 'VALID') return '#10b981';
-    if (selectedId === node.id) return '#3b82f6';
-    return '#374151';
+    if (selectedId === node.id) return '#2d72d2';
+    return '#aeb8c5';
   }
 
   function statusGlyph(nodeId: string) {
@@ -221,8 +221,8 @@ export function PipelineCanvas({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+    <div style={{ display: 'grid', gap: 0 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', padding: 8, borderBottom: '1px solid var(--border-default)', background: 'var(--bg-topbar)' }}>
         {!readOnly && TRANSFORM_OPTIONS.map((t) => (
           <button key={t.value} type="button" onClick={() => addNode(t.value)} className="of-button" style={{ fontSize: 11 }}>
             + {t.label}
@@ -230,7 +230,7 @@ export function PipelineCanvas({
         ))}
         {!readOnly && selectedId && (
           <>
-            <button type="button" onClick={startConnect} className="of-button" style={{ fontSize: 11, background: pendingSourceId ? '#7c3aed' : undefined, color: pendingSourceId ? '#fff' : undefined }}>
+            <button type="button" onClick={startConnect} className="of-button" style={{ fontSize: 11, background: pendingSourceId ? '#2d72d2' : undefined, color: pendingSourceId ? '#fff' : undefined }}>
               {pendingSourceId ? 'Click target to connect…' : 'Connect →'}
             </button>
             <button type="button" onClick={removeSelected} className="of-button" style={{ fontSize: 11, color: '#b91c1c', borderColor: '#fecaca' }}>
@@ -246,13 +246,17 @@ export function PipelineCanvas({
         </span>
       </div>
 
-      <div style={{ overflow: 'auto', border: '1px solid var(--border-default)', borderRadius: 12, background: '#0b1220' }}>
+      <div style={{ overflow: 'auto', border: 0, background: '#eef1f5' }}>
         <svg width={Math.max(canvasW, 600)} height={Math.max(canvasH, 200)} role="img" aria-label="Pipeline DAG" style={{ display: 'block' }}>
           <defs>
-            <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="10" refY="3.5" orient="auto" fill="#94a3b8">
+            <pattern id="pipeline-grid" width="18" height="18" patternUnits="userSpaceOnUse">
+              <path d="M 18 0 L 0 0 0 18" fill="none" stroke="#d7dde5" strokeWidth="1" />
+            </pattern>
+            <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="10" refY="3.5" orient="auto" fill="#7b8794">
               <polygon points="0 0, 10 3.5, 0 7" />
             </marker>
           </defs>
+          <rect width="100%" height="100%" fill="url(#pipeline-grid)" />
           {/* Edges */}
           {nodes.flatMap((n) =>
             n.depends_on.map((dep) => {
@@ -267,7 +271,7 @@ export function PipelineCanvas({
               const path = `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
               return (
                 <g key={`${dep}->${n.id}`}>
-                  <path d={path} fill="none" stroke="#475569" strokeWidth={1.5} markerEnd="url(#arrowhead)" />
+                  <path d={path} fill="none" stroke="#7b8794" strokeWidth={1.4} markerEnd="url(#arrowhead)" />
                   {!readOnly && (
                     <path
                       d={path}
@@ -295,14 +299,15 @@ export function PipelineCanvas({
                 onClick={() => nodeClick(n.id)}
                 style={{ cursor: readOnly ? 'default' : 'pointer' }}
               >
-                <rect width={NODE_W} height={NODE_H} rx={8} ry={8} fill={nodeFill(n)} stroke={nodeStroke(n)} strokeWidth={2} />
-                <text x={12} y={22} fill="#f1f5f9" fontSize={13} fontWeight={600}>
+                <rect width={NODE_W} height={NODE_H} rx={2} ry={2} fill={nodeFill(n)} stroke={nodeStroke(n)} strokeWidth={1.5} />
+                <rect width={4} height={NODE_H} rx={2} ry={2} fill={selectedId === n.id ? '#2d72d2' : '#6f7d8c'} />
+                <text x={12} y={22} fill="#1f252d" fontSize={12} fontWeight={600}>
                   {n.label.length > 22 ? `${n.label.slice(0, 22)}…` : n.label}
                 </text>
-                <text x={12} y={42} fill="#94a3b8" fontSize={11}>
+                <text x={12} y={42} fill="#5f6b7a" fontSize={11}>
                   {n.transform_type}
                 </text>
-                <text x={12} y={56} fill="#64748b" fontSize={10} fontFamily="ui-monospace, monospace">
+                <text x={12} y={56} fill="#8b96a5" fontSize={10} fontFamily="ui-monospace, monospace">
                   {n.id}
                 </text>
                 {statusGlyph(n.id) && (
@@ -315,7 +320,7 @@ export function PipelineCanvas({
             );
           })}
           {nodes.length === 0 && (
-            <text x={20} y={40} fill="#94a3b8" fontSize={12}>
+            <text x={20} y={40} fill="#5f6b7a" fontSize={12}>
               Empty DAG. Click "+ SQL" or another transform to add a node.
             </text>
           )}

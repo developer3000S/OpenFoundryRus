@@ -59,30 +59,104 @@ const MIGRATED_ROUTES: { path: string; title: string; description: string }[] = 
 ];
 
 export function Home() {
+  const primaryRoutes = MIGRATED_ROUTES.filter((route) =>
+    ['/projects', '/datasets', '/pipelines', '/dashboards', '/ontology', '/builds', '/workflows', '/apps'].includes(route.path),
+  );
+  const recentRoutes = MIGRATED_ROUTES.slice(0, 14);
+
   return (
-    <section className="of-page" style={{ display: 'grid', gap: 16 }}>
-      <header className="of-hero-strip">
-        <p className="of-eyebrow">OpenFoundry</p>
-        <h1 className="of-heading-xl">React shell</h1>
-        <p className="of-text-muted">
-          Routes ported so far. The Svelte app at <code>apps/web</code> still owns everything
-          else; each migrated folder gets registered in <code>src/router.tsx</code>.
-        </p>
+    <section className="of-page" style={{ display: 'grid', gap: 10 }}>
+      <header className="of-hero-strip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <p className="of-eyebrow">Workspace</p>
+          <h1 className="of-heading-xl">OpenFoundry</h1>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Link to="/projects" className="of-button">Projects</Link>
+          <Link to="/datasets" className="of-button">Datasets</Link>
+          <Link to="/pipelines" className="of-button of-button--primary">New pipeline</Link>
+        </div>
       </header>
 
-      <div
-        className="of-card-grid"
-        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}
-      >
-        {MIGRATED_ROUTES.map((route) => (
-          <Link key={route.path} to={route.path} className="of-card" style={{ textDecoration: 'none' }}>
-            <p className="of-eyebrow">{route.path}</p>
-            <h2 className="of-heading-md">{route.title}</h2>
-            <p className="of-text-muted" style={{ fontSize: 13 }}>
-              {route.description}
-            </p>
-          </Link>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+        {[
+          ['Resources', MIGRATED_ROUTES.length],
+          ['Builds', 8],
+          ['Objects', 24],
+          ['Branches', 3],
+        ].map(([label, value]) => (
+          <section key={label} className="of-panel" style={{ padding: 10 }}>
+            <p className="of-eyebrow">{label}</p>
+            <p style={{ marginTop: 4, color: 'var(--text-strong)', fontSize: 22, fontWeight: 600 }}>{value}</p>
+          </section>
         ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 10, alignItems: 'start' }}>
+        <section className="of-panel" style={{ overflow: 'hidden' }}>
+          <div className="of-toolbar" style={{ border: 0, borderBottom: '1px solid var(--border-default)', borderRadius: 0, justifyContent: 'space-between' }}>
+            <div>
+              <p className="of-heading-sm">Resources</p>
+              <p className="of-text-muted" style={{ fontSize: 11 }}>Pinned workspace entry points</p>
+            </div>
+            <input className="of-input" placeholder="Search resources" style={{ width: 220 }} />
+          </div>
+          <table className="of-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Path</th>
+                <th>Description</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {primaryRoutes.map((route) => (
+                <tr key={route.path}>
+                  <td><Link to={route.path}>{route.title}</Link></td>
+                  <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{route.path}</td>
+                  <td className="of-text-muted">{route.description}</td>
+                  <td><span className="of-chip of-chip-active">Migrated</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+
+        <aside style={{ display: 'grid', gap: 10 }}>
+          <section className="of-panel" style={{ padding: 10 }}>
+            <p className="of-heading-sm">Recent</p>
+            <div style={{ display: 'grid', marginTop: 8 }}>
+              {recentRoutes.map((route) => (
+                <Link
+                  key={route.path}
+                  to={route.path}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    padding: '7px 0',
+                    borderTop: '1px solid var(--border-subtle)',
+                    color: 'var(--text-default)',
+                    fontSize: 12,
+                  }}
+                >
+                  <span>{route.title}</span>
+                  <span className="of-text-muted" style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>{route.path}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+          <section className="of-panel" style={{ padding: 10 }}>
+            <p className="of-heading-sm">Environment</p>
+            <dl style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '7px 10px', marginTop: 8, fontSize: 12 }}>
+              <dt className="of-text-muted">Branch</dt><dd>master</dd>
+              <dt className="of-text-muted">Ontology</dt><dd>default</dd>
+              <dt className="of-text-muted">Access</dt><dd>Editor</dd>
+              <dt className="of-text-muted">Build health</dt><dd style={{ color: 'var(--status-success)', fontWeight: 700 }}>Passing</dd>
+            </dl>
+          </section>
+        </aside>
       </div>
     </section>
   );

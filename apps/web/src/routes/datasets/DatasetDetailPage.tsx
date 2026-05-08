@@ -148,123 +148,157 @@ export function DatasetDetailPage() {
   const previewColumns = previewRows.length > 0 ? Object.keys(previewRows[0]) : [];
 
   return (
-    <section className="of-page" style={{ padding: 24, display: 'grid', gap: 16 }}>
-      <Link to="/datasets" style={{ color: 'var(--text-muted)', fontSize: 13 }}>← Datasets</Link>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-        <div>
-          <h1 className="of-heading-xl">{dataset.name}</h1>
-          <p className="of-text-muted" style={{ marginTop: 4, fontSize: 12 }}>
-            {dataset.id} · {dataset.format} · {dataset.row_count} rows · {dataset.size_bytes} bytes · branch: {dataset.active_branch}
-          </p>
+    <section className="of-page" style={{ display: 'grid', gap: 10 }}>
+      <header className="of-panel" style={{ padding: 10, display: 'grid', gap: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <Link to="/datasets" style={{ color: 'var(--text-muted)', fontSize: 12 }}>← Datasets</Link>
+            <h1 className="of-heading-lg" style={{ marginTop: 4 }}>{dataset.name}</h1>
+            <p className="of-text-muted" style={{ marginTop: 2, fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+              {dataset.id}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <Link to={`/datasets/${dataset.id}/branches`} className="of-button">Branches</Link>
+            <button type="button" onClick={() => void remove()} disabled={busy} className="of-button" style={{ color: '#b42318', borderColor: '#e5b8b8' }}>
+              Delete
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <Link to={`/datasets/${dataset.id}/branches`} className="of-button" style={{ fontSize: 12 }}>Branches</Link>
-          <button type="button" onClick={() => void remove()} disabled={busy} className="of-button" style={{ color: '#b91c1c', borderColor: '#fecaca' }}>
-            Delete
-          </button>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <span className="of-chip">{dataset.format}</span>
+          <span className="of-chip">{dataset.row_count.toLocaleString()} rows</span>
+          <span className="of-chip">{dataset.size_bytes.toLocaleString()} bytes</span>
+          <span className="of-chip of-chip-active">{dataset.active_branch}</span>
         </div>
       </header>
 
       {error && (
-        <div className="of-status-danger" style={{ padding: '10px 14px', borderRadius: 'var(--radius-md)', fontSize: 13 }}>
+        <div className="of-status-danger" style={{ padding: '8px 10px', borderRadius: 'var(--radius-md)', fontSize: 12 }}>
           {error}
         </div>
       )}
 
-      <Tabs
-        tabs={['preview', 'schema', 'files', 'transactions', 'versions', 'quality', 'metadata'] as const}
-        active={tab}
-        onChange={(t) => void loadTab(t)}
-      />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 460px), 1fr))', gap: 10, alignItems: 'start' }}>
+        <section className="of-panel" style={{ minWidth: 0, overflow: 'hidden' }}>
+          <Tabs
+            tabs={['preview', 'schema', 'files', 'transactions', 'versions', 'quality', 'metadata'] as const}
+            active={tab}
+            onChange={(t) => void loadTab(t)}
+          />
 
-      {tab === 'preview' && (
-        <section className="of-panel" style={{ padding: 16 }}>
-          {preview ? (
-            <VirtualizedPreviewTable
-              columns={preview.columns ?? previewColumns.map((name) => ({ name }))}
-              rows={previewRows}
-              transactions={transactions}
-              fileFormat={preview.format ?? null}
-            />
-          ) : (
-            <p className="of-text-muted">No preview yet.</p>
-          )}
-        </section>
-      )}
+          <div style={{ padding: tab === 'preview' ? 0 : 10 }}>
+            {tab === 'preview' && (
+              preview ? (
+                <VirtualizedPreviewTable
+                  columns={preview.columns ?? previewColumns.map((name) => ({ name }))}
+                  rows={previewRows}
+                  transactions={transactions}
+                  fileFormat={preview.format ?? null}
+                />
+              ) : (
+                <p className="of-text-muted" style={{ padding: 12 }}>No preview yet.</p>
+              )
+            )}
 
-      {tab === 'schema' && (
-        <section className="of-panel" style={{ padding: 16 }}>
-          {schema ? <SchemaTable fields={schema.fields} /> : <p className="of-text-muted">Loading…</p>}
-        </section>
-      )}
+            {tab === 'schema' && (schema ? <SchemaTable fields={schema.fields} /> : <p className="of-text-muted">Loading…</p>)}
 
-      {tab === 'files' && (
-        <section className="of-panel" style={{ padding: 16 }}>
-          <ul style={{ paddingLeft: 18, fontSize: 12 }}>
-            {files.map((f) => (
-              <li key={f.path}>{f.path} · {f.entry_type} · {f.size_bytes ?? '—'} bytes</li>
-            ))}
-            {files.length === 0 && <li className="of-text-muted">No files.</li>}
-          </ul>
-        </section>
-      )}
+            {tab === 'files' && (
+              <table className="of-table">
+                <thead><tr><th>Path</th><th>Type</th><th>Size</th></tr></thead>
+                <tbody>
+                  {files.map((f) => (
+                    <tr key={f.path}><td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{f.path}</td><td>{f.entry_type}</td><td>{f.size_bytes ?? '—'} bytes</td></tr>
+                  ))}
+                  {files.length === 0 && <tr><td colSpan={3} className="of-text-muted">No files.</td></tr>}
+                </tbody>
+              </table>
+            )}
 
-      {tab === 'transactions' && (
-        <section className="of-panel" style={{ padding: 16 }}>
-          <ul style={{ paddingLeft: 18, fontSize: 12 }}>
-            {transactions.map((t) => (
-              <li key={t.id}>
-                {t.id} · {t.operation} · {t.status} · {new Date(t.created_at).toLocaleString()}
-              </li>
-            ))}
-            {transactions.length === 0 && <li className="of-text-muted">No transactions.</li>}
-          </ul>
-        </section>
-      )}
+            {tab === 'transactions' && (
+              <table className="of-table">
+                <thead><tr><th>ID</th><th>Operation</th><th>Status</th><th>Created</th></tr></thead>
+                <tbody>
+                  {transactions.map((t) => (
+                    <tr key={t.id}>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{t.id}</td>
+                      <td>{t.operation}</td>
+                      <td>{t.status}</td>
+                      <td>{new Date(t.created_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                  {transactions.length === 0 && <tr><td colSpan={4} className="of-text-muted">No transactions.</td></tr>}
+                </tbody>
+              </table>
+            )}
 
-      {tab === 'versions' && (
-        <section className="of-panel" style={{ padding: 16 }}>
-          <ul style={{ paddingLeft: 18, fontSize: 12 }}>
-            {versions.map((v) => (
-              <li key={v.id}>v{v.version} · {v.message || '—'} · {v.row_count} rows · {new Date(v.created_at).toLocaleString()}</li>
-            ))}
-            {versions.length === 0 && <li className="of-text-muted">No versions.</li>}
-          </ul>
-        </section>
-      )}
+            {tab === 'versions' && (
+              <table className="of-table">
+                <thead><tr><th>Version</th><th>Message</th><th>Rows</th><th>Created</th></tr></thead>
+                <tbody>
+                  {versions.map((v) => (
+                    <tr key={v.id}><td>v{v.version}</td><td>{v.message || '—'}</td><td>{v.row_count}</td><td>{new Date(v.created_at).toLocaleString()}</td></tr>
+                  ))}
+                  {versions.length === 0 && <tr><td colSpan={4} className="of-text-muted">No versions.</td></tr>}
+                </tbody>
+              </table>
+            )}
 
-      {tab === 'quality' && (
-        <section className="of-panel" style={{ padding: 16 }}>
-          <button type="button" onClick={() => void refreshQuality()} disabled={busy} className="of-button" style={{ fontSize: 12 }}>
-            Refresh quality profile
-          </button>
-          <pre style={{ marginTop: 8, padding: 12, background: 'var(--bg-subtle)', fontSize: 11, fontFamily: 'var(--font-mono)', borderRadius: 12, overflow: 'auto' }}>
-            {quality ? JSON.stringify(quality, null, 2) : 'Loading…'}
-          </pre>
-        </section>
-      )}
+            {tab === 'quality' && (
+              <div style={{ display: 'grid', gap: 8 }}>
+                <button type="button" onClick={() => void refreshQuality()} disabled={busy} className="of-button" style={{ width: 'fit-content' }}>
+                  Refresh quality profile
+                </button>
+                <pre style={{ padding: 10, background: 'var(--bg-subtle)', fontSize: 11, fontFamily: 'var(--font-mono)', borderRadius: 2, overflow: 'auto' }}>
+                  {quality ? JSON.stringify(quality, null, 2) : 'Loading…'}
+                </pre>
+              </div>
+            )}
 
-      {tab === 'metadata' && (
-        <section className="of-panel" style={{ padding: 16, display: 'grid', gap: 8 }}>
-          <label style={{ fontSize: 13 }}>
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} className="of-input" style={{ marginTop: 4 }} />
-          </label>
-          <label style={{ fontSize: 13 }}>
-            Description
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className="of-input" style={{ marginTop: 4 }} />
-          </label>
-          <label style={{ fontSize: 13 }}>
-            Tags (comma separated)
-            <input value={tagsText} onChange={(e) => setTagsText(e.target.value)} className="of-input" style={{ marginTop: 4 }} />
-          </label>
-          <div>
-            <button type="button" onClick={() => void save()} disabled={busy} className="of-button of-button--primary">
-              Save
-            </button>
+            {tab === 'metadata' && (
+              <div style={{ display: 'grid', gap: 8 }}>
+                <label style={{ fontSize: 12 }}>
+                  Name
+                  <input value={name} onChange={(e) => setName(e.target.value)} className="of-input" style={{ marginTop: 4 }} />
+                </label>
+                <label style={{ fontSize: 12 }}>
+                  Description
+                  <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className="of-input" style={{ marginTop: 4 }} />
+                </label>
+                <label style={{ fontSize: 12 }}>
+                  Tags
+                  <input value={tagsText} onChange={(e) => setTagsText(e.target.value)} className="of-input" style={{ marginTop: 4 }} />
+                </label>
+                <button type="button" onClick={() => void save()} disabled={busy} className="of-button of-button--primary" style={{ width: 'fit-content' }}>
+                  Save
+                </button>
+              </div>
+            )}
           </div>
         </section>
-      )}
+
+        <aside className="of-panel" style={{ padding: 10, display: 'grid', gap: 10 }}>
+          <div>
+            <p className="of-heading-sm">Dataset details</p>
+            <p className="of-text-muted" style={{ fontSize: 12, marginTop: 4 }}>{dataset.description || 'No description.'}</p>
+          </div>
+          <dl style={{ display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr)', gap: '7px 10px', fontSize: 12 }}>
+            <dt className="of-text-muted">Owner</dt><dd>{dataset.owner_id}</dd>
+            <dt className="of-text-muted">Version</dt><dd>v{dataset.current_version}</dd>
+            <dt className="of-text-muted">Storage</dt><dd style={{ fontFamily: 'var(--font-mono)', overflowWrap: 'anywhere' }}>{dataset.storage_path}</dd>
+            <dt className="of-text-muted">Created</dt><dd>{new Date(dataset.created_at).toLocaleString()}</dd>
+            <dt className="of-text-muted">Updated</dt><dd>{new Date(dataset.updated_at).toLocaleString()}</dd>
+            <dt className="of-text-muted">Quality</dt><dd>{quality?.score == null ? '—' : `${Math.round(quality.score * 100)}%`}</dd>
+          </dl>
+          <div>
+            <p className="of-eyebrow">Tags</p>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+              {dataset.tags.map((tag) => <span key={tag} className="of-chip">{tag}</span>)}
+              {dataset.tags.length === 0 && <span className="of-text-muted">No tags</span>}
+            </div>
+          </div>
+        </aside>
+      </div>
     </section>
   );
 }
@@ -280,27 +314,27 @@ function SchemaTable({ fields }: { fields: unknown }) {
   const rows: SchemaField[] = Array.isArray(fields) ? (fields as SchemaField[]) : [];
   if (rows.length === 0) {
     return (
-      <pre style={{ padding: 12, background: 'var(--bg-subtle)', fontSize: 11, fontFamily: 'var(--font-mono)', borderRadius: 12, overflow: 'auto' }}>
+      <pre style={{ padding: 10, background: 'var(--bg-subtle)', fontSize: 11, fontFamily: 'var(--font-mono)', borderRadius: 2, overflow: 'auto' }}>
         {JSON.stringify(fields, null, 2)}
       </pre>
     );
   }
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+    <table className="of-table" style={{ fontSize: 12 }}>
       <thead>
         <tr>
           {['Name', 'Type', 'Nullable', 'Description'].map((h) => (
-            <th key={h} style={{ textAlign: 'left', padding: 6, borderBottom: '1px solid var(--border-default)' }}>{h}</th>
+            <th key={h}>{h}</th>
           ))}
         </tr>
       </thead>
       <tbody>
         {rows.map((f, i) => (
-          <tr key={i} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-            <td style={{ padding: 6, fontFamily: 'var(--font-mono)' }}>{f.name ?? '—'}</td>
-            <td style={{ padding: 6 }}>{f.type ?? '—'}</td>
-            <td style={{ padding: 6 }}>{f.nullable === undefined ? '—' : f.nullable ? '✓' : '✗'}</td>
-            <td style={{ padding: 6 }} className="of-text-muted">{f.description ?? '—'}</td>
+          <tr key={i}>
+            <td style={{ fontFamily: 'var(--font-mono)' }}>{f.name ?? '—'}</td>
+            <td>{f.type ?? '—'}</td>
+            <td>{f.nullable === undefined ? '—' : f.nullable ? '✓' : '✗'}</td>
+            <td className="of-text-muted">{f.description ?? '—'}</td>
           </tr>
         ))}
       </tbody>

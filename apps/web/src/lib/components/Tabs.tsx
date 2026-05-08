@@ -13,7 +13,7 @@ interface TabsProps<T extends string> {
 
 export function Tabs<T extends string>({ tabs, active, onChange }: TabsProps<T>) {
   return (
-    <div role="tablist" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, borderBottom: '1px solid var(--border-default)' }}>
+    <div className="of-tabbar" role="tablist">
       {tabs.map((entry) => {
         const id = (typeof entry === 'string' ? entry : entry.id) as T;
         const label = typeof entry === 'string' ? entry : (entry.label ?? entry.id);
@@ -24,15 +24,9 @@ export function Tabs<T extends string>({ tabs, active, onChange }: TabsProps<T>)
             type="button"
             role="tab"
             aria-selected={selected}
+            className={`of-tab${selected ? ' of-tab-active' : ''}`}
             onClick={() => onChange(id)}
             style={{
-              fontSize: 12,
-              borderBottom: selected ? '2px solid #1d4ed8' : '2px solid transparent',
-              background: 'transparent',
-              border: 'none',
-              padding: '8px 16px',
-              cursor: 'pointer',
-              color: selected ? 'var(--text-default)' : 'var(--text-muted)',
               textTransform: typeof label === 'string' ? 'capitalize' : undefined,
             }}
           >

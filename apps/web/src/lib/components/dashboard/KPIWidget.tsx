@@ -37,8 +37,8 @@ export function KPIWidget({ widget, result }: KPIWidgetProps) {
           smooth: true,
           data: sparkline,
           showSymbol: false,
-          lineStyle: { color: '#0f766e', width: 3 },
-          areaStyle: { color: 'rgba(15, 118, 110, 0.18)' },
+          lineStyle: { color: '#2d72d2', width: 2 },
+          areaStyle: { color: 'rgba(45, 114, 210, 0.12)' },
         },
       ],
     };
@@ -49,12 +49,12 @@ export function KPIWidget({ widget, result }: KPIWidgetProps) {
       style={{
         display: 'flex',
         height: '100%',
-        minHeight: 200,
+        minHeight: 170,
         flexDirection: 'column',
         justifyContent: 'space-between',
-        gap: 24,
-        background: 'radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 55%)',
-        padding: 4,
+        gap: 14,
+        background: '#fff',
+        padding: 0,
         borderRadius: 'var(--radius-md)',
       }}
     >
@@ -62,11 +62,11 @@ export function KPIWidget({ widget, result }: KPIWidgetProps) {
         <div className="of-eyebrow">Current Value</div>
         <div
           style={{
-            marginTop: 12,
-            fontSize: 36,
+            marginTop: 8,
+            fontSize: 30,
             fontWeight: 600,
             color: 'var(--text-strong)',
-            letterSpacing: '-0.02em',
+            letterSpacing: 0,
           }}
         >
           {formatMetricValue(value, widget.valueFormat)}
@@ -74,7 +74,7 @@ export function KPIWidget({ widget, result }: KPIWidgetProps) {
         {delta !== null && (
           <div
             className={`of-chip ${delta >= 0 ? 'of-status-success' : 'of-status-danger'}`}
-            style={{ marginTop: 12 }}
+            style={{ marginTop: 8 }}
           >
             <span>{delta >= 0 ? '▲' : '▼'}</span>
             <span>{Math.abs(delta).toFixed(1)}%</span>
@@ -83,13 +83,13 @@ export function KPIWidget({ widget, result }: KPIWidgetProps) {
       </div>
 
       <div style={{ display: 'grid', gap: 8 }}>
-        <div className="of-eyebrow">Sparkline</div>
+        <div className="of-eyebrow">Trend</div>
         {sparklineOptions ? (
-          <EChartCanvas options={sparklineOptions} style={{ height: 80 }} />
+          <EChartCanvas options={sparklineOptions} style={{ height: 72 }} />
         ) : (
           <div
             style={{
-              height: 80,
+              height: 72,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

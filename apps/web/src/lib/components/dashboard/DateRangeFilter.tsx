@@ -57,16 +57,17 @@ export function DateRangeFilter({ value, disabled = false, onChange }: DateRange
         display: 'flex',
         flexWrap: 'wrap',
         alignItems: 'center',
-        gap: 12,
+        gap: 6,
         background: '#fff',
         border: '1px solid var(--border-default)',
         borderRadius: 'var(--radius-md)',
-        padding: '8px 12px',
+        padding: '4px 8px',
+        flex: '1 1 300px',
       }}
     >
       <div>
         <div className="of-eyebrow">Date Range</div>
-        <div style={{ marginTop: 4, fontSize: 13, fontWeight: 500, color: 'var(--text-strong)' }}>
+        <div style={{ marginTop: 2, fontSize: 12, fontWeight: 500, color: 'var(--text-strong)' }}>
           {resolved.label}
         </div>
       </div>
@@ -81,7 +82,7 @@ export function DateRangeFilter({ value, disabled = false, onChange }: DateRange
 
       {showCustomInputs && (
         <>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
             <span>From</span>
             <input
               type="date"
@@ -92,7 +93,7 @@ export function DateRangeFilter({ value, disabled = false, onChange }: DateRange
               style={{ width: 'auto' }}
             />
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
             <span>To</span>
             <input
               type="date"

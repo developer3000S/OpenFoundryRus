@@ -159,16 +159,34 @@ export function PipelineEditPage() {
   }
 
   return (
-    <section className="of-page" style={{ padding: 24, display: 'grid', gap: 16 }}>
-      <Link to="/pipelines" style={{ color: 'var(--text-muted)', fontSize: 13 }}>← Pipelines</Link>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-        <div>
-          <h1 className="of-heading-xl">{pipeline.name}</h1>
-          <p className="of-text-muted" style={{ marginTop: 4, fontSize: 12 }}>
-            {pipeline.id} · {pipeline.status} · {pipeline.pipeline_type ?? 'BATCH'}
-          </p>
+    <section className="of-page" style={{ display: 'grid', gap: 10 }}>
+      <header className="of-panel" style={{ display: 'grid', gap: 8, padding: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <Link to="/pipelines" style={{ color: 'var(--text-muted)', fontSize: 12 }}>← Pipelines</Link>
+            <h1 className="of-heading-lg" style={{ marginTop: 4 }}>{pipeline.name}</h1>
+            <p className="of-text-muted" style={{ marginTop: 2, fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+              {pipeline.id}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <span className="of-chip of-chip-active">{pipeline.status}</span>
+            <span className="of-chip">{pipeline.pipeline_type ?? 'BATCH'}</span>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div className="of-toolbar" style={{ borderRadius: 0, margin: '0 -10px -10px', borderRight: 0, borderLeft: 0, borderBottom: 0, justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <select value={statusValue} onChange={(e) => setStatusValue(e.target.value)} className="of-select" style={{ width: 120 }}>
+              <option value="draft">draft</option>
+              <option value="active">active</option>
+              <option value="paused">paused</option>
+              <option value="archived">archived</option>
+            </select>
+            <span className="of-text-muted" style={{ alignSelf: 'center', fontSize: 11 }}>
+              {runs.length} run{runs.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <button type="button" onClick={() => void runValidate()} disabled={busy} className="of-button">
             Validate
           </button>
@@ -178,115 +196,103 @@ export function PipelineEditPage() {
           <button type="button" onClick={() => void save()} disabled={saving} className="of-button of-button--primary">
             {saving ? 'Saving…' : 'Save'}
           </button>
+          </div>
         </div>
       </header>
 
       {error && (
-        <div className="of-status-danger" style={{ padding: '10px 14px', borderRadius: 'var(--radius-md)', fontSize: 13 }}>
+        <div className="of-status-danger" style={{ padding: '8px 10px', borderRadius: 'var(--radius-md)', fontSize: 12 }}>
           {error}
         </div>
       )}
 
-      <Tabs tabs={['canvas', 'nodes', 'config', 'runs', 'validate'] as const} active={tab} onChange={setTab} />
+      <section className="of-panel" style={{ overflow: 'hidden' }}>
+        <Tabs tabs={['canvas', 'nodes', 'config', 'runs', 'validate'] as const} active={tab} onChange={setTab} />
 
-      {tab === 'canvas' && (
-        <PipelineCanvas
-          nodes={(() => {
-            try { return JSON.parse(nodesJson) as PipelineNode[]; }
-            catch { return []; }
-          })()}
-          status={statusValue}
-          scheduleConfig={(() => {
-            try { return JSON.parse(scheduleJson); }
-            catch { return { enabled: false, cron: null }; }
-          })()}
-          onChange={(next) => setNodesJson(JSON.stringify(next, null, 2))}
-        />
-      )}
-
-      {tab === 'nodes' && (
-        <PipelineNodeList
-          nodes={(() => {
-            try { return JSON.parse(nodesJson) as PipelineNode[]; }
-            catch { return []; }
-          })()}
-          onChange={(next) => setNodesJson(JSON.stringify(next, null, 2))}
-        />
-      )}
-
-      {tab === 'config' && (
-        <section className="of-panel" style={{ padding: 16, display: 'grid', gap: 8 }}>
-          <label style={{ fontSize: 13 }}>
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} className="of-input" style={{ marginTop: 4 }} />
-          </label>
-          <label style={{ fontSize: 13 }}>
-            Description
-            <input value={description} onChange={(e) => setDescription(e.target.value)} className="of-input" style={{ marginTop: 4 }} />
-          </label>
-          <label style={{ fontSize: 13 }}>
-            Status
-            <select value={statusValue} onChange={(e) => setStatusValue(e.target.value)} className="of-input" style={{ marginTop: 4 }}>
-              <option value="draft">draft</option>
-              <option value="active">active</option>
-              <option value="paused">paused</option>
-              <option value="archived">archived</option>
-            </select>
-          </label>
-          <JsonEditor label="Nodes JSON (DAG)" value={nodesJson} onChange={setNodesJson} minHeight={320} />
-          <JsonEditor label="Schedule config JSON" value={scheduleJson} onChange={setScheduleJson} minHeight={80} />
-          <JsonEditor label="Retry policy JSON" value={retryJson} onChange={setRetryJson} minHeight={80} />
-        </section>
-      )}
-
-      {tab === 'runs' && (
-        <section className="of-panel" style={{ padding: 16 }}>
-          <p className="of-eyebrow">Runs ({runs.length})</p>
-          <ul style={{ marginTop: 8, paddingLeft: 0, listStyle: 'none' }}>
-            {runs.map((r) => (
-              <li
-                key={r.id}
-                style={{
-                  padding: 10,
-                  borderBottom: '1px solid var(--border-default)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                }}
-              >
-                <div>
-                  <strong>{r.status}</strong> · attempt {r.attempt_number} · {r.trigger_type} · {new Date(r.started_at).toLocaleString()}
-                  {r.error_message && <p className="of-text-muted" style={{ fontSize: 11, marginTop: 4 }}>{r.error_message}</p>}
-                </div>
-                <button type="button" onClick={() => void retryRun(r.id)} disabled={busy} className="of-button" style={{ fontSize: 11 }}>
-                  Retry
-                </button>
-              </li>
-            ))}
-            {runs.length === 0 && <li className="of-text-muted">No runs yet.</li>}
-          </ul>
-        </section>
-      )}
-
-      {tab === 'validate' && (
-        <section className="of-panel" style={{ padding: 16 }}>
-          {validation ? (
-            <>
-              <p className="of-eyebrow">{validation.valid ? '✓ Valid' : '✗ Invalid'}</p>
-              {validation.errors.length > 0 && (
-                <ul style={{ marginTop: 8, paddingLeft: 18, fontSize: 12 }}>
-                  {validation.errors.map((e, i) => (
-                    <li key={i} style={{ color: '#b91c1c' }}>{e}</li>
-                  ))}
-                </ul>
-              )}
-            </>
-          ) : (
-            <p className="of-text-muted">Click "Validate" to run server-side DAG validation.</p>
+        <div style={{ padding: tab === 'canvas' ? 0 : 10 }}>
+          {tab === 'canvas' && (
+            <PipelineCanvas
+              nodes={(() => {
+                try { return JSON.parse(nodesJson) as PipelineNode[]; }
+                catch { return []; }
+              })()}
+              status={statusValue}
+              scheduleConfig={(() => {
+                try { return JSON.parse(scheduleJson); }
+                catch { return { enabled: false, cron: null }; }
+              })()}
+              onChange={(next) => setNodesJson(JSON.stringify(next, null, 2))}
+            />
           )}
-        </section>
-      )}
+
+          {tab === 'nodes' && (
+            <PipelineNodeList
+              nodes={(() => {
+                try { return JSON.parse(nodesJson) as PipelineNode[]; }
+                catch { return []; }
+              })()}
+              onChange={(next) => setNodesJson(JSON.stringify(next, null, 2))}
+            />
+          )}
+
+          {tab === 'config' && (
+            <section style={{ display: 'grid', gap: 8 }}>
+              <label style={{ fontSize: 12 }}>
+                Name
+                <input value={name} onChange={(e) => setName(e.target.value)} className="of-input" style={{ marginTop: 4 }} />
+              </label>
+              <label style={{ fontSize: 12 }}>
+                Description
+                <input value={description} onChange={(e) => setDescription(e.target.value)} className="of-input" style={{ marginTop: 4 }} />
+              </label>
+              <JsonEditor label="Nodes JSON (DAG)" value={nodesJson} onChange={setNodesJson} minHeight={320} />
+              <JsonEditor label="Schedule config JSON" value={scheduleJson} onChange={setScheduleJson} minHeight={80} />
+              <JsonEditor label="Retry policy JSON" value={retryJson} onChange={setRetryJson} minHeight={80} />
+            </section>
+          )}
+
+          {tab === 'runs' && (
+            <table className="of-table">
+              <thead><tr><th>Status</th><th>Attempt</th><th>Trigger</th><th>Started</th><th /></tr></thead>
+              <tbody>
+                {runs.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.status}</td>
+                    <td>{r.attempt_number}</td>
+                    <td>{r.trigger_type}</td>
+                    <td>{new Date(r.started_at).toLocaleString()}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button type="button" onClick={() => void retryRun(r.id)} disabled={busy} className="of-button" style={{ fontSize: 11 }}>
+                        Retry
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {runs.length === 0 && <tr><td colSpan={5} className="of-text-muted">No runs yet.</td></tr>}
+              </tbody>
+            </table>
+          )}
+
+          {tab === 'validate' && (
+            <section>
+              {validation ? (
+                <>
+                  <p className="of-eyebrow">{validation.valid ? '✓ Valid' : '✗ Invalid'}</p>
+                  {validation.errors.length > 0 && (
+                    <ul style={{ marginTop: 8, paddingLeft: 18, fontSize: 12 }}>
+                      {validation.errors.map((e, i) => (
+                        <li key={i} style={{ color: '#b42318' }}>{e}</li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : (
+                <p className="of-text-muted">Click "Validate" to run server-side DAG validation.</p>
+              )}
+            </section>
+          )}
+        </div>
+      </section>
     </section>
   );
 }

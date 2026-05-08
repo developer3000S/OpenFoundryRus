@@ -4,7 +4,7 @@ import { EChartCanvas } from '@components/EChartCanvas';
 import type { QueryResult } from '@/lib/api/queries';
 import { toNumber, type DashboardChartWidget } from '@/lib/utils/dashboards';
 
-const PALETTE = ['#0f766e', '#0369a1', '#c2410c', '#7c3aed', '#be123c'];
+const PALETTE = ['#2d72d2', '#16b8b3', '#d9822b', '#bfccd6', '#c23030'];
 
 function buildOptions(widget: DashboardChartWidget, result: QueryResult | null): unknown {
   if (!result || result.rows.length === 0) return null;

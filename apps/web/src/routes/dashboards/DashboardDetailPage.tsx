@@ -293,11 +293,11 @@ export function DashboardDetailPage() {
   }
 
   return (
-    <section className="of-page" style={{ display: 'grid', gap: 16 }}>
-      <div className="of-panel" style={{ padding: 24 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-          <div style={{ maxWidth: 720, display: 'grid', gap: 12 }}>
-            <Link to="/dashboards" className="of-link" style={{ fontSize: 13 }}>
+    <section className="of-page" style={{ display: 'grid', gap: 10 }}>
+      <div className="of-panel" style={{ padding: 10 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ maxWidth: 720, display: 'grid', gap: 7 }}>
+            <Link to="/dashboards" className="of-link" style={{ fontSize: 12 }}>
               ← Back to dashboards
             </Link>
 
@@ -311,9 +311,9 @@ export function DashboardDetailPage() {
                   style={{
                     width: '100%',
                     background: 'transparent',
-                    fontSize: 28,
-                    fontWeight: 700,
-                    letterSpacing: '-0.02em',
+                    fontSize: 20,
+                    fontWeight: 600,
+                    letterSpacing: 0,
                     color: 'var(--text-strong)',
                     border: 0,
                     outline: 'none',
@@ -328,8 +328,8 @@ export function DashboardDetailPage() {
                     width: '100%',
                     resize: 'none',
                     background: 'transparent',
-                    fontSize: 14,
-                    lineHeight: 1.7,
+                    fontSize: 12,
+                    lineHeight: 1.4,
                     color: 'var(--text-muted)',
                     border: 0,
                     outline: 'none',
@@ -356,7 +356,7 @@ export function DashboardDetailPage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {dashboard ? (
               <>
                 <button
@@ -390,7 +390,7 @@ export function DashboardDetailPage() {
         {readOnlySnapshot && (
           <div
             className="of-status-warning"
-            style={{ marginTop: 20, padding: '10px 14px', borderRadius: 'var(--radius-md)', fontSize: 13 }}
+            style={{ marginTop: 10, padding: '8px 10px', borderRadius: 'var(--radius-md)', fontSize: 12 }}
           >
             This view comes from a snapshot link. Save a copy to persist edits locally.
           </div>
@@ -399,7 +399,7 @@ export function DashboardDetailPage() {
         {feedback && (
           <div
             className={feedbackTone === 'error' ? 'of-status-danger' : 'of-status-success'}
-            style={{ marginTop: 20, padding: '10px 14px', borderRadius: 'var(--radius-md)', fontSize: 13 }}
+            style={{ marginTop: 10, padding: '8px 10px', borderRadius: 'var(--radius-md)', fontSize: 12 }}
           >
             {feedback}
           </div>

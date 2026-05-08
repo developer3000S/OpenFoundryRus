@@ -8,7 +8,7 @@ export function AppShell() {
   return (
     <div className="of-shell" style={{ display: 'flex' }}>
       <Sidebar />
-      <main style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+      <main className="of-main">
         <Topbar />
         <Outlet />
       </main>

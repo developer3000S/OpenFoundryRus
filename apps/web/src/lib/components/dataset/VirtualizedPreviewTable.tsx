@@ -73,14 +73,14 @@ export function VirtualizedPreviewTable({
   const badge = badgeLabel(fileFormat, textSubFormat);
 
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
+    <div style={{ display: 'grid', gap: 0 }}>
       {(badge || schemaInferred || transactions.length > 0) && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 11 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 11, padding: 8, borderBottom: '1px solid var(--border-default)', background: 'var(--bg-topbar)' }}>
           {badge && (
-            <span style={{ padding: '2px 8px', background: '#1e293b', color: '#cbd5e1', borderRadius: 999, fontFamily: 'var(--font-mono)' }}>{badge}</span>
+            <span style={{ padding: '2px 6px', background: '#26313d', color: '#d8dee6', borderRadius: 2, fontFamily: 'var(--font-mono)' }}>{badge}</span>
           )}
           {schemaInferred && (
-            <span style={{ padding: '2px 8px', background: '#fef3c7', color: '#92400e', borderRadius: 999 }}>
+            <span style={{ padding: '2px 6px', background: '#fff3df', color: '#9a5b00', borderRadius: 2 }}>
               schema inferred
             </span>
           )}
@@ -91,9 +91,9 @@ export function VirtualizedPreviewTable({
                 onClick={() => onSelectTransaction?.(null)}
                 style={{
                   padding: '2px 8px',
-                  borderRadius: 999,
+                  borderRadius: 2,
                   border: '1px solid var(--border-default)',
-                  background: !selectedTransactionId ? '#1d4ed8' : 'transparent',
+                  background: !selectedTransactionId ? '#2d72d2' : '#fff',
                   color: !selectedTransactionId ? '#fff' : 'inherit',
                   fontSize: 10,
                   cursor: 'pointer',
@@ -113,9 +113,9 @@ export function VirtualizedPreviewTable({
                     title={`${t.operation} · ${t.status} · ${new Date(t.created_at).toLocaleString()}`}
                     style={{
                       padding: '2px 8px',
-                      borderRadius: 999,
+                      borderRadius: 2,
                       border: '1px solid var(--border-default)',
-                      background: sel ? '#1d4ed8' : 'transparent',
+                      background: sel ? '#2d72d2' : '#fff',
                       color: sel ? '#fff' : 'inherit',
                       fontSize: 10,
                       cursor: 'pointer',
@@ -138,21 +138,36 @@ export function VirtualizedPreviewTable({
         style={{
           height: viewportHeight,
           overflow: 'auto',
-          border: '1px solid var(--border-default)',
-          borderRadius: 12,
+          border: 0,
+          borderRadius: 0,
           background: 'var(--bg-default)',
           position: 'relative',
         }}
       >
         <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', fontSize: 12 }}>
-          <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--bg-default)' }}>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: '#f3f5f7' }}>
             <tr>
+              <th
+                style={{
+                  width: 42,
+                  textAlign: 'right',
+                  padding: '6px 8px',
+                  borderRight: '1px solid var(--border-subtle)',
+                  borderBottom: '1px solid var(--border-default)',
+                  color: 'var(--text-soft)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+              >
+                #
+              </th>
               {cols.map((c) => (
                 <th
                   key={c.name}
                   style={{
                     textAlign: 'left',
-                    padding: '6px 10px',
+                    padding: '6px 8px',
+                    borderRight: '1px solid var(--border-subtle)',
                     borderBottom: '1px solid var(--border-default)',
                     fontFamily: 'var(--font-mono)',
                     fontSize: 11,
@@ -177,16 +192,32 @@ export function VirtualizedPreviewTable({
           <tbody>
             {padTop > 0 && (
               <tr style={{ height: padTop }}>
-                <td colSpan={cols.length} />
+                <td colSpan={cols.length + 1} />
               </tr>
             )}
             {visibleRows.map((row, i) => (
               <tr key={startIdx + i} style={{ height: rowHeight }}>
+                <td
+                  style={{
+                    width: 42,
+                    padding: '4px 8px',
+                    borderRight: '1px solid var(--border-subtle)',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    color: 'var(--text-soft)',
+                    textAlign: 'right',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11,
+                    background: '#f8fafc',
+                  }}
+                >
+                  {startIdx + i + 1}
+                </td>
                 {cols.map((c) => (
                   <td
                     key={c.name}
                     style={{
-                      padding: '4px 10px',
+                      padding: '4px 8px',
+                      borderRight: '1px solid var(--border-subtle)',
                       borderBottom: '1px solid var(--border-subtle)',
                       maxWidth: 240,
                       overflow: 'hidden',
@@ -202,12 +233,12 @@ export function VirtualizedPreviewTable({
             ))}
             {padBottom > 0 && (
               <tr style={{ height: padBottom }}>
-                <td colSpan={cols.length} />
+                <td colSpan={cols.length + 1} />
               </tr>
             )}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={Math.max(1, cols.length)} className="of-text-muted" style={{ padding: 18, textAlign: 'center' }}>
+                <td colSpan={Math.max(1, cols.length + 1)} className="of-text-muted" style={{ padding: 18, textAlign: 'center' }}>
                   No rows.
                 </td>
               </tr>
@@ -216,7 +247,7 @@ export function VirtualizedPreviewTable({
         </table>
       </div>
 
-      <div className="of-text-muted" style={{ fontSize: 10 }}>
+      <div className="of-text-muted" style={{ fontSize: 10, padding: '6px 8px', borderTop: '1px solid var(--border-default)', background: 'var(--bg-topbar)' }}>
         {rows.length} row{rows.length === 1 ? '' : 's'} · {cols.length} column{cols.length === 1 ? '' : 's'} · windowed render
       </div>
     </div>
