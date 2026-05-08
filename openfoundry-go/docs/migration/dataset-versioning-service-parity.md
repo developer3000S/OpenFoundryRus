@@ -239,8 +239,8 @@ Go has a copied/ported migration set under `openfoundry-go/services/dataset-vers
 | `markings_inheritance.rs`, `branch_markings_snapshot_at_creation.rs` | dataset/branch markings | missing |
 | `branches_create_and_reparent.rs`, `branch_lifecycle_full_journey.rs`, `branch_create_from_transaction*.rs`, `branch_event_emitted_on_create_via_outbox.rs` | branch creation/actions/lifecycle/outbox | partial to missing |
 | `api_conformance_etag.rs`, `api_conformance_pagination.rs`, `api_conformance_batch_207.rs`, `foundry_semantics_edge_cases.rs` | protocol conformance | partial to missing |
-| `branch_ancestry_endpoint.rs`, `branch_fallback_resolution.rs`, `branch_delete_reparents_children_idempotent.rs` | ancestry/fallback/delete planning | missing |
-| `branch_compare_detects_conflicts.rs`, `branch_compare_lca_correct.rs` | branch compare/LCA/conflicts | missing |
+| `branch_ancestry_endpoint.rs`, `branch_fallback_resolution.rs`, `branch_delete_reparents_children_idempotent.rs` | ancestry/fallback/delete planning | ancestry/fallback implemented; delete planning partial |
+| `branch_compare_detects_conflicts.rs`, `branch_compare_lca_correct.rs` | branch compare/LCA/conflicts | implemented |
 | `branch_retention_archives_after_ttl.rs`, `branch_retention_inherited_resolves_to_parent.rs`, `retention_aborted_txns.rs` | retention worker/routes | missing |
 | `transactions_lifecycle.rs`, `transaction_types_matrix.rs`, `concurrent_transactions.rs`, `branch_open_tx_blocks_new_tx.rs`, `branch_open_tx_allows_child_branch.rs`, `delete_transaction_does_not_purge_storage.rs` | transaction start/get/commit/abort invariants | implemented |
 | `union_view_aggregates_all_deployment_outputs.rs`, `view_at_timestamp.rs`, `files_endpoint_respects_view_algorithm.rs` | views/current/at/files algorithms | implemented |
@@ -253,7 +253,8 @@ Go has a copied/ported migration set under `openfoundry-go/services/dataset-vers
 1. **Router shell parity with no-op/stub handlers**: mount exact Rust `/v1`, `/api/v1`, public, and internal paths in Go with typed handler names and explicit `501`/stub responses where logic is not migrated. This unblocks route-audit from prefix false negatives.
 2. **RID-aware dataset CRUD + model metadata slice**: reconcile `/v1/datasets*`, `/v1/catalog/facets`, model, metadata, markings, permissions, lineage-links, and file-index routes with Go repository methods and copied fixtures.
 3. **Foundry branches slice**: port branch list/create/get/delete/action, checkout, reparent, ancestry, fallback, compare, rollback, retention, markings, and restore contracts.
-4. **Transactions slice**: implemented on 2026-05-08; keep future work focused on live storage/backing-FS integration around staged files, not 501 route closure.
+   - 2026-05-08: Go branch compare now mirrors Rust LCA semantics (child→root ancestry and closest common ancestor), committed transaction summaries, and path-overlap conflict detection. Branch ancestry returns 404 on missing branches and child→root payloads. Fallback PUT accepts both `fallbacks` and `chain`, normalizes entries, rejects self/duplicate/cyclic chains, persists in `dataset_branch_fallbacks`, and mirrors the denormalized branch array.
+4. **Transactions slice**: port transaction start/get/list/batchGet/action dispatch for `:commit` and `:abort`, including invariants and pagination/conformance tests.
 5. **Views/files/schema slice**: port current/at/list/create/action/preview/data/files/schema routes and schema-per-view models.
 6. **Backing filesystem and upload slice**: finish LocalBackingFs/Iceberg/backing filesystem abstractions, presigned download/upload-url, storage-details, and multipart upload parity.
 7. **Quality/lint/health slice**: route handlers are ported for `/api/v1/datasets/*/quality`, lint, and dataset health. Follow-up can deepen live profiling/metrics recomputation beyond persisted profile/snapshot repository reads.

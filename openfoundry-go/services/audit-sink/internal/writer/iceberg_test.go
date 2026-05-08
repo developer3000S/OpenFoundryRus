@@ -54,14 +54,20 @@ func TestIcebergWriterAppendBuildsRustCompatibleAuditBatch(t *testing.T) {
 	if got := catalog.seen[0].PartitionTransform; got != "day(at)" {
 		t.Fatalf("partition = %q", got)
 	}
+	if got := catalog.seen[0].SortOrder; got != "at ASC" {
+		t.Fatalf("sort order = %q", got)
+	}
+	if !reflect.DeepEqual(catalog.seen[0].Schema, auditSchema()) {
+		t.Fatalf("schema = %#v, want %#v", catalog.seen[0].Schema, auditSchema())
+	}
 	if len(table.batches) != 1 || len(table.batches[0].Rows) != 1 {
 		t.Fatalf("batches = %#v", table.batches)
 	}
 	if got := table.batches[0].Rows[0]["payload"]; got != `{"ok":true}` {
 		t.Fatalf("payload = %#v", got)
 	}
-	if got := table.batches[0].Spec.Schema[0]; got != (FieldSpec{ID: 1, Name: "event_id", Type: "uuid", Required: true}) {
-		t.Fatalf("schema[0] = %#v", got)
+	if !reflect.DeepEqual(table.batches[0].Spec.Schema, auditSchema()) {
+		t.Fatalf("batch schema = %#v, want %#v", table.batches[0].Spec.Schema, auditSchema())
 	}
 }
 

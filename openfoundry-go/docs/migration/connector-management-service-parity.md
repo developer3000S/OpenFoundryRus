@@ -120,6 +120,8 @@ Remaining non-parity gaps are connector-runtime depth rather than HTTP route ava
 
 ### egress policies/network boundary
 
+Go now carries Rust-parity source policy binding handlers over `source_policy_bindings` plus a dedicated `internal/domain/egress` helper that mirrors Rust `EgressPolicy::from_state_and_config`, `validate_url`, host allow/block matching, insecure-HTTP blocking, and private-network classification. As in Rust, this helper is a validation gate only: DNS resolution, socket-level controls, connector-agent proxying, and policy catalog ownership remain external network-boundary/runtime responsibilities rather than connector-management enforcement.
+
 | Method | Rust path | Rust handler | Go path | Go handler | State | Tables/migrations | Rust tests |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/v1/data-connection/sources/{id}/egress-policies` | `handlers::data_connection::list_source_policies` | `/api/v1/data-connection/sources/{id}/egress-policies` | `h.ListSourcePolicies` | implemented | `source_policy_bindings`; `20260430120000_data_connection_mvp.sql` | `src/domain/egress.rs` |
@@ -245,7 +247,7 @@ No Rust routes are mounted directly under adapter modules, but Rust request hand
 1. **Done — catalog/contracts/streaming-source slice**: Rust static catalog/contracts plus streaming source contract response shapes and tests are present.
 2. **Partial — connection test/capabilities slice**: capability matrix and a non-dispatching `test_connection` response are present; per-connector runtime dispatch remains.
 3. **Credential storage/vending slice**: port encrypted `source_credentials` CRUD and vended credential helpers, including key derivation/encryption compatibility tests.
-4. **Egress policy slice**: port source policy binding handlers and domain URL/allowlist/private-network validation; keep network-boundary ownership external.
+4. **Done — egress policy slice**: source policy binding handlers and Rust-compatible URL/allowlist/private-network validation are ported; network-boundary enforcement remains external by design.
 5. **Sync runtime slice**: complete `run_sync` parity by dispatching to ingestion-replication, materializing payloads, recording dataset versions/content hashes, and implementing `GET /syncs/{id}/runs`.
 6. **Media-set parity slice**: reconcile Rust-only create/list vs Go extended run/get/update API, then wire runtime config and filter/classification parity tests.
 7. **Done/partial — virtual registrations slice**: list/discover/bulk/preview/delete/query/Arrow endpoints and repo methods over `connection_registrations` are present; full adapter-backed query and audit-table writes remain.

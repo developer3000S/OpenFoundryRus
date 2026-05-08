@@ -131,11 +131,21 @@ func TestDatasetProductsAndSchedulesContracts(t *testing.T) {
 	decodeJSON(t, doJSON(t, "POST", srv.URL+"/v1/products/"+product.ID.String()+"/schedules", token, map[string]any{"product_version_id": versionID.String(), "manifest": map[string]any{"name": "daily", "trigger": map[string]any{"dataset_rid": "old-dataset"}, "target": map[string]any{"pipeline_rid": "old-pipeline"}, "scope_kind": "project"}}, 201), &schedule)
 	assert.Equal(t, "daily", schedule.Name)
 
+	var marketplaceSchedule models.AddScheduleManifestResponse
+	decodeJSON(t, doJSON(t, "POST", srv.URL+"/v1/marketplace/products/"+product.ID.String()+"/schedules", token, map[string]any{"product_version_id": versionID.String(), "manifest": map[string]any{"name": "hourly", "trigger": map[string]any{"dataset_rid": "old-dataset"}, "target": map[string]any{"pipeline_rid": "old-pipeline"}, "scope_kind": "project"}}, 201), &marketplaceSchedule)
+	assert.Equal(t, "hourly", marketplaceSchedule.Name)
+
 	var materialised models.InstallSchedulesResponse
 	decodeJSON(t, doJSON(t, "POST", srv.URL+"/v1/products/"+product.ID.String()+"/install:schedules", token, map[string]any{"product_version_id": versionID.String(), "rid_mapping": map[string]any{"pipeline": map[string]string{"old-pipeline": "new-pipeline"}, "dataset": map[string]string{"old-dataset": "new-dataset"}}, "activate_manifests": []string{"daily"}}, 200), &materialised)
 	require.Len(t, materialised.Materialised, 1)
 	assert.Contains(t, string(materialised.Materialised[0].Target), "new-pipeline")
 	assert.Contains(t, string(materialised.Materialised[0].Trigger), "new-dataset")
+
+	var marketplaceMaterialised models.InstallSchedulesResponse
+	decodeJSON(t, doJSON(t, "POST", srv.URL+"/v1/marketplace/products/"+product.ID.String()+"/install:schedules", token, map[string]any{"product_version_id": versionID.String(), "rid_mapping": map[string]any{"pipeline": map[string]string{"old-pipeline": "marketplace-pipeline"}, "dataset": map[string]string{"old-dataset": "marketplace-dataset"}}, "activate_manifests": []string{"hourly"}}, 200), &marketplaceMaterialised)
+	require.Len(t, marketplaceMaterialised.Materialised, 1)
+	assert.Contains(t, string(marketplaceMaterialised.Materialised[0].Target), "marketplace-pipeline")
+	assert.Contains(t, string(marketplaceMaterialised.Materialised[0].Trigger), "marketplace-dataset")
 }
 
 func createListingV1(t *testing.T, baseURL, token string, payload any) models.ListingDefinition {

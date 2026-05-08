@@ -665,7 +665,13 @@ func (r *Repo) BranchAncestry(ctx context.Context, datasetID uuid.UUID, branch s
 		}
 		out = append(out, *v)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, ErrNotFound
+	}
+	return out, nil
 }
 
 func (r *Repo) UpdateBranchRetention(ctx context.Context, datasetID uuid.UUID, branch string, policy models.RetentionPolicy, ttlDays *int32) (*models.RuntimeBranch, error) {
@@ -727,17 +733,66 @@ func (r *Repo) ListFallbacks(ctx context.Context, branchID uuid.UUID) ([]models.
 }
 
 func (r *Repo) ReplaceFallbacks(ctx context.Context, branchID uuid.UUID, fallbackNames []string) error {
-	if _, err := r.Pool.Exec(ctx, `DELETE FROM dataset_branch_fallbacks WHERE branch_id = $1`, branchID); err != nil {
+	var datasetID uuid.UUID
+	var targetName string
+	if err := r.Pool.QueryRow(ctx, `SELECT dataset_id, name FROM dataset_branches WHERE id = $1 AND deleted_at IS NULL AND archived_at IS NULL`, branchID).Scan(&datasetID, &targetName); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
 	}
-	for i, name := range fallbackNames {
-		if _, err := r.Pool.Exec(ctx, `INSERT INTO dataset_branch_fallbacks (branch_id, position, fallback_branch_name)
-			VALUES ($1, $2, $3) ON CONFLICT (branch_id, position) DO UPDATE SET fallback_branch_name = EXCLUDED.fallback_branch_name`, branchID, int32(i), name); err != nil {
+
+	normalized := make([]string, 0, len(fallbackNames))
+	seen := map[string]struct{}{}
+	for _, name := range fallbackNames {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			return fmt.Errorf("%w: fallback chain entries must be non-empty", ErrValidation)
+		}
+		if trimmed == targetName {
+			return fmt.Errorf("%w: fallback chain cannot reference the branch itself", ErrValidation)
+		}
+		if _, ok := seen[trimmed]; ok {
+			return fmt.Errorf("%w: fallback chain cannot contain duplicate branches", ErrValidation)
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+
+	var cycle bool
+	if err := r.Pool.QueryRow(ctx, `WITH RECURSIVE fallback_walk(name) AS (
+		SELECT unnest($3::text[])
+		UNION
+		SELECT f.fallback_branch_name
+		FROM fallback_walk w
+		JOIN dataset_branches b ON b.dataset_id = $1 AND b.name = w.name AND b.deleted_at IS NULL AND b.archived_at IS NULL
+		JOIN dataset_branch_fallbacks f ON f.branch_id = b.id
+	)
+	SELECT EXISTS(SELECT 1 FROM fallback_walk WHERE name = $2)`, datasetID, targetName, normalized).Scan(&cycle); err != nil {
+		return err
+	}
+	if cycle {
+		return fmt.Errorf("%w: fallback chain contains a cycle", ErrValidation)
+	}
+
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM dataset_branch_fallbacks WHERE branch_id = $1`, branchID); err != nil {
+		return err
+	}
+	for i, name := range normalized {
+		if _, err := tx.Exec(ctx, `INSERT INTO dataset_branch_fallbacks (branch_id, position, fallback_branch_name)
+			VALUES ($1, $2, $3)`, branchID, int32(i), name); err != nil {
 			return err
 		}
 	}
-	_, err := r.Pool.Exec(ctx, `UPDATE dataset_branches SET fallback_chain = $2, updated_at = NOW() WHERE id = $1`, branchID, fallbackNames)
-	return err
+	if _, err := tx.Exec(ctx, `UPDATE dataset_branches SET fallback_chain = $2, updated_at = NOW() WHERE id = $1`, branchID, normalized); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *Repo) StartTransaction(ctx context.Context, datasetID uuid.UUID, branchID uuid.UUID, branchName string, txType models.TransactionType, summary string, providence models.JSONValue, startedBy uuid.UUID) (*models.RuntimeTransaction, error) {
@@ -2075,7 +2130,6 @@ func (r *Repo) ListConflictingFiles(ctx context.Context, baseBranchID uuid.UUID,
 		'ri.foundry.main.transaction.' || b.transaction_id::text AS b_transaction_rid,
 		a.content_hash AS content_hash_a, b.content_hash AS content_hash_b
 	FROM a JOIN b USING (logical_path)
-	WHERE a.content_hash IS DISTINCT FROM b.content_hash
 	ORDER BY a.logical_path`, baseBranchID, compareBranchID)
 	if err != nil {
 		return nil, err

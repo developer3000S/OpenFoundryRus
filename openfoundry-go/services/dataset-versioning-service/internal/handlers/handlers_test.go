@@ -220,6 +220,7 @@ type fakeStore struct {
 	quality             map[uuid.UUID]*models.DatasetQualityResponse
 	health              map[string]*models.DatasetHealth
 	lint                map[uuid.UUID]*models.DatasetLintSummary
+	fallbacks           map[uuid.UUID][]string
 	versionConflict     bool
 	branchConflict      bool
 	permissionConflict  bool
@@ -231,7 +232,7 @@ func newFakeStore(owner uuid.UUID) *fakeStore {
 		StoragePath: "s3://bucket/sales", OwnerID: owner, CurrentVersion: 1,
 		Tags: []string{}, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	return &fakeStore{datasets: []models.Dataset{ds}, versions: map[uuid.UUID][]models.DatasetVersion{}, branches: map[uuid.UUID][]models.DatasetBranch{}, files: map[uuid.UUID][]models.DatasetFile{}, transactions: map[uuid.UUID]string{}, runtimeTransactions: map[uuid.UUID]models.RuntimeTransaction{}, markings: map[uuid.UUID][]models.EffectiveMarking{}, permissions: map[uuid.UUID][]models.DatasetPermissionEdge{}, lineageLinks: map[uuid.UUID][]models.DatasetLineageLink{}, fileIndex: map[uuid.UUID][]models.DatasetFileIndexEntry{}, views: map[uuid.UUID][]models.DatasetView{}, schemas: map[uuid.UUID]models.SchemaResponse{}, quality: map[uuid.UUID]*models.DatasetQualityResponse{}, health: map[string]*models.DatasetHealth{}, lint: map[uuid.UUID]*models.DatasetLintSummary{}}
+	return &fakeStore{datasets: []models.Dataset{ds}, versions: map[uuid.UUID][]models.DatasetVersion{}, branches: map[uuid.UUID][]models.DatasetBranch{}, files: map[uuid.UUID][]models.DatasetFile{}, transactions: map[uuid.UUID]string{}, runtimeTransactions: map[uuid.UUID]models.RuntimeTransaction{}, markings: map[uuid.UUID][]models.EffectiveMarking{}, permissions: map[uuid.UUID][]models.DatasetPermissionEdge{}, lineageLinks: map[uuid.UUID][]models.DatasetLineageLink{}, fileIndex: map[uuid.UUID][]models.DatasetFileIndexEntry{}, views: map[uuid.UUID][]models.DatasetView{}, schemas: map[uuid.UUID]models.SchemaResponse{}, quality: map[uuid.UUID]*models.DatasetQualityResponse{}, health: map[string]*models.DatasetHealth{}, lint: map[uuid.UUID]*models.DatasetLintSummary{}, fallbacks: map[uuid.UUID][]string{}}
 }
 
 func (f *fakeStore) ListDatasets(_ context.Context, ownerID *uuid.UUID, _ int) ([]models.Dataset, error) {
@@ -662,11 +663,27 @@ func (f *fakeStore) ReparentRuntimeBranch(_ context.Context, datasetID uuid.UUID
 	return b, nil
 }
 func (f *fakeStore) BranchAncestry(_ context.Context, datasetID uuid.UUID, branch string) ([]models.RuntimeBranch, error) {
-	b, err := f.GetRuntimeBranch(context.Background(), datasetID, branch)
+	current, err := f.GetRuntimeBranch(context.Background(), datasetID, branch)
 	if err != nil {
 		return nil, err
 	}
-	return []models.RuntimeBranch{*b}, nil
+	chain := []models.RuntimeBranch{}
+	for current != nil {
+		chain = append(chain, *current)
+		if current.ParentBranchID == nil {
+			break
+		}
+		var next *models.RuntimeBranch
+		for _, b := range f.branches[datasetID] {
+			if b.ID == *current.ParentBranchID {
+				copy := models.RuntimeBranch{ID: b.ID, RID: b.RID, DatasetID: b.DatasetID, DatasetRID: b.DatasetRID, Name: b.Name, ParentBranchID: b.ParentBranchID, HeadTransactionID: b.HeadTransactionID, CreatedFromTransactionID: b.CreatedFromTransactionID, LastActivityAt: b.LastActivityAt, Labels: b.Labels, FallbackChain: b.FallbackChain, CreatedAt: b.CreatedAt, UpdatedAt: b.UpdatedAt}
+				next = &copy
+				break
+			}
+		}
+		current = next
+	}
+	return chain, nil
 }
 func (f *fakeStore) UpdateBranchRetention(_ context.Context, datasetID uuid.UUID, branch string, _ models.RetentionPolicy, _ *int32) (*models.RuntimeBranch, error) {
 	return f.GetRuntimeBranch(context.Background(), datasetID, branch)
@@ -683,10 +700,17 @@ func (f *fakeStore) CompareBranches(_ context.Context, _ uuid.UUID, base string,
 func (f *fakeStore) RollbackBranch(_ context.Context, _ uuid.UUID, branch string, _ *models.RollbackBody, _ uuid.UUID) (map[string]any, error) {
 	return map[string]any{"view": map[string]any{"branch": branch}}, nil
 }
-func (f *fakeStore) ListFallbacks(_ context.Context, _ uuid.UUID) ([]models.RuntimeFallbackEntry, error) {
-	return []models.RuntimeFallbackEntry{}, nil
+func (f *fakeStore) ListFallbacks(_ context.Context, branchID uuid.UUID) ([]models.RuntimeFallbackEntry, error) {
+	out := []models.RuntimeFallbackEntry{}
+	for i, name := range f.fallbacks[branchID] {
+		out = append(out, models.RuntimeFallbackEntry{Position: int32(i), FallbackBranchName: name})
+	}
+	return out, nil
 }
-func (f *fakeStore) ReplaceFallbacks(_ context.Context, _ uuid.UUID, _ []string) error { return nil }
+func (f *fakeStore) ReplaceFallbacks(_ context.Context, branchID uuid.UUID, names []string) error {
+	f.fallbacks[branchID] = append([]string{}, names...)
+	return nil
+}
 
 func (f *fakeStore) StartTransaction(_ context.Context, datasetID uuid.UUID, branchID uuid.UUID, branchName string, txType models.TransactionType, summary string, providence models.JSONValue, startedBy uuid.UUID) (*models.RuntimeTransaction, error) {
 	for _, tx := range f.runtimeTransactions {
@@ -1317,6 +1341,12 @@ func TestAdvancedBranchLifecycleHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.BranchAncestry(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+	var ancestry []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &ancestry))
+	require.Len(t, ancestry, 2)
+	require.Equal(t, "feature", ancestry[0]["name"])
+	require.Equal(t, "master", ancestry[1]["name"])
+	require.Equal(t, true, ancestry[1]["is_root"])
 
 	req = withRouteParam(catalogReq(http.MethodGet, store, claims, ""), "branch", "feature")
 	rec = httptest.NewRecorder()
@@ -1357,6 +1387,9 @@ func TestAdvancedBranchRetentionCompareFallbacksAndValidation(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.PutFallbacks(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+	var fallbacks []models.RuntimeFallbackEntry
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &fallbacks))
+	require.Equal(t, []models.RuntimeFallbackEntry{{Position: 0, FallbackBranchName: "master"}}, fallbacks)
 
 	req = withRouteParam(catalogReq(http.MethodGet, store, claims, ""), "branch", "feature")
 	rec = httptest.NewRecorder()

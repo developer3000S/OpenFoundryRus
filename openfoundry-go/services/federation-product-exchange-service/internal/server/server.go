@@ -87,6 +87,8 @@ func buildRouter(cfg *config.Config, jwt *authmw.JWTConfig, h *marketplace.Handl
 			api.Post("/products/from-dataset/{rid}", h.CreateDatasetProduct)
 			api.Get("/products/{id}", h.GetDatasetProduct)
 			api.Post("/products/{id}/install", h.InstallDatasetProduct)
+			api.Post("/products/{id}/schedules", h.AddScheduleManifest)
+			api.Post("/products/{id}/install:schedules", h.MaterialiseInstallSchedules)
 		})
 
 		r.Route("/v1/products", func(api chi.Router) {

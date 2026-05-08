@@ -258,7 +258,7 @@ func (h *Handlers) PutFallbacks(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if err := h.Repo.ReplaceFallbacks(r.Context(), branch.ID, body.Fallbacks); err != nil {
+	if err := h.Repo.ReplaceFallbacks(r.Context(), branch.ID, body.Names()); err != nil {
 		writeBranchError(w, err)
 		return
 	}

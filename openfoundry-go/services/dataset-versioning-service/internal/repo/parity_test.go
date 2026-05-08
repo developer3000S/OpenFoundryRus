@@ -268,7 +268,7 @@ func TestCompareBranchesLoadsLCACommitSummariesAndConflicts(t *testing.T) {
 	mock.ExpectQuery("LEFT JOIN dataset_transaction_files").WithArgs(compareID, "feature", 200).WillReturnRows(
 		pgxmock.NewRows([]string{"transaction_rid", "id", "branch", "tx_type", "status", "committed_at", "files_changed"}).AddRow("ri.tx.b", uuid.New(), "feature", "UPDATE", "COMMITTED", &now, 2))
 	hashA := "a"
-	hashB := "b"
+	hashB := "a"
 	mock.ExpectQuery("WITH a AS").WithArgs(baseID, compareID).WillReturnRows(
 		pgxmock.NewRows([]string{"logical_path", "a_transaction_rid", "b_transaction_rid", "content_hash_a", "content_hash_b"}).AddRow("orders.parquet", "ri.tx.a", "ri.tx.b", &hashA, &hashB))
 
@@ -278,7 +278,65 @@ func TestCompareBranchesLoadsLCACommitSummariesAndConflicts(t *testing.T) {
 	require.Equal(t, &lca, got.LCABranchRID)
 	require.Len(t, got.AOnlyTransactions, 1)
 	require.Len(t, got.ConflictingFiles, 1)
+	require.Equal(t, hashA, *got.ConflictingFiles[0].ContentHashA)
+	require.Equal(t, hashB, *got.ConflictingFiles[0].ContentHashB)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestBranchAncestryWalksChildToRoot(t *testing.T) {
+	ctx := context.Background()
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	datasetID := uuid.New()
+	rootID := uuid.New()
+	childID := uuid.New()
+	now := time.Now().UTC()
+	branchCols := []string{"id", "rid", "dataset_id", "dataset_rid", "name", "parent_branch_id", "head_transaction_id", "created_from_transaction_id", "last_activity_at", "labels", "fallback_chain", "created_at", "updated_at"}
+	mock.ExpectQuery("WITH RECURSIVE ancestry").WithArgs(datasetID, "feature").WillReturnRows(
+		pgxmock.NewRows(branchCols).
+			AddRow(childID, "ri.foundry.main.branch.feature", datasetID, "ri.dataset", "feature", &rootID, nil, nil, now, []byte(`{}`), []string{}, now, now).
+			AddRow(rootID, "ri.foundry.main.branch.master", datasetID, "ri.dataset", "master", nil, nil, nil, now, []byte(`{}`), []string{}, now, now))
+
+	r := &repo.Repo{Pool: mock}
+	got, err := r.BranchAncestry(ctx, datasetID, "feature")
+	require.NoError(t, err)
+	require.Equal(t, []string{"feature", "master"}, []string{got[0].Name, got[1].Name})
+	require.Nil(t, got[1].ParentBranchID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestReplaceFallbacksNormalizesPersistsAndRejectsCycles(t *testing.T) {
+	ctx := context.Background()
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	datasetID := uuid.New()
+	branchID := uuid.New()
+	mock.ExpectQuery("SELECT dataset_id, name FROM dataset_branches").WithArgs(branchID).WillReturnRows(pgxmock.NewRows([]string{"dataset_id", "name"}).AddRow(datasetID, "feature"))
+	mock.ExpectQuery("WITH RECURSIVE fallback_walk").WithArgs(datasetID, "feature", []string{"master"}).WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM dataset_branch_fallbacks").WithArgs(branchID).WillReturnResult(pgxmock.NewResult("DELETE", 0))
+	mock.ExpectExec("INSERT INTO dataset_branch_fallbacks").WithArgs(branchID, int32(0), "master").WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec("UPDATE dataset_branches SET fallback_chain").WithArgs(branchID, []string{"master"}).WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectCommit()
+
+	r := &repo.Repo{Pool: mock}
+	require.NoError(t, r.ReplaceFallbacks(ctx, branchID, []string{" master "}))
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	mock2, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock2.Close()
+	mock2.ExpectQuery("SELECT dataset_id, name FROM dataset_branches").WithArgs(branchID).WillReturnRows(pgxmock.NewRows([]string{"dataset_id", "name"}).AddRow(datasetID, "feature"))
+	mock2.ExpectQuery("WITH RECURSIVE fallback_walk").WithArgs(datasetID, "feature", []string{"develop"}).WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+
+	r = &repo.Repo{Pool: mock2}
+	err = r.ReplaceFallbacks(ctx, branchID, []string{"develop"})
+	require.ErrorIs(t, err, repo.ErrValidation)
+	require.NoError(t, mock2.ExpectationsWereMet())
 }
 
 func TestGetDatasetQualityUsesRustProfileTablesAndLoadsChildren(t *testing.T) {

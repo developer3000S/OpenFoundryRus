@@ -664,6 +664,14 @@ type RuntimeFallbackEntry struct {
 
 type PutFallbacksRequest struct {
 	Fallbacks []string `json:"fallbacks"`
+	Chain     []string `json:"chain"`
+}
+
+func (p PutFallbacksRequest) Names() []string {
+	if p.Chain != nil {
+		return p.Chain
+	}
+	return p.Fallbacks
 }
 
 type TransactionSummary struct {
@@ -712,14 +720,14 @@ type BranchEnvelope struct {
 // Topic and event_type strings for `foundry.branch.events.v1`.
 // Mirrors Rust src/domain/branch_events.rs.
 const (
-	BranchEventsTopic        = "foundry.branch.events.v1"
-	EventBranchCreated       = "dataset.branch.created.v1"
-	EventBranchReparented    = "dataset.branch.reparented.v1"
-	EventBranchDeleted       = "dataset.branch.deleted.v1"
-	EventBranchArchived      = "dataset.branch.archived.v1"
-	EventBranchRestored      = "dataset.branch.restored.v1"
-	EventBranchMarkingsSet   = "dataset.branch.markings.updated.v1"
-	EventBranchRetentionSet  = "dataset.branch.retention.updated.v1"
+	BranchEventsTopic       = "foundry.branch.events.v1"
+	EventBranchCreated      = "dataset.branch.created.v1"
+	EventBranchReparented   = "dataset.branch.reparented.v1"
+	EventBranchDeleted      = "dataset.branch.deleted.v1"
+	EventBranchArchived     = "dataset.branch.archived.v1"
+	EventBranchRestored     = "dataset.branch.restored.v1"
+	EventBranchMarkingsSet  = "dataset.branch.markings.updated.v1"
+	EventBranchRetentionSet = "dataset.branch.retention.updated.v1"
 )
 
 // NewBranchEnvelope constructs a fresh envelope. The default constructor

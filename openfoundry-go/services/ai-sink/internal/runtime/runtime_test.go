@@ -83,6 +83,30 @@ func (c *captureWriter) Append(_ context.Context, byTable map[string][]envelope.
 }
 func (c *captureWriter) Close() error { return nil }
 
+// blockingWriter lets tests prove Kafka offsets are not committed until
+// Writer.Append returns successfully.
+type blockingWriter struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newBlockingWriter() *blockingWriter {
+	return &blockingWriter{started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (b *blockingWriter) Append(ctx context.Context, byTable map[string][]envelope.AiEventEnvelope) error {
+	b.once.Do(func() { close(b.started) })
+	select {
+	case <-b.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (b *blockingWriter) Close() error { return nil }
+
 func mkBytes(t *testing.T, kind envelope.AiEventKind, at int64) []byte {
 	t.Helper()
 	body, err := json.Marshal(envelope.AiEventEnvelope{
@@ -160,21 +184,24 @@ func TestRuntimeRoutesAcrossFourTables(t *testing.T) {
 	go func() { done <- runtime.Run(ctx, cfg, sub, w, m, log) }()
 
 	require.Eventually(t, func() bool {
-		w.mu.Lock(); defer w.mu.Unlock()
+		w.mu.Lock()
+		defer w.mu.Unlock()
 		return len(w.batches) == 1
 	}, 3*time.Second, 20*time.Millisecond)
 
 	cancel()
 	<-done
 
-	w.mu.Lock(); defer w.mu.Unlock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	require.Len(t, w.batches, 1)
 	got := w.batches[0]
 	assert.Len(t, got[envelope.TablePrompts], 1)
 	assert.Len(t, got[envelope.TableResponses], 1)
 	assert.Len(t, got[envelope.TableEvaluations], 1)
 	assert.Len(t, got[envelope.TableTraces], 1)
-	sub.mu.Lock(); defer sub.mu.Unlock()
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
 	require.GreaterOrEqual(t, len(sub.commits), 1)
 	assert.Len(t, sub.commits[0], 4, "all 4 offsets committed in one CommitMessages call")
 }
@@ -195,8 +222,8 @@ func TestRuntimeSkipsPoisonAndUnknownKindButCommits(t *testing.T) {
 	sub := &stubSubscriber{
 		queue: [][]byte{
 			mkBytes(t, envelope.KindPrompt, 1),
-			[]byte("not-json"),  // poison
-			unknownKindBody,     // unknown kind
+			[]byte("not-json"), // poison
+			unknownKindBody,    // unknown kind
 			mkBytes(t, envelope.KindResponse, 4),
 		},
 	}
@@ -207,18 +234,81 @@ func TestRuntimeSkipsPoisonAndUnknownKindButCommits(t *testing.T) {
 	go func() { done <- runtime.Run(ctx, cfg, sub, w, m, log) }()
 
 	require.Eventually(t, func() bool {
-		w.mu.Lock(); defer w.mu.Unlock()
+		w.mu.Lock()
+		defer w.mu.Unlock()
 		return len(w.batches) == 1
 	}, 3*time.Second, 20*time.Millisecond)
 
 	cancel()
 	<-done
 
-	w.mu.Lock(); defer w.mu.Unlock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	got := w.batches[0]
 	assert.Len(t, got[envelope.TablePrompts], 1)
 	assert.Len(t, got[envelope.TableResponses], 1)
-	sub.mu.Lock(); defer sub.mu.Unlock()
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
 	require.GreaterOrEqual(t, len(sub.commits), 1)
 	assert.Len(t, sub.commits[0], 4, "commit advances past poison + unknown-kind too")
+}
+
+func TestRuntimeCommitsOffsetsOnlyAfterAllTableAppendsSucceed(t *testing.T) {
+	t.Parallel()
+	cfg := newConfig(1, 5*time.Second)
+	log := observability.InitLogging("ai-sink", "test")
+	w := newBlockingWriter()
+	m := runtime.NewMetrics()
+	sub := &stubSubscriber{queue: [][]byte{mkBytes(t, envelope.KindPrompt, 1)}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() { done <- runtime.Run(ctx, cfg, sub, w, m, log) }()
+
+	select {
+	case <-w.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("writer append did not start")
+	}
+
+	sub.mu.Lock()
+	commitsWhileAppendBlocked := len(sub.commits)
+	sub.mu.Unlock()
+	assert.Zero(t, commitsWhileAppendBlocked, "offsets must not be committable while table append is still in flight")
+
+	close(w.release)
+	require.Eventually(t, func() bool {
+		sub.mu.Lock()
+		defer sub.mu.Unlock()
+		return len(sub.commits) == 1 && len(sub.commits[0]) == 1
+	}, 3*time.Second, 20*time.Millisecond, "offset should be committed after append succeeds")
+
+	cancel()
+	<-done
+}
+
+func TestRuntimeWriterFailureDoesNotCommitOffsets(t *testing.T) {
+	t.Parallel()
+	cfg := newConfig(1, 5*time.Second)
+	log := observability.InitLogging("ai-sink", "test")
+	w := &captureWriter{failOn: 1}
+	m := runtime.NewMetrics()
+	sub := &stubSubscriber{queue: [][]byte{mkBytes(t, envelope.KindPrompt, 1)}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() { done <- runtime.Run(ctx, cfg, sub, w, m, log) }()
+
+	select {
+	case err := <-done:
+		require.Error(t, err, "Run must return when Writer.Append fails")
+	case <-time.After(3 * time.Second):
+		t.Fatal("runtime should have returned an error")
+	}
+
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	assert.Empty(t, sub.commits, "no commits when any table append fails")
 }

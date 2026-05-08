@@ -82,11 +82,12 @@ type fakeStore struct {
 	links         map[string]models.VirtualTableSourceLink
 	vtables       map[string]models.VirtualTable
 	registrations map[uuid.UUID][]models.ConnectionRegistration
+	policies      map[uuid.UUID][]models.SourcePolicyBindingResponse
 }
 
 func newFakeStore(owner uuid.UUID) *fakeStore {
 	conn := models.Connection{ID: uuid.New(), Name: "pg", ConnectorType: "postgresql", Config: json.RawMessage(`{}`), Status: "connected", OwnerID: owner, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-	return &fakeStore{connections: []models.Connection{conn}, syncJobs: map[uuid.UUID][]models.SyncJob{}, mediaSyncs: map[uuid.UUID][]models.MediaSetSync{}, runs: map[uuid.UUID][]models.SyncRun{}, links: map[string]models.VirtualTableSourceLink{}, vtables: map[string]models.VirtualTable{}, registrations: map[uuid.UUID][]models.ConnectionRegistration{}}
+	return &fakeStore{connections: []models.Connection{conn}, syncJobs: map[uuid.UUID][]models.SyncJob{}, mediaSyncs: map[uuid.UUID][]models.MediaSetSync{}, runs: map[uuid.UUID][]models.SyncRun{}, links: map[string]models.VirtualTableSourceLink{}, vtables: map[string]models.VirtualTable{}, registrations: map[uuid.UUID][]models.ConnectionRegistration{}, policies: map[uuid.UUID][]models.SourcePolicyBindingResponse{}}
 }
 
 func (f *fakeStore) ListConnections(_ context.Context, ownerID *uuid.UUID) ([]models.Connection, error) {
@@ -201,17 +202,36 @@ func (f *fakeStore) ListSourcePolicies(_ context.Context, sourceID uuid.UUID, ow
 	if c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID); c == nil {
 		return []models.SourcePolicyBindingResponse{}, nil
 	}
-	return []models.SourcePolicyBindingResponse{}, nil
+	return append([]models.SourcePolicyBindingResponse(nil), f.policies[sourceID]...), nil
 }
 func (f *fakeStore) AttachPolicy(_ context.Context, sourceID uuid.UUID, ownerID uuid.UUID, policyID uuid.UUID, kind string) (*models.SourcePolicyBindingResponse, error) {
 	if c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID); c == nil {
 		return nil, nil
 	}
-	return &models.SourcePolicyBindingResponse{SourceID: sourceID, PolicyID: policyID, Kind: kind}, nil
+	binding := models.SourcePolicyBindingResponse{SourceID: sourceID, PolicyID: policyID, Kind: kind}
+	items := f.policies[sourceID]
+	for i := range items {
+		if items[i].PolicyID == policyID {
+			items[i] = binding
+			f.policies[sourceID] = items
+			return &items[i], nil
+		}
+	}
+	f.policies[sourceID] = append(items, binding)
+	return &binding, nil
 }
-func (f *fakeStore) DetachPolicy(_ context.Context, sourceID uuid.UUID, ownerID uuid.UUID, _ uuid.UUID) (bool, error) {
-	c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID)
-	return c != nil, nil
+func (f *fakeStore) DetachPolicy(_ context.Context, sourceID uuid.UUID, ownerID uuid.UUID, policyID uuid.UUID) (bool, error) {
+	if c, _ := f.GetConnectionForOwner(context.Background(), sourceID, ownerID); c == nil {
+		return false, nil
+	}
+	items := f.policies[sourceID]
+	for i := range items {
+		if items[i].PolicyID == policyID {
+			f.policies[sourceID] = append(items[:i], items[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (f *fakeStore) EnableVirtualTableSource(_ context.Context, sourceRID string, body *models.EnableVirtualTableSourceRequest) (*models.VirtualTableSourceLink, error) {
@@ -423,6 +443,66 @@ func withRouteParam(req *http.Request, key, val string) *http.Request {
 	}
 	rctx.URLParams.Add(key, val)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func TestSourcePolicyBindingHandlersMatchRustContract(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	sourceID := store.connections[0].ID
+	policyID := uuid.New()
+	h := &handlers.Handlers{Repo: store}
+
+	req := withRouteParam(authedReq(http.MethodPost, "/sources/"+sourceID.String()+"/egress-policies", `{"policy_id":"`+policyID.String()+`"}`, owner), "id", sourceID.String())
+	rec := httptest.NewRecorder()
+	h.AttachPolicy(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var attached models.SourcePolicyBindingResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &attached))
+	require.Equal(t, sourceID, attached.SourceID)
+	require.Equal(t, policyID, attached.PolicyID)
+	require.Equal(t, "direct", attached.Kind)
+
+	req = withRouteParam(authedReq(http.MethodPost, "/sources/"+sourceID.String()+"/egress-policies", `{"policy_id":"`+policyID.String()+`","kind":"agent_proxy"}`, owner), "id", sourceID.String())
+	rec = httptest.NewRecorder()
+	h.AttachPolicy(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, store.policies[sourceID], 1)
+	require.Equal(t, "agent_proxy", store.policies[sourceID][0].Kind)
+
+	req = withRouteParam(authedReq(http.MethodGet, "/sources/"+sourceID.String()+"/egress-policies", ``, owner), "id", sourceID.String())
+	rec = httptest.NewRecorder()
+	h.ListSourcePolicies(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var listed []models.SourcePolicyBindingResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &listed))
+	require.Len(t, listed, 1)
+	require.Equal(t, "agent_proxy", listed[0].Kind)
+
+	req = withRouteParam(withRouteParam(authedReq(http.MethodDelete, "/sources/"+sourceID.String()+"/egress-policies/"+policyID.String(), ``, owner), "source_id", sourceID.String()), "policy_id", policyID.String())
+	rec = httptest.NewRecorder()
+	h.DetachPolicy(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	require.Empty(t, store.policies[sourceID])
+}
+
+func TestAttachPolicyRejectsEdgeCases(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	sourceID := store.connections[0].ID
+	h := &handlers.Handlers{Repo: store}
+
+	for name, body := range map[string]string{
+		"nil policy id":     `{"policy_id":"00000000-0000-0000-0000-000000000000"}`,
+		"unsupported kind":  `{"policy_id":"` + uuid.NewString() + `","kind":"bucket_endpoint"}`,
+		"malformed payload": `{`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := withRouteParam(authedReq(http.MethodPost, "/sources/"+sourceID.String()+"/egress-policies", body, owner), "id", sourceID.String())
+			rec := httptest.NewRecorder()
+			h.AttachPolicy(rec, req)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		})
+	}
 }
 
 func TestCreateListGetUpdateSyncJobAndRun(t *testing.T) {

@@ -56,6 +56,12 @@ func TestIcebergWriterAppendBuildsRustCompatibleAIBatches(t *testing.T) {
 	if got := catalog.seen[0].PartitionTransform; got != "day(at)" {
 		t.Fatalf("partition = %q", got)
 	}
+	if got := catalog.seen[0].SortOrder; got != "at ASC" {
+		t.Fatalf("sort order = %q", got)
+	}
+	if !reflect.DeepEqual(catalog.seen[0].Schema, aiSchema()) {
+		t.Fatalf("schema = %#v, want %#v", catalog.seen[0].Schema, aiSchema())
+	}
 	if len(table.batches) != 1 || len(table.batches[0].Rows) != 1 {
 		t.Fatalf("batches = %#v", table.batches)
 	}
@@ -63,8 +69,8 @@ func TestIcebergWriterAppendBuildsRustCompatibleAIBatches(t *testing.T) {
 	if row["kind"] != "response" || row["run_id"] != runID.String() || row["trace_id"] != traceID {
 		t.Fatalf("row = %#v", row)
 	}
-	if got := table.batches[0].Spec.Schema[7]; got != (FieldSpec{ID: 8, Name: "payload", Type: "string", Required: true}) {
-		t.Fatalf("schema[7] = %#v", got)
+	if !reflect.DeepEqual(table.batches[0].Spec.Schema, aiSchema()) {
+		t.Fatalf("batch schema = %#v, want %#v", table.batches[0].Spec.Schema, aiSchema())
 	}
 }
 
