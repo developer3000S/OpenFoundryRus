@@ -31,15 +31,27 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *obs
 	})
 	r.Method(http.MethodGet, "/metrics", m.Handler())
 
-	r.Route("/api/v1/ontology-definition", func(api chi.Router) {
+	mountObjectTypes := func(api chi.Router) {
 		api.Use(authmw.Middleware(jwt))
 
-		api.Get("/object-types", h.ListObjectTypes)
-		api.Post("/object-types", h.CreateObjectType)
-		api.Get("/object-types/{id}", h.GetObjectType)
-		api.Patch("/object-types/{id}", h.UpdateObjectType)
-		api.Delete("/object-types/{id}", h.DeleteObjectType)
-	})
+		// Canonical resource = `object-types`. The edge-gateway router
+		// (and the apps/web SPA) reach this service at `/types` —
+		// register the same handlers under both names so neither
+		// surface sees a 404.
+		for _, base := range []string{"/object-types", "/types"} {
+			api.Get(base, h.ListObjectTypes)
+			api.Post(base, h.CreateObjectType)
+			api.Get(base+"/{id}", h.GetObjectType)
+			api.Patch(base+"/{id}", h.UpdateObjectType)
+			api.Delete(base+"/{id}", h.DeleteObjectType)
+		}
+	}
+
+	// Mount on both the legacy `/api/v1/ontology-definition` prefix
+	// (kept for backwards compatibility) and the gateway-canonical
+	// `/api/v1/ontology` prefix.
+	r.Route("/api/v1/ontology-definition", mountObjectTypes)
+	r.Route("/api/v1/ontology", mountObjectTypes)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return &http.Server{

@@ -351,7 +351,19 @@ Caller can override `.allowFrom` to a list of pod selectors.
 {{- $root := .root -}}
 {{- $global := $root.Values.global | default dict -}}
 {{- $networkPolicy := $global.networkPolicy | default dict -}}
-{{- if $networkPolicy.enabled | default true }}
+{{/*
+  Sprig's `default` returns the fallback when the value is the zero of
+  its type — including boolean `false` — so the previous
+  `$networkPolicy.enabled | default true` always evaluated to `true`
+  when the operator explicitly set `enabled: false` in the profile.
+  Use an explicit hasKey check so an explicit `false` is honoured and
+  only an unset key falls back to the secure-by-default `true`.
+*/}}
+{{- $netpolEnabled := true -}}
+{{- if hasKey $networkPolicy "enabled" -}}
+  {{- $netpolEnabled = $networkPolicy.enabled -}}
+{{- end -}}
+{{- if $netpolEnabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

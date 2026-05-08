@@ -25,6 +25,55 @@ services:
       maxReplicas: 2
       targetCPUUtilizationPercentage: 70
       targetMemoryUtilizationPercentage: 80
+    # Bundled config.yaml lives at services/edge-gateway-service/config.yaml
+    # which is NOT shipped inside the distroless image, so the binary falls
+    # back to localhost:5xxxx defaults. Override every upstream via koanf
+    # env (OF_<path>__<key> → upstream.<key>) so the proxy chain resolves
+    # against the in-cluster Services.
+    env:
+      OF_UPSTREAM__IDENTITY_FEDERATION_SERVICE_URL: http://identity-federation-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__OAUTH_INTEGRATION_SERVICE_URL: http://identity-federation-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__SESSION_GOVERNANCE_SERVICE_URL: http://identity-federation-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__AUTHORIZATION_POLICY_SERVICE_URL: http://authorization-policy-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__SECURITY_GOVERNANCE_SERVICE_URL: http://authorization-policy-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__CIPHER_SERVICE_URL: http://authorization-policy-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__NETWORK_BOUNDARY_SERVICE_URL: http://authorization-policy-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__TENANCY_ORGANIZATIONS_SERVICE_URL: http://tenancy-organizations-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__CONNECTOR_MANAGEMENT_SERVICE_URL: http://connector-management-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__INGESTION_REPLICATION_SERVICE_URL: http://ingestion-replication-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__DATASET_VERSIONING_SERVICE_URL: http://dataset-versioning-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__ICEBERG_CATALOG_SERVICE_URL: http://iceberg-catalog-service.openfoundry.svc.cluster.local:8197
+      OF_UPSTREAM__QUERY_SERVICE_URL: http://sql-bi-gateway-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__PIPELINE_BUILD_SERVICE_URL: http://pipeline-build-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__LINEAGE_SERVICE_URL: http://lineage-service.openfoundry.svc.cluster.local:9090
+      OF_UPSTREAM__MEDIA_SETS_SERVICE_URL: http://media-sets-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__MEDIA_TRANSFORM_SERVICE_URL: http://media-transform-runtime-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__ONTOLOGY_DEFINITION_SERVICE_URL: http://ontology-definition-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__OBJECT_DATABASE_SERVICE_URL: http://object-database-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__ONTOLOGY_QUERY_SERVICE_URL: http://ontology-query-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__ONTOLOGY_ACTIONS_SERVICE_URL: http://ontology-actions-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__WORKFLOW_SERVICE_URL: http://workflow-automation-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__NOTEBOOK_SERVICE_URL: http://notebook-runtime-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__NOTIFICATION_SERVICE_URL: http://notification-alerting-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__APP_BUILDER_SERVICE_URL: http://application-composition-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__APPLICATION_COMPOSITION_SERVICE_URL: http://application-composition-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__SOLUTION_DESIGN_SERVICE_URL: http://solution-design-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__ML_SERVICE_URL: http://model-catalog-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__MODEL_CATALOG_SERVICE_URL: http://model-catalog-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__MODEL_DEPLOYMENT_SERVICE_URL: http://model-deployment-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__AI_SERVICE_URL: http://agent-runtime-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__AGENT_RUNTIME_SERVICE_URL: http://agent-runtime-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__LLM_CATALOG_SERVICE_URL: http://llm-catalog-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__RETRIEVAL_CONTEXT_SERVICE_URL: http://retrieval-context-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__AI_EVALUATION_SERVICE_URL: http://ai-evaluation-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__AUDIT_COMPLIANCE_SERVICE_URL: http://audit-compliance-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__TELEMETRY_GOVERNANCE_SERVICE_URL: http://telemetry-governance-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__FEDERATION_PRODUCT_EXCHANGE_SERVICE_URL: http://federation-product-exchange-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__SDK_GENERATION_SERVICE_URL: http://sdk-generation-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__CODE_REPOSITORY_REVIEW_SERVICE_URL: http://code-repository-review-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__ENTITY_RESOLUTION_SERVICE_URL: http://entity-resolution-service.openfoundry.svc.cluster.local:8080
+      OF_UPSTREAM__ONTOLOGY_EXPLORATORY_ANALYSIS_SERVICE_URL: http://ontology-exploratory-analysis-service.openfoundry.svc.cluster.local:8080
+      OF_CORS_ORIGINS: "*"
   identity-federation-service:
     replicas: 1
     autoscaling:

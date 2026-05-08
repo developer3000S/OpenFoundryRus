@@ -52,6 +52,7 @@ COPY --link package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --link apps/web/package.json apps/web/package.json
 
 RUN --mount=type=cache,id=of-pnpm-store,target=/pnpm/store,sharing=locked \
+    NODE_ENV=development \
     pnpm install --frozen-lockfile --prefer-offline
 
 ############################################################
