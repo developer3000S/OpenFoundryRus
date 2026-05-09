@@ -56,7 +56,7 @@ spec:
   driver:
     cores: 1
     coreRequest: "200m"
-    memory: "768m"
+    memory: "512m"
     serviceAccount: spark
     env:
       - { name: AWS_ACCESS_KEY_ID,     valueFrom: { secretKeyRef: { name: openfoundry-iceberg, key: AWS_ACCESS_KEY_ID } } }
@@ -65,7 +65,7 @@ spec:
     cores: 1
     coreRequest: "200m"
     instances: 1
-    memory: "768m"
+    memory: "512m"
     env:
       - { name: AWS_ACCESS_KEY_ID,     valueFrom: { secretKeyRef: { name: openfoundry-iceberg, key: AWS_ACCESS_KEY_ID } } }
       - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: openfoundry-iceberg, key: AWS_SECRET_ACCESS_KEY } } }
