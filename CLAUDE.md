@@ -72,18 +72,22 @@ pnpm --filter @open-foundry/web test   # vitest
   backlog: `golangci-lint run --new-from-rev= ./...` (mostly spelling
   + staticcheck style nits, tracked as tech debt rather than a feature
   gate).
-- **No Go CI actually runs on PRs today.** Two workflows are broken:
-  - `.github/workflows/ci.yml` is the legacy Rust workflow (uses
-    `cargo`). Its path filters include `libs/**`, `services/**`,
-    `proto/**` and `justfile`, so it **triggers on Go-side PRs and
-    fails** — there is no `Cargo.toml` in the tree.
-  - `.github/workflows/openfoundry-go.yml` is the intended Go CI but
-    its `paths:` filter is `openfoundry-go/**`, which does not match
-    this layout (Go code is at the repo root), so it **never
-    triggers**.
-  - If a PR shows a green or skipped Go check, treat it as "not run",
-    not "passed". Run `make ci` locally as the real gate, and expect
-    to fix the workflows themselves before any CI claim is meaningful.
+- **Go CI lives in `.github/workflows/openfoundry-go.yml`.** Jobs:
+  `lint` (golangci-lint), `vet`, `tidy` (drift check on go.mod/go.sum),
+  `proto` (`buf lint` + `buf generate` drift check on `libs/proto-gen`),
+  `test` (unit, race + coverage), `integration` (build tag
+  `integration`, runs after lint+test, uses GH runner Docker for
+  testcontainers). It mirrors `make ci` plus a proto-generation drift
+  check; **sqlc drift is not yet checked in CI**. The legacy `ci.yml`
+  (cargo-based, Rust era) has been removed.
+- **Other workflows still reference the Rust era.** `proto-check.yml`,
+  `chaos-smoke.yml`, `iceberg-integration.yml`,
+  `integration-foundry-pattern.yml` and `security-audit.yml` either
+  have `Cargo.*` in their path filters or run cargo / sqlx steps that
+  no longer match this tree. The Python tooling under
+  `tools/bus-lint/` and `tools/data-residency/` also walks Cargo.toml
+  / sqlx and will not work against the Go monorepo. Treat any green
+  signal from those as "did not run" until they are migrated.
 - **Single Go module, root `go.mod`.** Don't create per-service modules.
 - **`libs/proto-gen/` is generated.** Don't edit by hand — re-run `make gen`.
 
