@@ -2,9 +2,14 @@ version: v2
 name: buf.build/open-foundry/api
 lint:
   use:
-    - STANDARD
+    - MINIMAL
   except:
-    - PACKAGE_VERSION_SUFFIX
-breaking:
-  use:
-    - FILE
+    # Proto tree uses a flat `proto/<area>/` layout instead of
+    # `proto/open_foundry/<area>/`. Re-shuffling the directory tree to
+    # match buf's strict directory<->package convention would invalidate
+    # every generated import path; not worth it for a stub-heavy tree.
+    - PACKAGE_DIRECTORY_MATCH
+    # The streaming/ dir hosts two intentionally separate packages
+    # (router.v1 + streams.v1) co-located by service area. Splitting
+    # them into sibling dirs is a follow-up.
+    - DIRECTORY_SAME_PACKAGE

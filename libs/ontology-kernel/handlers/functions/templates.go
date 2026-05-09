@@ -160,28 +160,28 @@ func functionSDKPackages() []models.FunctionSDKPackageReference {
 			Language:    "typescript",
 			Path:        "sdks/typescript/openfoundry-sdk",
 			PackageName: "@open-foundry/sdk",
-			GeneratedBy: "cargo run -p of-cli -- docs generate-sdk-typescript --input apps/web/static/generated/openapi/openfoundry.json --output sdks/typescript/openfoundry-sdk",
+			GeneratedBy: "go run ./tools/of-cli docs generate-sdk-typescript --input apps/web/public/generated/openapi/openfoundry.json --output sdks/typescript/openfoundry-sdk",
 		},
 		{
 			Language:    "python",
 			Path:        "sdks/python/openfoundry-sdk",
 			PackageName: "openfoundry-sdk",
-			GeneratedBy: "cargo run -p of-cli -- docs generate-sdk-python --input apps/web/static/generated/openapi/openfoundry.json --output sdks/python/openfoundry-sdk",
+			GeneratedBy: "go run ./tools/of-cli docs generate-sdk-python --input apps/web/public/generated/openapi/openfoundry.json --output sdks/python/openfoundry-sdk",
 		},
 		{
 			Language:    "java",
 			Path:        "sdks/java/openfoundry-sdk",
 			PackageName: "com.openfoundry.sdk",
-			GeneratedBy: "cargo run -p of-cli -- docs generate-sdk-java --input apps/web/static/generated/openapi/openfoundry.json --output sdks/java/openfoundry-sdk",
+			GeneratedBy: "go run ./tools/of-cli docs generate-sdk-java --input apps/web/public/generated/openapi/openfoundry.json --output sdks/java/openfoundry-sdk",
 		},
 	}
 }
 
 func functionAuthoringCLICommands() []string {
 	return []string{
-		"cargo run -p of-cli -- project init customer-triage --template function-typescript --output packages",
-		"cargo run -p of-cli -- project init anomaly-diagnostics --template function-python --output packages",
-		"cargo run -p of-cli -- docs generate-sdk-typescript --input apps/web/static/generated/openapi/openfoundry.json --output sdks/typescript/openfoundry-sdk",
-		"cargo run -p of-cli -- docs generate-sdk-python --input apps/web/static/generated/openapi/openfoundry.json --output sdks/python/openfoundry-sdk",
+		"go run ./tools/of-cli project init customer-triage --template function-typescript --output packages",
+		"go run ./tools/of-cli project init anomaly-diagnostics --template function-python --output packages",
+		"go run ./tools/of-cli docs generate-sdk-typescript --input apps/web/public/generated/openapi/openfoundry.json --output sdks/typescript/openfoundry-sdk",
+		"go run ./tools/of-cli docs generate-sdk-python --input apps/web/public/generated/openapi/openfoundry.json --output sdks/python/openfoundry-sdk",
 	}
 }
