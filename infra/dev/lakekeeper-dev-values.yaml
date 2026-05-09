@@ -1,0 +1,52 @@
+# Lakekeeper dev override — same chart and same image as production, only
+# replicas / placement / OIDC are scaled down so the deploy fits in a 3-node
+# Lima cluster. Apply with:
+#
+#   helm upgrade --install lakekeeper infra/helm/infra/lakekeeper \
+#     --namespace lakekeeper -f infra/dev/lakekeeper-dev-values.yaml
+#
+# In production this file is omitted; the chart's own values.yaml takes over
+# (3 replicas, podDisruptionBudget, topologySpreadConstraints, real OIDC).
+
+lakekeeper:
+  catalog:
+    # Single replica fits Lima single-zone clusters.
+    replicas: 1
+
+    # Disable HA constraints that prevent scheduling on 3 nodes / single zone.
+    topologySpreadConstraints: []
+
+    podDisruptionBudget:
+      enabled: false
+
+    # Slim resource requests so a Lima node can host other services alongside.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  # Authentication: keep the chart wiring (OIDC against
+  # identity-federation-service) but downgrade `audience`/`clientID` to
+  # placeholders we accept locally. The dev cluster's identity service is
+  # in the `openfoundry` namespace, not `default`, so override providerUri.
+  auth:
+    oauth2:
+      providerUri: "http://identity-federation-service.openfoundry.svc.cluster.local:8080/realms/openfoundry"
+      audience: "lakekeeper"
+      ui:
+        clientID: "lakekeeper-ui"
+        scopes: "openid profile email"
+    k8s:
+      enabled: false
+
+  # Allow-all auth so smoke tests do not need a real JWT chain. Production
+  # keeps `allowall` too — fine-grained access lives upstream in the gateway.
+  authz:
+    backend: "allowall"
+
+  internalOpenFGA: false
+
+  helmWait: true

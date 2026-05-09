@@ -44,19 +44,67 @@ spec:
   mainClass: "${main_class}"
   mainApplicationFile: ${main_application_file}
   arguments:
-    - ${input_dataset_rid}
-    - ${output_dataset_rid}
-  sparkVersion: "3.5.0"
+    - "--pipeline-id"
+    - "${pipeline_id}"
+    - "--run-id"
+    - "${run_id}"
+    - "--input-dataset"
+    - "${input_dataset_rid}"
+    - "--output-dataset"
+    - "${output_dataset_rid}"
+    - "--catalog"
+    - "${catalog}"
+    - "--catalog-uri"
+    - "${catalog_uri}"
+    - "--inline-sql"
+    - "${inline_sql}"
+    - "--inline-format"
+    - "${inline_format}"
+  sparkVersion: "3.5.4"
   restartPolicy:
     type: Never
   driver:
     cores: ${driver_cores}
     memory: ${driver_memory}
     serviceAccount: spark
+    env:
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: openfoundry-iceberg
+            key: AWS_ACCESS_KEY_ID
+            optional: true
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: openfoundry-iceberg
+            key: AWS_SECRET_ACCESS_KEY
+            optional: true
   executor:
     cores: ${executor_cores}
     instances: ${executor_instances}
     memory: ${executor_memory}
+    env:
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: openfoundry-iceberg
+            key: AWS_ACCESS_KEY_ID
+            optional: true
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: openfoundry-iceberg
+            key: AWS_SECRET_ACCESS_KEY
+            optional: true
+  sparkConf:
+    spark.sql.extensions: "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
+    spark.sql.catalog.${catalog}: "org.apache.iceberg.spark.SparkCatalog"
+    spark.sql.catalog.${catalog}.type: "rest"
+    spark.sql.catalog.${catalog}.uri: "${catalog_uri}"
+    spark.hadoop.fs.s3a.endpoint: "${s3_endpoint}"
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.aws.credentials.provider: "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider"
 `
 
 type SparkApplicationType string
@@ -71,7 +119,7 @@ func (t SparkApplicationType) defaults() (string, string) {
 	case SparkApplicationPython:
 		return "", "local:///opt/spark/work-dir/pipeline_runner.py"
 	default:
-		return "com.openfoundry.pipeline.PipelineRunner", "local:///opt/spark/jars/pipeline-runner.jar"
+		return "com.openfoundry.pipeline.PipelineRunner", "local:///opt/spark/jars/pipeline-runner-spark.jar"
 	}
 }
 
@@ -116,6 +164,32 @@ type PipelineRunInput struct {
 	InputDatasetRID     string                 `json:"input_dataset_rid"`
 	OutputDatasetRID    string                 `json:"output_dataset_rid"`
 	Resources           SparkResourceOverrides `json:"resources"`
+	// New fields for inline SQL transforms (consumed by services/pipeline-runner-spark
+	// PipelineRunner.scala via spark-submit). See infra/helm/infra/spark-jobs/templates/_pipeline-run-template.yaml.
+	Catalog      string `json:"catalog,omitempty"`
+	CatalogURI   string `json:"catalog_uri,omitempty"`
+	S3Endpoint   string `json:"s3_endpoint,omitempty"`
+	InlineSQL    string `json:"inline_sql,omitempty"`
+	InlineFormat string `json:"inline_format,omitempty"`
+}
+
+// PipelineRunDefaults applies sensible defaults for the inline-SQL fields when
+// the caller leaves them blank. Centralised so the engine wiring and the API
+// handlers stay in sync.
+func PipelineRunDefaults(input PipelineRunInput) PipelineRunInput {
+	if strings.TrimSpace(input.Catalog) == "" {
+		input.Catalog = "lakekeeper"
+	}
+	if strings.TrimSpace(input.CatalogURI) == "" {
+		input.CatalogURI = "http://lakekeeper.lakekeeper.svc:8181"
+	}
+	if strings.TrimSpace(input.S3Endpoint) == "" {
+		input.S3Endpoint = "http://rook-ceph-rgw-openfoundry-store.rook-ceph.svc:80"
+	}
+	if strings.TrimSpace(input.InlineFormat) == "" {
+		input.InlineFormat = "iceberg"
+	}
+	return input
 }
 
 type SparkRunStatus string
@@ -163,6 +237,7 @@ func RenderManifest(input PipelineRunInput) (map[string]any, error) {
 		input.ApplicationType = SparkApplicationScala
 	}
 	input.Resources = input.Resources.withDefaults()
+	input = PipelineRunDefaults(input)
 	if err := validateInput(input); err != nil {
 		return nil, err
 	}
@@ -182,6 +257,11 @@ func RenderManifest(input PipelineRunInput) (map[string]any, error) {
 		"main_application_file":  mainFile,
 		"input_dataset_rid":      input.InputDatasetRID,
 		"output_dataset_rid":     input.OutputDatasetRID,
+		"catalog":                input.Catalog,
+		"catalog_uri":            input.CatalogURI,
+		"s3_endpoint":            input.S3Endpoint,
+		"inline_sql":             escapeYAMLString(input.InlineSQL),
+		"inline_format":          input.InlineFormat,
 		"driver_cores":           fmt.Sprint(input.Resources.DriverCores),
 		"driver_memory":          input.Resources.DriverMemory,
 		"executor_cores":         fmt.Sprint(input.Resources.ExecutorCores),
@@ -534,4 +614,17 @@ func certPoolFromPEM(pemBytes []byte) (*x509.CertPool, error) {
 		return nil, errors.New("kubeconfig certificate authority did not contain a valid PEM certificate")
 	}
 	return pool, nil
+}
+
+// escapeYAMLString prepares a string value to be substituted inside a
+// double-quoted YAML scalar in the SparkApplication template. Backslashes and
+// double-quotes have to be escaped so SQL like `WHERE col = "x"` does not break
+// the surrounding YAML, and newlines are flattened so the inline-sql argument
+// stays on one line for the spark-submit CLI.
+func escapeYAMLString(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\"", "\\\"")
+	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.ReplaceAll(value, "\r", " ")
+	return value
 }

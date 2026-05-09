@@ -22,9 +22,40 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/spark"
 )
+
+// SparkRuntime is the narrow port the engine needs from the host AppState to
+// dispatch SparkApplication submissions. Implemented by the production
+// pipeline-build-service AppState (which embeds spark.SparkClient + the
+// per-cluster defaults); satisfied in tests by a thin in-memory fake.
+type SparkRuntime interface {
+	SparkClient() spark.SparkClient
+	SparkNamespace() string
+	SparkRunnerImage() string
+	SparkPollInterval() time.Duration
+	SparkPollTimeout() time.Duration
+}
+
+// distributedComputeNodeConfig is the JSON shape stored under
+// PipelineNode.Config when transform_type ∈ {spark, pyspark}. The
+// pipeline-build-service handlers serialise the user's pipeline DAG into this
+// shape; the engine reads it back here.
+type distributedComputeNodeConfig struct {
+	SQL          string                       `json:"sql,omitempty"`
+	Format       string                       `json:"format,omitempty"`
+	Catalog      string                       `json:"catalog,omitempty"`
+	CatalogURI   string                       `json:"catalog_uri,omitempty"`
+	S3Endpoint   string                       `json:"s3_endpoint,omitempty"`
+	Resources    spark.SparkResourceOverrides `json:"resources,omitempty"`
+	RunnerImage  string                       `json:"runner_image,omitempty"`
+	Application  spark.SparkApplicationType   `json:"application_type,omitempty"`
+}
 
 // nodeFingerprint mirrors `pub fn node_fingerprint`. Hashes the node
 // definition + dependency fingerprints + sorted input metadata so
@@ -173,10 +204,120 @@ func executePassthroughTransform(_ context.Context, _ any, _ *PipelineNode, _ []
 	return nil, nil, nil, transformRuntimeError("passthrough")
 }
 
-// executeDistributedComputeTransform — spark-on-k8s submission lands
-// in its own phase (requires the Kubernetes client wired by Phase B).
-func executeDistributedComputeTransform(_ context.Context, _ any, _ *PipelineNode, _ []LoadedDataset) (TransformResult, error) {
-	return TransformResult{}, transformRuntimeError("distributed")
+// executeDistributedComputeTransform submits a SparkApplication CR via the
+// host AppState's SparkClient and watches the CR until it terminates. The host
+// AppState is checked for the SparkRuntime interface — if the interface is not
+// satisfied (e.g. because pipeline-build-service was booted without the k8s
+// client wiring) we surface the canonical Phase A failure so callers can
+// produce a clear configuration error rather than crashing.
+func executeDistributedComputeTransform(ctx context.Context, state any, node *PipelineNode, inputs []LoadedDataset) (TransformResult, error) {
+	runtime, ok := state.(SparkRuntime)
+	if !ok || runtime == nil || runtime.SparkClient() == nil {
+		return TransformResult{}, transformRuntimeError("distributed")
+	}
+
+	cfg, err := parseDistributedComputeConfig(node)
+	if err != nil {
+		return TransformResult{}, err
+	}
+
+	pipelineID := node.ID
+	runID := uuid.NewString()
+
+	inputDataset := ""
+	if len(inputs) > 0 {
+		inputDataset = inputs[0].Metadata.DatasetID.String()
+	}
+	outputDataset := ""
+	if node.OutputDatasetID != nil {
+		outputDataset = node.OutputDatasetID.String()
+	}
+	if inputDataset == "" {
+		inputDataset = outputDataset
+	}
+
+	image := strings.TrimSpace(cfg.RunnerImage)
+	if image == "" {
+		image = runtime.SparkRunnerImage()
+	}
+
+	input := spark.PipelineRunInput{
+		PipelineID:          pipelineID,
+		RunID:               runID,
+		Namespace:           runtime.SparkNamespace(),
+		ApplicationType:     cfg.Application,
+		PipelineRunnerImage: image,
+		InputDatasetRID:     inputDataset,
+		OutputDatasetRID:    outputDataset,
+		Resources:           cfg.Resources,
+		Catalog:             cfg.Catalog,
+		CatalogURI:          cfg.CatalogURI,
+		S3Endpoint:          cfg.S3Endpoint,
+		InlineSQL:           cfg.SQL,
+		InlineFormat:        cfg.Format,
+	}
+
+	client := runtime.SparkClient()
+	name, err := client.SubmitPipelineRun(ctx, input)
+	if err != nil {
+		return TransformResult{}, fmt.Errorf("submit SparkApplication: %w", err)
+	}
+
+	pollInterval := runtime.SparkPollInterval()
+	if pollInterval <= 0 {
+		pollInterval = 5 * time.Second
+	}
+	pollTimeout := runtime.SparkPollTimeout()
+	if pollTimeout <= 0 {
+		pollTimeout = 30 * time.Minute
+	}
+	deadline := time.Now().Add(pollTimeout)
+
+	for {
+		report, err := client.GetPipelineRunStatus(ctx, runtime.SparkNamespace(), name)
+		if err != nil {
+			return TransformResult{}, fmt.Errorf("get SparkApplication status: %w", err)
+		}
+		if report != nil {
+			switch report.Status {
+			case spark.SparkRunSucceeded:
+				output, _ := json.Marshal(map[string]any{
+					"spark_application": name,
+					"namespace":         runtime.SparkNamespace(),
+					"run_id":            runID,
+					"output_dataset":    outputDataset,
+				})
+				return TransformResult{Output: output}, nil
+			case spark.SparkRunFailed:
+				msg := "spark application failed"
+				if report.ErrorMessage != nil && *report.ErrorMessage != "" {
+					msg = *report.ErrorMessage
+				}
+				return TransformResult{}, fmt.Errorf("SparkApplication %s failed: %s", name, msg)
+			}
+		}
+
+		if time.Now().After(deadline) {
+			return TransformResult{}, fmt.Errorf("SparkApplication %s timed out after %s", name, pollTimeout)
+		}
+
+		select {
+		case <-ctx.Done():
+			return TransformResult{}, ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+func parseDistributedComputeConfig(node *PipelineNode) (distributedComputeNodeConfig, error) {
+	cfg := distributedComputeNodeConfig{}
+	if len(node.Config) == 0 {
+		return cfg, nil
+	}
+	if err := json.Unmarshal(node.Config, &cfg); err != nil {
+		return cfg, fmt.Errorf("parse distributed compute config: %w", err)
+	}
+	return cfg, nil
 }
 
 // executeRemoteComputeTransform — connector-management-service
