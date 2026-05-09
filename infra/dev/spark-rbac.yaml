@@ -1,0 +1,39 @@
+# Spark Operator dispatches driver/executor pods under a ServiceAccount the
+# CR references. We grant the SparkApplication "spark" SA in `openfoundry`
+# the permissions Spark Operator + driver need to schedule executors.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark
+  namespace: openfoundry
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spark-driver
+  namespace: openfoundry
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["configmaps", "persistentvolumeclaims"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spark-driver
+  namespace: openfoundry
+subjects:
+  - kind: ServiceAccount
+    name: spark
+    namespace: openfoundry
+roleRef:
+  kind: Role
+  name: spark-driver
+  apiGroup: rbac.authorization.k8s.io

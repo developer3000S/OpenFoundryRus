@@ -1,0 +1,75 @@
+# Smoke test SparkApplication. Renders our pipeline-runner image, writes a
+# 1-row Iceberg table via the Scala main, and exits.
+#
+# Usage:
+#   kubectl apply -f infra/dev/spark-smoke.yaml
+#   kubectl get sparkapplication -n openfoundry -w
+#   kubectl logs -n openfoundry pipeline-run-smoke-001-driver
+#
+# Verify result via Lakekeeper REST:
+#   curl ... /catalog/v1/<warehouse-id>/namespaces/default/tables/smoke
+---
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: pipeline-run-smoke-001
+  namespace: openfoundry
+  labels:
+    openfoundry.io/component: pipeline-run
+    openfoundry.io/pipeline-id: "smoke"
+    openfoundry.io/run-id: "001"
+spec:
+  type: Scala
+  mode: cluster
+  image: localhost:5001/pipeline-runner:dev-000541
+  imagePullPolicy: IfNotPresent
+  mainClass: "com.openfoundry.pipeline.PipelineRunner"
+  mainApplicationFile: "local:///opt/spark/jars/pipeline-runner-spark.jar"
+  arguments:
+    - "--pipeline-id"
+    - "smoke"
+    - "--run-id"
+    - "001"
+    - "--input-dataset"
+    - "lakekeeper.default.smoke"
+    - "--output-dataset"
+    - "lakekeeper.default.smoke"
+    - "--catalog"
+    - "lakekeeper"
+    - "--catalog-uri"
+    - "http://lakekeeper.lakekeeper.svc:8181/catalog"
+    - "--inline-sql"
+    - "SELECT 1 AS one"
+    - "--inline-format"
+    - "iceberg"
+  sparkVersion: "3.5.4"
+  restartPolicy:
+    type: Never
+  timeToLiveSeconds: 1800
+  driver:
+    cores: 1
+    memory: "512m"
+    serviceAccount: spark
+    env:
+      - { name: AWS_ACCESS_KEY_ID,     valueFrom: { secretKeyRef: { name: openfoundry-iceberg, key: AWS_ACCESS_KEY_ID } } }
+      - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: openfoundry-iceberg, key: AWS_SECRET_ACCESS_KEY } } }
+  executor:
+    cores: 1
+    instances: 1
+    memory: "512m"
+    env:
+      - { name: AWS_ACCESS_KEY_ID,     valueFrom: { secretKeyRef: { name: openfoundry-iceberg, key: AWS_ACCESS_KEY_ID } } }
+      - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: openfoundry-iceberg, key: AWS_SECRET_ACCESS_KEY } } }
+  sparkConf:
+    spark.sql.extensions: "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
+    spark.sql.catalog.lakekeeper: "org.apache.iceberg.spark.SparkCatalog"
+    spark.sql.catalog.lakekeeper.type: "rest"
+    spark.sql.catalog.lakekeeper.uri: "http://lakekeeper.lakekeeper.svc:8181/catalog"
+    spark.sql.catalog.lakekeeper.warehouse: "openfoundry"
+    spark.sql.catalog.lakekeeper.credential: "lakekeeper:s"
+    spark.sql.catalog.lakekeeper.oauth2-server-uri: "http://oidc-stub.lakekeeper.svc.cluster.local:8080/lakekeeper/token"
+    spark.sql.catalog.lakekeeper.scope: "openid"
+    spark.sql.defaultCatalog: "lakekeeper"
+    spark.hadoop.fs.s3a.endpoint: "http://rook-ceph-rgw-openfoundry-store.rook-ceph.svc:80"
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.aws.credentials.provider: "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider"

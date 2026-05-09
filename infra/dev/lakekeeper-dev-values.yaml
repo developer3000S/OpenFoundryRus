@@ -37,7 +37,7 @@ lakekeeper:
       # Dev OIDC: navikt/mock-oauth2-server in the same namespace. Production
       # points at identity-federation-service. Issuer name `lakekeeper`
       # matches the audience the chart sends to the catalog.
-      providerUri: "http://oidc-stub:8080/lakekeeper"
+      providerUri: "http://oidc-stub.lakekeeper.svc.cluster.local:8080/lakekeeper"
       audience: "lakekeeper"
       ui:
         clientID: "lakekeeper-ui"

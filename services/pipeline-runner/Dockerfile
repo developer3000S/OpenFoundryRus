@@ -123,6 +123,10 @@ COPY --from=jars      /jars/                                /opt/spark/jars/
 COPY --from=scala-jar /workspace/pipeline-runner-spark.jar  /opt/spark/jars/pipeline-runner-spark.jar
 COPY --from=builder   /out/pipeline-runner                  /usr/local/bin/pipeline-runner
 
+# Keep the apache/spark base entrypoint (`/opt/entrypoint.sh`) so the Spark
+# Operator can drive the image as a SparkApplication driver/executor pod.
+# The Go orchestrator (pipeline-runner) stays available at /usr/local/bin/
+# for external callers that prefer the spark-submit-shim flow; explicit
+# invocation is required (it is NOT the default ENTRYPOINT any more).
 USER 185:185
 STOPSIGNAL SIGTERM
-ENTRYPOINT ["/usr/local/bin/pipeline-runner"]
