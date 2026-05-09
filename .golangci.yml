@@ -1,0 +1,101 @@
+# golangci-lint configuration — schema v2.
+# Pinned binary version is in Makefile (`make tools`).
+#
+# Philosophy: pragmatic + additive. Enables the standard linter set plus
+# a small number of high-signal extras. Tightening the config (revive,
+# gosec, prealloc, gofumpt-as-lint) is intentionally deferred — it would
+# create a large cleanup PR without changing behavior.
+#
+# Run via: make lint        (uses ./bin/golangci-lint from `make tools`)
+# Auto-fix: golangci-lint run --fix
+
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  # Lint integration test files too. Without this, files behind
+  # //go:build integration are skipped silently and never linted.
+  build-tags:
+    - integration
+
+linters:
+  # `standard` = errcheck + govet + ineffassign + staticcheck + unused.
+  default: standard
+  enable:
+    - bodyclose      # http.Response.Body.Close()
+    - errorlint      # errors.Is/As idioms (we use sentinels)
+    - misspell       # typos in comments and strings
+    - unconvert      # redundant type conversions
+    - copyloopvar    # Go 1.22+ idiom
+
+  exclusions:
+    paths:
+      - libs/proto-gen
+      - bin
+      - sdks
+      - apps           # frontend, not Go
+      - docs
+      - python
+      - .*\.pb\.go$
+      - .*\.pb\.gw\.go$
+      - .*_grpc\.pb\.go$
+      - .*\.gen\.go$
+    rules:
+      # Tests: assertions cover the failure paths errcheck would flag.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose
+      # Generated migration wrappers — don't lint.
+      - path: migrations/
+        linters:
+          - errcheck
+          - govet
+          - ineffassign
+          - staticcheck
+          - unused
+          - bodyclose
+          - errorlint
+          - misspell
+          - unconvert
+          - copyloopvar
+
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+        - (*encoding/json.Encoder).Encode
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - fmt.Fprint
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment   # micro-optimization, not worth the churn
+        - shadow           # too many false positives on err shadowing
+    staticcheck:
+      checks:
+        - all
+        - "-ST1003"        # naming-style nags on existing identifiers
+    errorlint:
+      errorf: true
+      errorf-multi: true
+      asserts: true
+      comparison: true
+    misspell:
+      locale: US
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Baseline: silence pre-existing issues across the tree. `make lint`
+  # only flags issues introduced after the latest commit, which keeps
+  # the feedback loop honest for agents working on a feature branch
+  # without requiring a giant cleanup PR up front.
+  #
+  # To audit the full backlog: `golangci-lint run ./...` (no extra flags).
+  # To gate against main in CI: `--new-from-rev=origin/main`.
+  new-from-rev: HEAD

@@ -60,8 +60,11 @@ pnpm --filter @open-foundry/web test   # vitest
 
 ## Gotchas (real, not theoretical)
 
-- **`justfile` is Rust-era.** It runs `cargo` against a workspace that no
-  longer exists in this tree. Never invoke `just <target>`. Use `make`.
+- **`justfile` is a thin shim over `make`.** Every recipe just calls the
+  matching Make target; the Makefile is canonical. (Until recently the
+  justfile was full of `cargo` recipes pointing at a Rust workspace
+  that no longer exists in this tree. If you see `just <recipe>` in
+  legacy docs, mentally translate to `make <recipe>`.)
 - **`CONTRIBUTING.md` is stale**: says "~85 Rust microservices", "Cargo +
   pnpm + buf monorepo", and "Run `just lint test`". Treat it as
   out-of-date for stack/commands; the PR-process and RFC sections are
@@ -70,12 +73,17 @@ pnpm --filter @open-foundry/web test   # vitest
   directories"**. Actual: React 19 + Vite, 41 service directories. The
   service count overload is because the doc counts logical "ownership
   boundaries" — read with skepticism.
-- **`.golangci.yml` is referenced by `README.md` but is not committed.**
-  `make lint` will need either that file added or the lint config
-  reconstituted before it passes.
-- **`.github/workflows/ci.yml` is the Rust CI (cargo).** The Go CI is
-  `openfoundry-go.yml`. If you need to debug CI for this code, look at
-  the latter.
+- **`make lint` baselines pre-existing issues.** `.golangci.yml` is
+  configured with `new-from-rev: HEAD`, so `make lint` only flags
+  issues introduced *after* the latest commit. To audit the full
+  backlog: `golangci-lint run --new-from-rev= ./...` (currently ~950
+  issues across the tree, mostly British/US misspellings + staticcheck
+  style nits — tracked as tech debt, not a feature gate).
+- **`.github/workflows/ci.yml` is the Rust CI (cargo) and effectively
+  inactive** — its path filters reference `Cargo.*` and `openfoundry-go/**`
+  which no longer match this layout. The Go CI workflow
+  `openfoundry-go.yml` also has stale paths. If you need to debug CI,
+  expect to fix the workflow first.
 - **Single Go module, root `go.mod`.** Don't create per-service modules.
 - **`libs/proto-gen/` is generated.** Don't edit by hand — re-run `make gen`.
 
