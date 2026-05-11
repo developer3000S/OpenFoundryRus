@@ -13,9 +13,10 @@ import (
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/models"
 )
 
-func TestValidateConfigRequiresBaseURL(t *testing.T) {
+func TestValidateConfigRequiresBaseURLOrDomain(t *testing.T) {
 	require.Error(t, ValidateConfig(json.RawMessage(`{}`)))
 	require.NoError(t, ValidateConfig(json.RawMessage(`{"base_url":"https://example.com"}`)))
+	require.NoError(t, ValidateConfig(json.RawMessage(`{"domain":"api.open-meteo.com","auth":{"type":"none"}}`)))
 }
 
 // TestNormalizesCommonRESTWrappers mirrors Rust's
@@ -124,6 +125,58 @@ func TestQueryVirtualTableAgainstFakeServer(t *testing.T) {
 	require.Equal(t, "zero_copy", res.Mode)
 	require.Equal(t, 2, res.RowCount)
 	require.Len(t, res.Rows, 2)
+}
+
+func TestQueryVirtualTableUsesModeledRESTAPISourceAuthAndQueryDefaults(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/forecast", r.URL.Path)
+		require.Equal(t, "hourly", r.URL.Query().Get("model"))
+		require.Equal(t, "dev-key", r.URL.Query().Get("api_key"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"records":[{"temperature":84,"wind_speed":4.8}]}`))
+	}))
+	defer srv.Close()
+
+	a := New()
+	a.SetHTTPClient(srv.Client())
+	conn := &models.Connection{Config: json.RawMessage(`{
+		"base_url":"` + srv.URL + `",
+		"query_params":{"model":"hourly"},
+		"auth":{"type":"api_key","query_param":"api_key","value":"dev-key"},
+		"runtime":{"worker":"foundry","timeout_ms":5000},
+		"permissions":{"discoverable":true,"syncable":true,"invokable":true,"usable_in_code":true}
+	}`)}
+	res, err := a.QueryVirtualTable(context.Background(), conn, &adapters.Query{Selector: "/forecast"}, "")
+	require.NoError(t, err)
+	require.Equal(t, 1, res.RowCount)
+	require.Equal(t, []string{"temperature", "wind_speed"}, res.Columns)
+}
+
+func TestConnectionAgainstFakeRESTAPISource(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/forecast", r.URL.Path)
+		require.Equal(t, "weather-key", r.Header.Get("X-Weather-Key"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"current":{"temperature_2m":84}}`))
+	}))
+	defer srv.Close()
+
+	a := New()
+	a.SetHTTPClient(srv.Client())
+	result, err := a.TestConnection(context.Background(), json.RawMessage(`{
+		"base_url":"`+srv.URL+`",
+		"health_path":"/v1/forecast",
+		"auth":{"type":"api_key","header_name":"X-Weather-Key","value":"weather-key"},
+		"runtime":{"worker":"foundry","timeout_ms":5000,"allowed_methods":["GET"]},
+		"permissions":{"invokable":true,"allowed_egress_hosts":["api.open-meteo.com"]}
+	}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, "validated REST API source", result.Message)
+	var details map[string]any
+	require.NoError(t, json.Unmarshal(result.Details, &details))
+	require.Equal(t, "api_key", details["auth_type"])
+	require.Equal(t, "foundry", details["worker"])
 }
 
 func TestStreamArrowReturnsErrNotImplemented(t *testing.T) {

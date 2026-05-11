@@ -1,0 +1,22 @@
+{
+  "id": "trail-running-demo-fixtures-v1",
+  "description": "Synthetic Trail Running demo fixtures for Pipeline Builder, Ontology, Data Connection, and Workshop acceptance tests.",
+  "privacy": "All activities, trails, cafes, and weather responses are synthetic. Do not replace with private Strava exports or personal home/work locations.",
+  "expected_counts": {
+    "strava_activities": 10,
+    "gpx_trails": 3,
+    "coffee_shops": 6,
+    "weather_snapshots": 1
+  },
+  "files": {
+    "strava_activities": "strava_activities.json",
+    "coffee_shops_csv": "coffee_shops.csv",
+    "coffee_shops_json": "coffee_shops.json",
+    "weather_response": "weather_open_meteo_boulder.json",
+    "gpx_trails": [
+      "gpx/mesa_overlook_loop.gpx",
+      "gpx/green_mountain_ascent.gpx",
+      "gpx/boulder_creek_path.gpx"
+    ]
+  }
+}

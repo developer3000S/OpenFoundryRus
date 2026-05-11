@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/models"
@@ -907,4 +908,218 @@ func scanConnectorAgent(r rowLikeT) (*models.ConnectorAgent, error) {
 		return nil, err
 	}
 	return agent, nil
+}
+
+const webhookHistorySelect = `SELECT id, source_id, user_id, status, http_status,
+	input_policy, inputs, output_parameters, error, call_count, started_at,
+	finished_at, duration_ms, retention_expires_at, created_at
+	FROM webhook_invocation_history`
+
+func (r *Repo) AppendWebhookHistory(ctx context.Context, body *models.CreateWebhookHistoryEntry) (*models.WebhookHistoryEntry, error) {
+	if body == nil {
+		return nil, errors.New("webhook history entry is nil")
+	}
+	if body.StartedAt.IsZero() {
+		body.StartedAt = time.Now().UTC()
+	}
+	if body.FinishedAt.IsZero() {
+		body.FinishedAt = time.Now().UTC()
+	}
+	if body.RetentionExpiresAt.IsZero() {
+		body.RetentionExpiresAt = body.FinishedAt.Add(30 * 24 * time.Hour)
+	}
+	durationMS := body.FinishedAt.Sub(body.StartedAt).Milliseconds()
+	if durationMS < 0 {
+		durationMS = 0
+	}
+	policy, err := json.Marshal(body.InputPolicy)
+	if err != nil {
+		return nil, err
+	}
+	var httpStatus any
+	if body.HTTPStatus != nil {
+		httpStatus = int(*body.HTTPStatus)
+	}
+	id := uuid.New()
+	row := r.Pool.QueryRow(ctx,
+		`INSERT INTO webhook_invocation_history
+			(id, source_id, user_id, status, http_status, input_policy, inputs,
+			 output_parameters, error, call_count, started_at, finished_at,
+			 duration_ms, retention_expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		 RETURNING id, source_id, user_id, status, http_status, input_policy,
+		           inputs, output_parameters, error, call_count, started_at,
+		           finished_at, duration_ms, retention_expires_at, created_at`,
+		id, body.SourceID, body.UserID, body.Status, httpStatus, policy,
+		nullableJSON(body.Inputs), nullableJSON(body.OutputParameters), body.Error,
+		body.CallCount, body.StartedAt, body.FinishedAt, durationMS, body.RetentionExpiresAt,
+	)
+	return scanWebhookHistory(row)
+}
+
+func (r *Repo) ListWebhookHistory(ctx context.Context, sourceID uuid.UUID, limit int) ([]models.WebhookHistoryEntry, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	_, _ = r.Pool.Exec(ctx, `DELETE FROM webhook_invocation_history WHERE retention_expires_at < NOW()`)
+	rows, err := r.Pool.Query(ctx, webhookHistorySelect+`
+		WHERE source_id = $1 AND retention_expires_at >= NOW()
+		ORDER BY created_at DESC
+		LIMIT $2`, sourceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.WebhookHistoryEntry{}
+	for rows.Next() {
+		row, err := scanWebhookHistory(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *row)
+	}
+	return out, rows.Err()
+}
+
+func nullableJSON(raw json.RawMessage) any {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return raw
+}
+
+func scanWebhookHistory(r rowLikeT) (*models.WebhookHistoryEntry, error) {
+	entry := &models.WebhookHistoryEntry{}
+	var policy json.RawMessage
+	var httpStatus pgtype.Int4
+	if err := r.Scan(
+		&entry.ID,
+		&entry.SourceID,
+		&entry.UserID,
+		&entry.Status,
+		&httpStatus,
+		&policy,
+		&entry.Inputs,
+		&entry.OutputParameters,
+		&entry.Error,
+		&entry.CallCount,
+		&entry.StartedAt,
+		&entry.FinishedAt,
+		&entry.DurationMS,
+		&entry.RetentionExpiresAt,
+		&entry.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if len(policy) > 0 {
+		_ = json.Unmarshal(policy, &entry.InputPolicy)
+	}
+	if httpStatus.Valid {
+		converted := uint16(httpStatus.Int32)
+		entry.HTTPStatus = &converted
+	}
+	if len(entry.Inputs) == 0 {
+		entry.Inputs = nil
+	}
+	if len(entry.OutputParameters) == 0 {
+		entry.OutputParameters = nil
+	}
+	return entry, nil
+}
+
+const inboundListenerEventSelect = `SELECT id, source_id, listener_id, event_id, status,
+	signature_verified, payload, headers, destination, created_at
+	FROM inbound_listener_events`
+
+func (r *Repo) AppendInboundListenerEvent(ctx context.Context, body *models.CreateInboundListenerEvent) (*models.InboundListenerEvent, error) {
+	if body == nil {
+		return nil, errors.New("inbound listener event is nil")
+	}
+	if strings.TrimSpace(body.ListenerID) == "" {
+		return nil, errors.New("listener_id is required")
+	}
+	status := strings.TrimSpace(body.Status)
+	if status == "" {
+		status = "accepted"
+	}
+	destination, err := json.Marshal(body.Destination)
+	if err != nil {
+		return nil, err
+	}
+	id := uuid.New()
+	row := r.Pool.QueryRow(ctx,
+		`INSERT INTO inbound_listener_events
+			(id, source_id, listener_id, event_id, status, signature_verified,
+			 payload, headers, destination)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		 RETURNING id, source_id, listener_id, event_id, status, signature_verified,
+		           payload, headers, destination, created_at`,
+		id, body.SourceID, body.ListenerID, nullableText(body.EventID), status,
+		body.SignatureVerified, nullableJSON(body.Payload), nullableJSON(body.Headers), destination,
+	)
+	return scanInboundListenerEvent(row)
+}
+
+func (r *Repo) ListInboundListenerEvents(ctx context.Context, sourceID uuid.UUID, limit int) ([]models.InboundListenerEvent, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := r.Pool.Query(ctx, inboundListenerEventSelect+`
+		WHERE source_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2`, sourceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.InboundListenerEvent{}
+	for rows.Next() {
+		row, err := scanInboundListenerEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *row)
+	}
+	return out, rows.Err()
+}
+
+func nullableText(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func scanInboundListenerEvent(r rowLikeT) (*models.InboundListenerEvent, error) {
+	event := &models.InboundListenerEvent{}
+	var eventID pgtype.Text
+	var destination json.RawMessage
+	if err := r.Scan(
+		&event.ID,
+		&event.SourceID,
+		&event.ListenerID,
+		&eventID,
+		&event.Status,
+		&event.SignatureVerified,
+		&event.Payload,
+		&event.Headers,
+		&destination,
+		&event.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if eventID.Valid {
+		event.EventID = eventID.String
+	}
+	if len(destination) > 0 {
+		_ = json.Unmarshal(destination, &event.Destination)
+	}
+	if len(event.Payload) == 0 {
+		event.Payload = nil
+	}
+	if len(event.Headers) == 0 {
+		event.Headers = nil
+	}
+	return event, nil
 }

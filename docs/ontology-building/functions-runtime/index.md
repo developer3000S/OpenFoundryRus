@@ -10,6 +10,8 @@ The repo already suggests several function execution modes:
 - Node-oriented package simulation and validation via `node_runtime_command`
 - Python-enabled semantics through `pyo3` in `ontology-service`
 - SDK-backed external consumption paths
+- Data Connection external Functions through configured webhooks via
+  `context.sdk.dataConnection.invokeWebhook({ sourceId, inputs })`
 
 ## Why this matters
 
@@ -19,6 +21,8 @@ Separating function capability by runtime helps document:
 - execution limits
 - packaging requirements
 - security and permission models
+- external egress governance through Data Connection sources instead of
+  ad hoc runtime HTTP calls
 
 ## Section map
 

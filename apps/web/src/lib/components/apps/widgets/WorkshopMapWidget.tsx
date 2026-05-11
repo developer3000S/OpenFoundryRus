@@ -11,12 +11,13 @@ import {
   type WorkshopVariableEngineResult,
   type WorkshopVariableLike,
 } from './workshopVariables';
-import { executeWorkshopObjectSet } from './workshopObjectSets';
+import { executeWorkshopObjectSet, type WorkshopObjectSetExecutionResult } from './workshopObjectSets';
 import {
   buildFeaturesFromObjects,
   buildFeaturesFromGeospatialLayer,
   buildFeaturesFromConfiguredLayers,
   buildFeaturesFromQueryResult,
+  buildFeaturesFromLinkedEdges,
   buildMapTemplateRenderRequest,
   collectFeatureBounds,
   createWorkshopMapStyle,
@@ -240,17 +241,27 @@ export function WorkshopMapWidget({
     async function loadObjectLayers() {
       setLoadError('');
       const objectLayerFeatures: WorkshopMapFeature[] = [];
+      const linkedEdgeGroups: Array<{ layer: WorkshopMapLayerConfig; edges: WorkshopObjectSetExecutionResult['linkedEdges'] }> = [];
       try {
         for (const layer of visibleLayers) {
           if (layer.source === 'binding' || layer.source === 'geospatial_tile' || layer.loading_mode === 'viewport_tiles') continue;
           const variable = layer.source_variable_id ? variables.find((entry) => entry.id === layer.source_variable_id) ?? null : null;
           const objectTypeId = variable?.object_type_id || layer.object_type_id;
           if (!objectTypeId) continue;
-          const objects = await loadObjectsForLayer(objectTypeId, variable, variables, layer, variableEngine);
+          const result = await loadObjectSetForLayer(objectTypeId, variable, variables, layer, variableEngine);
           if (cancelled) return;
-          objectLayerFeatures.push(...buildFeaturesFromObjects(objects, layer, variable));
+          objectLayerFeatures.push(...buildFeaturesFromObjects(result.data, layer, variable));
+          if (result.linkedEdges.length > 0) {
+            linkedEdgeGroups.push({ layer, edges: result.linkedEdges });
+          }
         }
-        if (!cancelled) setObjectFeatures(objectLayerFeatures);
+        const linkedLayerFeatures = linkedEdgeGroups.flatMap(({ layer, edges }) => buildFeaturesFromLinkedEdges(objectLayerFeatures, edges, {
+          layerId: `links-${layer.id}`,
+          layerTitle: `${layer.title} links`,
+          color: layer.color,
+          lineWidth: Math.max(1, layer.line_width - 1),
+        }));
+        if (!cancelled) setObjectFeatures([...linkedLayerFeatures, ...objectLayerFeatures]);
       } catch (cause) {
         if (!cancelled) {
           setObjectFeatures([]);
@@ -665,7 +676,7 @@ function clampNumber(value: number, min: number, max: number, fallback: number) 
   return Math.min(max, Math.max(min, value));
 }
 
-async function loadObjectsForLayer(
+async function loadObjectSetForLayer(
   objectTypeId: string,
   variable: WorkshopVariableLike | null,
   variables: WorkshopVariableLike[],
@@ -688,16 +699,15 @@ async function loadObjectsForLayer(
       objectTypeId,
       limit: 5000,
     });
-    return response.data;
+    return response;
   }
-  const response = await executeWorkshopObjectSet({
+  return executeWorkshopObjectSet({
     variable,
     variables,
     engine: variableEngine,
     objectTypeId,
     limit: 5000,
   });
-  return response.data;
 }
 
 function installWorkshopMapLayers(map: MapLibreMap, data: WorkshopMapFeatureCollection) {

@@ -411,21 +411,75 @@ func executeLoadedAction(
 		}
 		failureType := "authentication"
 		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+		if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+			action:         action,
+			claims:         claims,
+			targetObjectID: body.TargetObjectID,
+			parameters:     body.Parameters,
+			validation: map[string]any{
+				"valid":  false,
+				"errors": []string{err.Error()},
+			},
+			edits:         map[string]any{"denied": true},
+			status:        "denied",
+			failureType:   &failureType,
+			errorMessage:  err.Error(),
+			justification: body.Justification,
+			startedAt:     startedAt,
+		}); matErr != nil {
+			logActionLogMaterializationFailure(action.ID, matErr)
+		}
 		forbidden(w, err.Error())
 		return
 	}
 	if err := ensureConfirmationJustification(action, body.Justification); err != nil {
 		failureType := "invalid_parameter"
 		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+		if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+			action:         action,
+			claims:         claims,
+			targetObjectID: body.TargetObjectID,
+			parameters:     body.Parameters,
+			validation: map[string]any{
+				"valid":  false,
+				"errors": []string{err.Error()},
+			},
+			edits:         map[string]any{},
+			status:        "failure",
+			failureType:   &failureType,
+			errorMessage:  err.Error(),
+			justification: body.Justification,
+			startedAt:     startedAt,
+		}); matErr != nil {
+			logActionLogMaterializationFailure(action.ID, matErr)
+		}
 		invalid(w, err.Error())
 		return
 	}
 
 	params := body.Parameters
 	if writeback != nil {
-		if err := runWebhookWriteback(ctx, state, writeback, &params); err != nil {
+		if err := runWebhookWriteback(ctx, state, claims, writeback, &params); err != nil {
 			failureType := "invalid_parameter"
 			_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+			if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+				action:         action,
+				claims:         claims,
+				targetObjectID: body.TargetObjectID,
+				parameters:     params,
+				validation: map[string]any{
+					"valid":  false,
+					"errors": []string{"webhook writeback failed: " + err.Error()},
+				},
+				edits:         map[string]any{"webhook_writeback": "failed"},
+				status:        "failure",
+				failureType:   &failureType,
+				errorMessage:  err.Error(),
+				justification: body.Justification,
+				startedAt:     startedAt,
+			}); matErr != nil {
+				logActionLogMaterializationFailure(action.ID, matErr)
+			}
 			dbError(w, "webhook writeback failed: "+err.Error())
 			return
 		}
@@ -452,6 +506,24 @@ func executeLoadedAction(
 			failureType = "authentication"
 		}
 		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+		if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+			action:         action,
+			claims:         claims,
+			targetObjectID: body.TargetObjectID,
+			parameters:     params,
+			validation: map[string]any{
+				"valid":  false,
+				"errors": errs,
+			},
+			edits:         map[string]any{"details": errs},
+			status:        auditStatus,
+			failureType:   &failureType,
+			errorMessage:  joinErrs(errs),
+			justification: body.Justification,
+			startedAt:     startedAt,
+		}); matErr != nil {
+			logActionLogMaterializationFailure(action.ID, matErr)
+		}
 		writeJSON(w, status, map[string]any{
 			"error":   "action validation failed",
 			"details": errs,
@@ -467,6 +539,25 @@ func executeLoadedAction(
 		}
 		failureType := classifyExecutePlanError(err).AsStr()
 		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+		if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+			action:         action,
+			claims:         claims,
+			targetObjectID: body.TargetObjectID,
+			parameters:     params,
+			preview:        planPreview(plan),
+			validation: map[string]any{
+				"valid":  true,
+				"errors": []string{},
+			},
+			edits:         map[string]any{"error": err.Error()},
+			status:        "failure",
+			failureType:   &failureType,
+			errorMessage:  err.Error(),
+			justification: body.Justification,
+			startedAt:     startedAt,
+		}); matErr != nil {
+			logActionLogMaterializationFailure(action.ID, matErr)
+		}
 		dbError(w, err.Error())
 		return
 	}
@@ -488,6 +579,23 @@ func executeLoadedAction(
 	runWebhookSideEffects(ctx, state, claims, claims.Sub, action.ID,
 		executed.targetObjectID, sideEffects, params)
 	_ = emitActionAttemptEvent(ctx, state, claims, action, executed.targetObjectID, params, "success", time.Since(startedAt).Milliseconds(), nil)
+	if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+		action:         action,
+		claims:         claims,
+		targetObjectID: executed.targetObjectID,
+		parameters:     params,
+		preview:        executed.preview,
+		validation: map[string]any{
+			"valid":  true,
+			"errors": []string{},
+		},
+		edits:         auditResult,
+		status:        "success",
+		justification: body.Justification,
+		startedAt:     startedAt,
+	}); matErr != nil {
+		logActionLogMaterializationFailure(action.ID, matErr)
+	}
 	writeJSON(w, http.StatusOK, models.ExecuteActionResponse{
 		Action:         action,
 		TargetObjectID: executed.targetObjectID,
@@ -517,18 +625,72 @@ func executeLoadedActionInline(
 	if err := ensureActionActorPermission(claims, action); err != nil {
 		failureType := "authentication"
 		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+		if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+			action:         action,
+			claims:         claims,
+			targetObjectID: body.TargetObjectID,
+			parameters:     body.Parameters,
+			validation: map[string]any{
+				"valid":  false,
+				"errors": []string{err.Error()},
+			},
+			edits:         map[string]any{"denied": true, "bulk_inline_edit": true},
+			status:        "denied",
+			failureType:   &failureType,
+			errorMessage:  err.Error(),
+			justification: body.Justification,
+			startedAt:     startedAt,
+		}); matErr != nil {
+			logActionLogMaterializationFailure(action.ID, matErr)
+		}
 		return err
 	}
 	if err := ensureConfirmationJustification(action, body.Justification); err != nil {
 		failureType := "invalid_parameter"
 		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+		if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+			action:         action,
+			claims:         claims,
+			targetObjectID: body.TargetObjectID,
+			parameters:     body.Parameters,
+			validation: map[string]any{
+				"valid":  false,
+				"errors": []string{err.Error()},
+			},
+			edits:         map[string]any{"bulk_inline_edit": true},
+			status:        "failure",
+			failureType:   &failureType,
+			errorMessage:  err.Error(),
+			justification: body.Justification,
+			startedAt:     startedAt,
+		}); matErr != nil {
+			logActionLogMaterializationFailure(action.ID, matErr)
+		}
 		return err
 	}
 	params := body.Parameters
 	if writeback != nil {
-		if err := runWebhookWriteback(ctx, state, writeback, &params); err != nil {
+		if err := runWebhookWriteback(ctx, state, claims, writeback, &params); err != nil {
 			failureType := "invalid_parameter"
 			_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+			if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+				action:         action,
+				claims:         claims,
+				targetObjectID: body.TargetObjectID,
+				parameters:     params,
+				validation: map[string]any{
+					"valid":  false,
+					"errors": []string{"webhook writeback failed: " + err.Error()},
+				},
+				edits:         map[string]any{"webhook_writeback": "failed", "bulk_inline_edit": true},
+				status:        "failure",
+				failureType:   &failureType,
+				errorMessage:  err.Error(),
+				justification: body.Justification,
+				startedAt:     startedAt,
+			}); matErr != nil {
+				logActionLogMaterializationFailure(action.ID, matErr)
+			}
 			return fmt.Errorf("webhook writeback failed: %w", err)
 		}
 	}
@@ -538,16 +700,55 @@ func executeLoadedActionInline(
 	})
 	if len(errs) > 0 {
 		failureType := "invalid_parameter"
+		matStatus := "failure"
 		if allForbidden(errs) {
 			failureType = "authentication"
+			matStatus = "denied"
 		}
 		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+		if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+			action:         action,
+			claims:         claims,
+			targetObjectID: body.TargetObjectID,
+			parameters:     params,
+			validation: map[string]any{
+				"valid":  false,
+				"errors": errs,
+			},
+			edits:         map[string]any{"details": errs, "bulk_inline_edit": true},
+			status:        matStatus,
+			failureType:   &failureType,
+			errorMessage:  joinErrs(errs),
+			justification: body.Justification,
+			startedAt:     startedAt,
+		}); matErr != nil {
+			logActionLogMaterializationFailure(action.ID, matErr)
+		}
 		return fmt.Errorf("%s", joinErrs(errs))
 	}
 	executed, err := executePlan(ctx, state, claims, action, plan)
 	if err != nil {
 		failureType := classifyExecutePlanError(err).AsStr()
 		_ = emitActionAttemptEvent(ctx, state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+		if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+			action:         action,
+			claims:         claims,
+			targetObjectID: body.TargetObjectID,
+			parameters:     params,
+			preview:        planPreview(plan),
+			validation: map[string]any{
+				"valid":  true,
+				"errors": []string{},
+			},
+			edits:         map[string]any{"error": err.Error(), "bulk_inline_edit": true},
+			status:        "failure",
+			failureType:   &failureType,
+			errorMessage:  err.Error(),
+			justification: body.Justification,
+			startedAt:     startedAt,
+		}); matErr != nil {
+			logActionLogMaterializationFailure(action.ID, matErr)
+		}
 		return err
 	}
 	auditResult := map[string]any{
@@ -568,6 +769,23 @@ func executeLoadedActionInline(
 	runWebhookSideEffects(ctx, state, claims, claims.Sub, action.ID,
 		executed.targetObjectID, sideEffects, params)
 	_ = emitActionAttemptEvent(ctx, state, claims, action, executed.targetObjectID, params, "success", time.Since(startedAt).Milliseconds(), nil)
+	if matErr := materializeActionLogObject(ctx, state, actionLogMaterializationInput{
+		action:         action,
+		claims:         claims,
+		targetObjectID: executed.targetObjectID,
+		parameters:     params,
+		preview:        executed.preview,
+		validation: map[string]any{
+			"valid":  true,
+			"errors": []string{},
+		},
+		edits:         auditResult,
+		status:        "success",
+		justification: body.Justification,
+		startedAt:     startedAt,
+	}); matErr != nil {
+		logActionLogMaterializationFailure(action.ID, matErr)
+	}
 	return nil
 }
 

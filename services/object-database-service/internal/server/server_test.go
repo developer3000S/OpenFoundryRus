@@ -184,6 +184,159 @@ func TestObjectQuerySupportsWorkshopSortCountAggregationsAndSelectedIDs(t *testi
 	assert.Equal(t, float64(500), body.Aggregations[2].Value)
 }
 
+func TestObjectQuerySearchAroundTraversesLinks(t *testing.T) {
+	srv := newTestServer(t)
+	t.Cleanup(srv.Close)
+
+	seed := func(typeID string, body string) string {
+		t.Helper()
+		resp, err := http.Post(
+			srv.URL+"/api/v1/ontology/types/"+typeID+"/objects",
+			"application/json",
+			strings.NewReader(body),
+		)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+		var created map[string]any
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+		id, _ := created["id"].(string)
+		require.NotEmpty(t, id)
+		return id
+	}
+	trailID := seed("Trail", `{"properties":{"name":"Mesa Trail","lat":40.0,"lon":-105.0}}`)
+	nearCoffeeID := seed("CoffeeShop", `{"properties":{"name":"Boxcar Coffee","lat":40.01,"lon":-105.01}}`)
+	seed("CoffeeShop", `{"properties":{"name":"Far Coffee","lat":41.0,"lon":-106.0}}`)
+
+	linkBody := `{"from":` + strconv.Quote(trailID) + `,"to":` + strconv.Quote(nearCoffeeID) + `,"payload":{"distance_miles":0.8},"created_at_ms":3}`
+	linkReq, _ := http.NewRequest(http.MethodPost,
+		srv.URL+"/api/v1/object-database/links/default/trail_near_coffee", strings.NewReader(linkBody))
+	linkResp, err := http.DefaultClient.Do(linkReq)
+	require.NoError(t, err)
+	defer linkResp.Body.Close()
+	require.Equal(t, http.StatusCreated, linkResp.StatusCode)
+
+	resp, err := http.Post(
+		srv.URL+"/api/v1/ontology/types/CoffeeShop/objects/query",
+		"application/json",
+		strings.NewReader(`{
+			"search_around": {
+				"source_object_ids": [`+strconv.Quote(trailID)+`],
+				"link_type_ids": ["trail_near_coffee"],
+				"direction": "outgoing",
+				"depth": 1,
+				"target_object_type_id": "CoffeeShop"
+			},
+			"per_page": 10
+		}`),
+	)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body struct {
+		Data []struct {
+			ID         string         `json:"id"`
+			Properties map[string]any `json:"properties"`
+		} `json:"data"`
+		LinkedEdges []struct {
+			LinkTypeID     string         `json:"link_type_id"`
+			SourceObjectID string         `json:"source_object_id"`
+			TargetObjectID string         `json:"target_object_id"`
+			Direction      string         `json:"direction"`
+			Depth          int            `json:"depth"`
+			Properties     map[string]any `json:"properties"`
+		} `json:"linked_edges"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Len(t, body.Data, 1)
+	assert.Equal(t, nearCoffeeID, body.Data[0].ID)
+	assert.Equal(t, "Boxcar Coffee", body.Data[0].Properties["name"])
+	require.Len(t, body.LinkedEdges, 1)
+	assert.Equal(t, "trail_near_coffee", body.LinkedEdges[0].LinkTypeID)
+	assert.Equal(t, trailID, body.LinkedEdges[0].SourceObjectID)
+	assert.Equal(t, nearCoffeeID, body.LinkedEdges[0].TargetObjectID)
+	assert.Equal(t, "outgoing", body.LinkedEdges[0].Direction)
+	assert.Equal(t, 1, body.LinkedEdges[0].Depth)
+	assert.Equal(t, float64(0.8), body.LinkedEdges[0].Properties["distance_miles"])
+}
+
+func TestObjectQueryKNNRanksVectorProperties(t *testing.T) {
+	srv := newTestServer(t)
+	t.Cleanup(srv.Close)
+
+	seed := func(body string) {
+		t.Helper()
+		resp, err := http.Post(
+			srv.URL+"/api/v1/ontology/types/Run/objects",
+			"application/json",
+			strings.NewReader(body),
+		)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+	}
+	seed(`{"properties":{"name":"Mesa effort","trail_vector":[5,100],"activity_type":"trail"}}`)
+	seed(`{"properties":{"name":"Long climb","trail_vector":[20,1200],"activity_type":"trail"}}`)
+	seed(`{"properties":{"name":"Road recovery","trail_vector":[8,180],"activity_type":"road"}}`)
+	seed(`{"properties":{"name":"Malformed vector","trail_vector":[6],"activity_type":"trail"}}`)
+
+	resp, err := http.Post(
+		srv.URL+"/api/v1/ontology/types/Run/objects/query",
+		"application/json",
+		strings.NewReader(`{
+			"filters": [{"property_name":"activity_type","operator":"in","value":["trail","road"]}],
+			"knn": {
+				"property_name": "trail_vector",
+				"vector": [6, 120],
+				"k": 2,
+				"metric": "euclidean"
+			},
+			"per_page": 10,
+			"include_count": true
+		}`),
+	)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body struct {
+		Data []struct {
+			ID         string         `json:"id"`
+			Properties map[string]any `json:"properties"`
+		} `json:"data"`
+		Total      int `json:"total"`
+		KNNResults []struct {
+			ObjectID     string  `json:"object_id"`
+			Rank         int     `json:"rank"`
+			Score        float64 `json:"score"`
+			Distance     float64 `json:"distance"`
+			Metric       string  `json:"metric"`
+			PropertyName string  `json:"property_name"`
+		} `json:"knn_results"`
+		ObjectSet struct {
+			KNN map[string]any `json:"knn"`
+		} `json:"object_set"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, 2, body.Total)
+	require.Len(t, body.Data, 2)
+	assert.Equal(t, "Mesa effort", body.Data[0].Properties["name"])
+	assert.Equal(t, "Road recovery", body.Data[1].Properties["name"])
+	assert.Equal(t, float64(1), body.Data[0].Properties["__of_knn_rank"])
+	assert.Equal(t, "euclidean", body.Data[0].Properties["__of_knn_metric"])
+	require.Len(t, body.KNNResults, 2)
+	assert.Equal(t, body.Data[0].ID, body.KNNResults[0].ObjectID)
+	assert.Equal(t, 1, body.KNNResults[0].Rank)
+	assert.Equal(t, "trail_vector", body.KNNResults[0].PropertyName)
+	assert.Equal(t, "euclidean", body.KNNResults[0].Metric)
+	assert.InDelta(t, 20.024984, body.KNNResults[0].Distance, 0.0001)
+	assert.Greater(t, body.KNNResults[0].Score, body.KNNResults[1].Score)
+	assert.Equal(t, "trail_vector", body.ObjectSet.KNN["property_name"])
+	assert.Equal(t, float64(2), body.ObjectSet.KNN["k"])
+	assert.Equal(t, float64(2), body.ObjectSet.KNN["query_vector_dimension"])
+}
+
 func TestPutGetDeleteRoundTrip(t *testing.T) {
 	srv := newTestServer(t)
 	t.Cleanup(srv.Close)

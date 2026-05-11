@@ -14,8 +14,10 @@
 //     [adapters.ErrNotImplemented].
 //   - BuildIngestSpec    — placeholder spec the bridge forwards to
 //     ingestion-replication-service; the selector is the resource path.
+//   - TestConnection     — validates the modeled REST API source by issuing
+//     a bounded GET to the configured health/resource path.
 //
-// HTTP egress: stdlib http.Client, Bearer + custom-header auth. The
+// HTTP egress: stdlib http.Client, bearer/API-key/custom-header auth. The
 // Rust `http_runtime` module that supports connector-agent proxying
 // and EgressPolicy validation is not yet ported here; per-instance
 // overrides via [Adapter.SetHTTPClient] keep the test surface
@@ -31,6 +33,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/adapters"
 	"github.com/openfoundry/openfoundry-go/services/connector-management-service/internal/models"
@@ -73,14 +76,21 @@ func (a *Adapter) SetHTTPClient(client *http.Client) {
 }
 
 type restConfig struct {
-	BaseURL      string            `json:"base_url"`
-	HealthPath   string            `json:"health_path"`
-	ResourcePath string            `json:"resource_path"`
-	ResourceName string            `json:"resource_name"`
-	CatalogPath  string            `json:"catalog_path"`
-	BearerToken  string            `json:"bearer_token"`
-	Headers      map[string]string `json:"headers"`
-	Resources    []json.RawMessage `json:"resources"`
+	SourceKind   string                       `json:"source_kind"`
+	Domain       string                       `json:"domain"`
+	BaseURL      string                       `json:"base_url"`
+	HealthPath   string                       `json:"health_path"`
+	ResourcePath string                       `json:"resource_path"`
+	ResourceName string                       `json:"resource_name"`
+	CatalogPath  string                       `json:"catalog_path"`
+	BearerToken  string                       `json:"bearer_token"`
+	Headers      map[string]string            `json:"headers"`
+	QueryParams  map[string]string            `json:"query_params"`
+	Resources    []json.RawMessage            `json:"resources"`
+	Auth         models.RESTAPIAuthConfig     `json:"auth"`
+	Runtime      models.RESTAPIRuntimePolicy  `json:"runtime"`
+	Permissions  models.RESTAPIPermissions    `json:"permissions"`
+	Webhook      *models.RESTAPIWebhookConfig `json:"webhook"`
 }
 
 func parseConfig(raw json.RawMessage) (*restConfig, error) {
@@ -88,7 +98,11 @@ func parseConfig(raw json.RawMessage) (*restConfig, error) {
 	if len(raw) == 0 {
 		return cfg, nil
 	}
-	if err := json.Unmarshal(raw, cfg); err != nil {
+	normalized, err := models.NormalizeRESTAPISourceConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(normalized, cfg); err != nil {
 		return nil, fmt.Errorf("rest_api: invalid config: %w", err)
 	}
 	return cfg, nil
@@ -97,14 +111,8 @@ func parseConfig(raw json.RawMessage) (*restConfig, error) {
 // ValidateConfig mirrors Rust's `validate_config`: a non-empty
 // `base_url` is the only required identity field.
 func ValidateConfig(raw json.RawMessage) error {
-	cfg, err := parseConfig(raw)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(cfg.BaseURL) == "" {
-		return errors.New("rest_api connector requires 'base_url'")
-	}
-	return nil
+	_, err := models.NormalizeRESTAPISourceConfig(raw)
+	return err
 }
 
 // DiscoverSources mirrors Rust's `discover_sources`. Inline
@@ -125,7 +133,7 @@ func (a *Adapter) DiscoverSources(ctx context.Context, c *models.Connection, _ s
 			if err := json.Unmarshal(raw, &v); err != nil {
 				continue
 			}
-			if src, ok := discoveredFromConfig(v); ok {
+			if src, ok := discoveredFromConfig(v, cfg.Permissions); ok {
 				out = append(out, src)
 			}
 		}
@@ -148,7 +156,7 @@ func (a *Adapter) DiscoverSources(ctx context.Context, c *models.Connection, _ s
 		records := normalizeRecords(payload)
 		entries := make([]adapters.Source, 0, len(records))
 		for _, rec := range records {
-			if src, ok := discoveredFromConfig(rec); ok {
+			if src, ok := discoveredFromConfig(rec, cfg.Permissions); ok {
 				entries = append(entries, src)
 			}
 		}
@@ -167,15 +175,50 @@ func (a *Adapter) DiscoverSources(ctx context.Context, c *models.Connection, _ s
 	if resourceName == "" {
 		resourceName = "REST resource"
 	}
-	meta, _ := json.Marshal(map[string]any{"base_url": cfg.BaseURL})
+	meta, _ := json.Marshal(map[string]any{
+		"base_url":    cfg.BaseURL,
+		"domain":      cfg.Domain,
+		"runtime":     cfg.Runtime,
+		"permissions": cfg.Permissions,
+	})
 	return []adapters.Source{{
 		Selector:         resourcePath,
 		DisplayName:      resourceName,
 		SourceKind:       defaultSourceKind,
-		SupportsSync:     true,
-		SupportsZeroCopy: true,
+		SupportsSync:     cfg.Permissions.Syncable,
+		SupportsZeroCopy: cfg.Permissions.Discoverable || cfg.Permissions.UsableInCode,
 		Metadata:         meta,
 	}}, nil
+}
+
+func (a *Adapter) TestConnection(ctx context.Context, raw json.RawMessage) (adapters.ConnectionTestResult, error) {
+	start := time.Now()
+	cfg, err := parseConfig(raw)
+	if err != nil {
+		return adapters.ConnectionTestResult{}, err
+	}
+	u, err := buildURL(cfg, "", true)
+	if err != nil {
+		return adapters.ConnectionTestResult{}, err
+	}
+	body, err := a.fetch(ctx, cfg, u, "REST API source test returned HTTP")
+	if err != nil {
+		return adapters.ConnectionTestResult{}, err
+	}
+	details, _ := json.Marshal(map[string]any{
+		"base_url":    cfg.BaseURL,
+		"domain":      cfg.Domain,
+		"auth_type":   cfg.Auth.Type,
+		"worker":      cfg.Runtime.Worker,
+		"status_code": http.StatusOK,
+		"bytes":       len(body),
+	})
+	return adapters.ConnectionTestResult{
+		Success:   true,
+		Message:   "validated REST API source",
+		LatencyMS: time.Since(start).Milliseconds(),
+		Details:   details,
+	}, nil
 }
 
 // QueryVirtualTable mirrors Rust's `query_virtual_table`: GETs the
@@ -265,7 +308,11 @@ func (a *Adapter) BuildIngestSpec(_ context.Context, c *models.Connection, src *
 	}
 	specCfg := map[string]any{
 		"base_url":      cfg.BaseURL,
+		"domain":        cfg.Domain,
 		"resource_path": src.Selector,
+		"auth":          cfg.Auth,
+		"runtime":       cfg.Runtime,
+		"permissions":   cfg.Permissions,
 	}
 	raw, err := json.Marshal(specCfg)
 	if err != nil {
@@ -294,16 +341,22 @@ func (a *Adapter) cfg(c *models.Connection) (*restConfig, error) {
 }
 
 func (a *Adapter) fetch(ctx context.Context, cfg *restConfig, u *url.URL, errorPrefix string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	reqURL := *u
+	query := reqURL.Query()
+	for k, v := range cfg.QueryParams {
+		if _, exists := query[k]; !exists {
+			query.Set(k, v)
+		}
+	}
+	reqURL.RawQuery = query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("rest_api: build %s: %w", u.String(), err)
+		return nil, fmt.Errorf("rest_api: build %s: %w", reqURL.String(), err)
 	}
 	for k, v := range cfg.Headers {
 		req.Header.Set(k, v)
 	}
-	if cfg.BearerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.BearerToken)
-	}
+	applyAuth(req, cfg)
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("rest_api: transport error: %w", err)
@@ -314,6 +367,40 @@ func (a *Adapter) fetch(ctx context.Context, cfg *restConfig, u *url.URL, errorP
 		return nil, fmt.Errorf("%s %d", errorPrefix, resp.StatusCode)
 	}
 	return body, nil
+}
+
+func applyAuth(req *http.Request, cfg *restConfig) {
+	switch cfg.Auth.Type {
+	case models.RESTAPIAuthBearer:
+		token := cfg.Auth.Token
+		if token == "" {
+			token = cfg.BearerToken
+		}
+		if token != "" {
+			scheme := strings.TrimSpace(cfg.Auth.Scheme)
+			if scheme == "" {
+				scheme = "Bearer"
+			}
+			req.Header.Set("Authorization", scheme+" "+token)
+		}
+	case models.RESTAPIAuthAPIKey:
+		value := cfg.Auth.Value
+		if value == "" {
+			return
+		}
+		if cfg.Auth.HeaderName != "" {
+			req.Header.Set(cfg.Auth.HeaderName, value)
+		}
+		if cfg.Auth.QueryParam != "" {
+			q := req.URL.Query()
+			q.Set(cfg.Auth.QueryParam, value)
+			req.URL.RawQuery = q.Encode()
+		}
+	case models.RESTAPIAuthCustomHeader:
+		if cfg.Auth.HeaderName != "" && cfg.Auth.Value != "" {
+			req.Header.Set(cfg.Auth.HeaderName, cfg.Auth.Value)
+		}
+	}
 }
 
 func buildURL(cfg *restConfig, selector string, forHealth bool) (*url.URL, error) {
@@ -369,7 +456,7 @@ func normalizeRecords(payload any) []any {
 	}
 }
 
-func discoveredFromConfig(value any) (adapters.Source, bool) {
+func discoveredFromConfig(value any, permissions models.RESTAPIPermissions) (adapters.Source, bool) {
 	obj, ok := value.(map[string]any)
 	if !ok {
 		return adapters.Source{}, false
@@ -387,8 +474,8 @@ func discoveredFromConfig(value any) (adapters.Source, bool) {
 		Selector:         selector,
 		DisplayName:      display,
 		SourceKind:       defaultSourceKind,
-		SupportsSync:     true,
-		SupportsZeroCopy: true,
+		SupportsSync:     permissions.Syncable,
+		SupportsZeroCopy: permissions.Discoverable || permissions.UsableInCode,
 		Metadata:         meta,
 	}, true
 }

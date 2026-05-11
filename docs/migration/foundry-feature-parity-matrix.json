@@ -829,6 +829,7 @@
         "services/connector-management-service/internal/server/server.go",
         "services/connector-management-service/internal/handlers/handlers.go",
         "services/connector-management-service/internal/models/catalog.go",
+        "services/connector-management-service/internal/models/rest_api_source.go",
         "apps/web/src/lib/api/data-connection.ts",
         "apps/web/src/lib/components/data-connection"
       ],
@@ -841,13 +842,15 @@
       "tests": [
         "services/connector-management-service/internal/server/server_test.go",
         "services/connector-management-service/internal/handlers/handlers_test.go",
+        "services/connector-management-service/internal/models/rest_api_source_test.go",
         "services/connector-management-service/internal/models/contract_fixtures_test.go"
       ],
-      "notes": "The source/catalog/agent/credential/egress surfaces are mounted and tested. Individual connector runtime depth varies by adapter."
+      "notes": "The source/catalog/agent/credential/egress surfaces are mounted and tested. REST API source create/update now normalizes domain/base URL, auth, secret refs, runtime policy, permissions, and webhook defaults. Individual connector runtime depth still varies by adapter."
     },
     {
       "foundry_feature": "Data Connection: REST API source and virtual table preview/query",
       "openfoundry_surface": [
+        "services/connector-management-service/internal/models/rest_api_source.go",
         "services/connector-management-service/internal/adapters/rest_api/adapter.go",
         "services/connector-management-service/internal/adapters/json/adapter.go",
         "services/connector-management-service/internal/adapters/registry.go",
@@ -860,30 +863,39 @@
         "https://www.palantir.com/docs/foundry/data-connection/core-concepts/"
       ],
       "tests": [
+        "services/connector-management-service/internal/models/rest_api_source_test.go",
         "services/connector-management-service/internal/adapters/rest_api/adapter_test.go",
         "services/connector-management-service/internal/adapters/json/adapter_test.go",
-        "services/connector-management-service/internal/adapters/registry_test.go"
+        "services/connector-management-service/internal/adapters/registry_test.go",
+        "services/connector-management-service/internal/handlers/handlers_test.go"
       ],
-      "notes": "REST/JSON adapters and virtual table query primitives exist; this is enough for many read-style external sources but not the full webhook builder UX."
+      "notes": "REST source configs now model outbound webhook needs and support test/query execution with configured auth/query defaults. Virtual table preview/query primitives exist; full webhook builder UX is separate."
     },
     {
       "foundry_feature": "Data Connection: outbound webhooks with input/output parameters",
       "openfoundry_surface": [
         "services/connector-management-service/internal/server/server.go",
         "services/connector-management-service/internal/handlers/registrations.go",
-        "services/connector-management-service/internal/models/models.go"
+        "services/connector-management-service/internal/models/models.go",
+        "services/connector-management-service/internal/models/webhook_definition.go",
+        "services/connector-management-service/internal/repo/migrations/20260511103000_webhook_invocation_history.sql",
+        "libs/ontology-kernel/domain/function_runtime.go",
+        "libs/ontology-kernel/domain/embed/typescript_runner.mjs"
       ],
       "status": "partial",
-      "owner": "connector-management-service",
+      "owner": "connector-management-service, libs/ontology-kernel",
       "doc_refs": [
         "https://www.palantir.com/docs/foundry/data-connection/webhooks-overview",
-        "https://www.palantir.com/docs/foundry/data-connection/webhooks-reference"
+        "https://www.palantir.com/docs/foundry/data-connection/webhooks-reference",
+        "https://www.palantir.com/docs/foundry/data-connection/external-functions"
       ],
       "tests": [
         "services/connector-management-service/internal/handlers/handlers_test.go",
-        "services/connector-management-service/internal/models/contract_fixtures_test.go"
+        "services/connector-management-service/internal/models/webhook_definition_test.go",
+        "services/connector-management-service/internal/models/contract_fixtures_test.go",
+        "libs/ontology-kernel/domain/function_runtime_test.go"
       ],
-      "notes": "POST /api/v1/webhooks/{id}/invoke exists and extracts output parameters. Webhook authoring, chained calls, limits, and history need deeper parity."
+      "notes": "DC.2/DC.3/DC.5/DC.6 are implemented: webhook definitions model typed inputs, single/chained REST calls, templating, response extractors, typed outputs, timeout, concurrency, rate-limit, limits, and history settings. Invocation runs the model against legacy configs or rest_api source webhooks and enforces owner/invoke permissions, source invokable flags, method/egress policy, size limits, rate/concurrency limits, and sanitized diagnostics. Successful and failed invocations are persisted with user, timings, retention, input visibility policy, parsed outputs, and sanitized error details. TypeScript Functions can invoke configured webhooks through context.sdk.dataConnection.invokeWebhook. Persisted webhook authoring remains separate."
     },
     {
       "foundry_feature": "Data Connection: webhook integration with Action types",
@@ -905,23 +917,231 @@
         "services/connector-management-service/internal/handlers/handlers_test.go",
         "apps/web/e2e/workshop-actions.spec.ts"
       ],
-      "notes": "Action execution has invoke_webhook planning and side-effect support, and WS.16 verifies Workshop can submit a webhook-style action through the generic action form. Production external-system delivery remains service-dependent."
+      "notes": "DC.4 is implemented: action execution supports Data Connection webhook writebacks before ontology edits, side-effect webhooks after successful edits, internal service JWT auth to connector-management, nested input mappings, typed output aliasing, explicit output mappings, and object-edit property mappings from webhook_output.*. Remaining parity work is persisted webhook history/external-function wrappers."
     },
     {
       "foundry_feature": "Data Connection: inbound listeners",
       "openfoundry_surface": [
-        "services/connector-management-service/internal/models/catalog.go",
-        "services/connector-management-service/internal/server/server.go"
+        "services/connector-management-service/internal/models/models.go",
+        "services/connector-management-service/internal/handlers/registrations.go",
+        "services/connector-management-service/internal/server/server.go",
+        "services/connector-management-service/internal/repo/migrations/20260511104500_inbound_listener_events.sql"
       ],
-      "status": "todo",
+      "status": "partial",
       "owner": "connector-management-service",
       "doc_refs": [
-        "https://www.palantir.com/docs/foundry/data-connection/listeners-overview"
+        "https://www.palantir.com/docs/foundry/data-connection/listeners-overview",
+        "https://www.palantir.com/docs/foundry/data-connection/listeners-https/",
+        "https://www.palantir.com/docs/foundry/data-connection/listeners-https-security/"
       ],
       "tests": [
+        "services/connector-management-service/internal/handlers/handlers_test.go",
         "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
       ],
-      "notes": "Streaming/external source catalog entries exist, but a listener product surface equivalent to Foundry's inbound listeners was not found."
+      "notes": "DC.7 is implemented for HTTPS push listeners: source configs can define signed listeners, public receive routes verify HMAC/shared-secret auth, payload limits are enforced, auth headers are redacted, and JSON events are stored as queryable inbound_listener_events with event_log, dataset, or object destination metadata. Kafka/email/SQS/Pub/Sub-style listener families and direct downstream projection workers remain future parity work."
+    },
+    {
+      "foundry_feature": "Trail Running demo: fixture pack and seed entrypoint",
+      "openfoundry_surface": [
+        "tools/demo/trail-running/README.md",
+        "tools/demo/trail-running/seed.py",
+        "tools/demo/trail-running/fixtures/manifest.json",
+        "tools/demo/trail-running/fixtures/strava_activities.json",
+        "tools/demo/trail-running/fixtures/gpx",
+        "tools/demo/trail-running/fixtures/coffee_shops.csv",
+        "tools/demo/trail-running/fixtures/coffee_shops.json",
+        "tools/demo/trail-running/fixtures/weather_open_meteo_boulder.json"
+      ],
+      "status": "done",
+      "owner": "tools/demo/trail-running",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/building-pipelines/create-batch-pipeline-pb/"
+      ],
+      "tests": [
+        "tools/demo/trail-running/fixtures_test.go",
+        "python3 tools/demo/trail-running/seed.py --validate",
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "DEMO.1 is implemented with a privacy-safe synthetic fixture pack and deterministic seed output for raw Strava-like activities, normalized run activities, parsed trail rows, coffee-shop tables, an offline weather snapshot, and the published Workshop app fixture."
+    },
+    {
+      "foundry_feature": "Trail Running demo: Strava RunActivity ingestion pipeline",
+      "openfoundry_surface": [
+        "tools/demo/trail-running/pipelines/strava_activity_ingestion.py",
+        "tools/demo/trail-running/pipelines/strava_activity_ingestion.pipeline.json",
+        "tools/demo/trail-running/expected/run_activities.golden.json",
+        "tools/demo/trail-running/seed.py"
+      ],
+      "status": "done",
+      "owner": "tools/demo/trail-running, pipeline-build-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/transforms-overview/",
+        "https://www.palantir.com/docs/foundry/transforms-python/lightweight-overview"
+      ],
+      "tests": [
+        "tools/demo/trail-running/fixtures_test.go",
+        "python3 tools/demo/trail-running/seed.py --validate",
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "DEMO.2 is implemented with a Python transform that filters Run/Trail Run activities, rejects private athlete/profile/device/email-style keys, normalizes distance/elevation/pace metrics, preserves HR, effort, terrain, surface, altitude, and weather profile fields, and declares Pipeline Builder dataset plus Ontology object outputs for RunActivity."
+    },
+    {
+      "foundry_feature": "Trail Running demo: GPX Trail ingestion pipeline",
+      "openfoundry_surface": [
+        "tools/demo/trail-running/pipelines/gpx_trail_ingestion.py",
+        "tools/demo/trail-running/pipelines/gpx_trail_ingestion.pipeline.json",
+        "tools/demo/trail-running/expected/trails.golden.json",
+        "tools/demo/trail-running/seed.py"
+      ],
+      "status": "done",
+      "owner": "tools/demo/trail-running, pipeline-build-service, geospatial libs",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/transforms-geospatial",
+        "https://www.palantir.com/docs/foundry/geospatial/coordinate_reference_systems_and_projections/"
+      ],
+      "tests": [
+        "tools/demo/trail-running/fixtures_test.go",
+        "python3 tools/demo/trail-running/seed.py --validate",
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "DEMO.3 is implemented with a GPX transform and gpx_parse Pipeline IR that emit map-ready Trail rows with WGS84 GeoPoint strings, bbox, GeoJSON LineString route geometry, distance/elevation metrics, and dataset plus Ontology object outputs."
+    },
+    {
+      "foundry_feature": "Trail Running demo: effort estimator function",
+      "openfoundry_surface": [
+        "tools/demo/trail-running/functions/effort_estimator.py",
+        "tools/demo/trail-running/functions/effort_estimator.function.json",
+        "tools/demo/trail-running/expected/trail_effort_estimates.golden.json",
+        "tools/demo/trail-running/seed.py"
+      ],
+      "status": "done",
+      "owner": "tools/demo/trail-running, Functions/Workshop runtime",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/functions/api-object-sets/",
+        "https://www.palantir.com/docs/foundry/workshop/functions-use/"
+      ],
+      "tests": [
+        "tools/demo/trail-running/fixtures_test.go",
+        "python3 tools/demo/trail-running/seed.py --validate",
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "DEMO.4 is implemented with estimateTrailEffort: top-N weighted KNN profile similarity over distance, gain, grade, altitude, terrain, surface, weather load, and HR profile; averaged pace/effort/heart-rate metrics; similar-run explanations; and confidence for selected-trail Workshop metric/detail panels."
+    },
+    {
+      "foundry_feature": "Trail Running demo: coffee recommendation pipeline",
+      "openfoundry_surface": [
+        "tools/demo/trail-running/pipelines/coffee_recommendations.py",
+        "tools/demo/trail-running/pipelines/coffee_recommendations.pipeline.json",
+        "tools/demo/trail-running/expected/trail_coffee_recommendations.golden.json",
+        "tools/demo/trail-running/expected/trail_coffee_links.golden.json",
+        "tools/demo/trail-running/seed.py"
+      ],
+      "status": "done",
+      "owner": "tools/demo/trail-running, geospatial libs, Workshop runtime",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/transforms-geospatial",
+        "https://www.palantir.com/docs/foundry/workshop/widgets-map/"
+      ],
+      "tests": [
+        "tools/demo/trail-running/fixtures_test.go",
+        "python3 tools/demo/trail-running/seed.py --validate",
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "DEMO.5 is implemented with a Haversine/nearest-neighbor coffee pipeline that emits top-3 cafes per trail, exact distance columns, map LineString geometry, CoffeeShop/TrailCoffeeRecommendation output contracts, and a TrailCoffeeLink table for selected-trail map/table flows."
+    },
+    {
+      "foundry_feature": "Trail Running demo: weather webhook/action",
+      "openfoundry_surface": [
+        "tools/demo/trail-running/data_connections/open_meteo_weather.source.json",
+        "tools/demo/trail-running/actions/fetch_trail_weather.action.json",
+        "tools/demo/trail-running/actions/fetch_trail_weather.py",
+        "tools/demo/trail-running/ontology/weather_snapshot.object_type.json",
+        "tools/demo/trail-running/expected/trail_weather_snapshot.golden.json"
+      ],
+      "status": "done",
+      "owner": "tools/demo/trail-running, Data Connection, Ontology Actions, Workshop runtime",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/data-connection/webhooks-overview",
+        "https://www.palantir.com/docs/foundry/action-types/webhooks"
+      ],
+      "tests": [
+        "tools/demo/trail-running/fixtures_test.go",
+        "python3 tools/demo/trail-running/seed.py --validate",
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "DEMO.6 is implemented with an Open-Meteo REST source/webhook, selected-trail action mappings, typed response extraction, sanitized webhook history settings, and a mocked HTTP action test that writes deterministic WeatherSnapshot payloads for Workshop Button Group flows."
+    },
+    {
+      "foundry_feature": "Trail Running demo: Workshop app pages",
+      "openfoundry_surface": [
+        "tools/demo/trail-running/workshop/run_fast.workshop_app.json",
+        "tools/demo/trail-running/README.md",
+        "tools/demo/trail-running/seed.py",
+        "apps/web/e2e/workshop-trail-running-demo.spec.ts"
+      ],
+      "status": "done",
+      "owner": "tools/demo/trail-running, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/getting-started/",
+        "https://www.palantir.com/docs/foundry/workshop/concepts-widgets"
+      ],
+      "tests": [
+        "tools/demo/trail-running/fixtures_test.go",
+        "apps/web/e2e/workshop-trail-running-demo.spec.ts",
+        "go test ./tools/demo/trail-running",
+        "pnpm --dir apps/web test:e2e -- workshop-trail-running-demo.spec.ts"
+      ],
+      "notes": "DEMO.7 is implemented with a published run-fast Workshop app fixture: Trail Overview uses Filter List/Object Table/Chart XY/Metric Card/Button Group, Trail Map uses MapLibre object-set layers for trailheads, routes, cafes, and distance lines, and Trail Detail uses Object Set Title/Property List/Metric Card/Object Table. Playwright opens /apps/runtime/run-fast and navigates all pages against deterministic Trail/Coffee/Weather fixture objects."
+    },
+    {
+      "foundry_feature": "Trail Running demo: custom GPX upload from Workshop",
+      "openfoundry_surface": [
+        "apps/web/src/lib/components/app-builder/MediaUploaderWidget.tsx",
+        "apps/web/src/lib/api/pipelines.ts",
+        "apps/web/e2e/workshop-gpx-upload.spec.ts",
+        "tools/demo/trail-running/workshop/run_fast.workshop_app.json",
+        "tools/demo/trail-running/workshop/gpx_upload_flow.py",
+        "tools/demo/trail-running/fixtures/gpx/custom_dawn_ridge.gpx",
+        "tools/demo/trail-running/expected/custom_gpx_upload_trail.golden.json",
+        "tools/demo/trail-running/expected/custom_gpx_upload_estimate.golden.json"
+      ],
+      "status": "done",
+      "owner": "tools/demo/trail-running, apps/web, pipeline-build-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/widgets-button-group/",
+        "https://www.palantir.com/docs/foundry/transforms-python/lightweight-overview"
+      ],
+      "tests": [
+        "tools/demo/trail-running/fixtures_test.go",
+        "apps/web/e2e/workshop-gpx-upload.spec.ts",
+        "go test ./tools/demo/trail-running",
+        "pnpm --dir apps/web test:e2e -- workshop-gpx-upload.spec.ts"
+      ],
+      "notes": "DEMO.8 is implemented with a Workshop Upload GPX page and media_uploader GPX mode that sends multipart files to the GPX parser endpoint, normalizes parser output into Trail properties, invokes estimateTrailEffort, creates a TrailEffortEstimate, and refreshes object-set backed tables in the runtime."
+    },
+    {
+      "foundry_feature": "Trail Running demo: smarter similarity scoring",
+      "openfoundry_surface": [
+        "tools/demo/trail-running/functions/effort_estimator.py",
+        "tools/demo/trail-running/functions/effort_estimator.function.json",
+        "tools/demo/trail-running/pipelines/strava_activity_ingestion.py",
+        "tools/demo/trail-running/pipelines/strava_activity_ingestion.pipeline.json",
+        "tools/demo/trail-running/expected/run_activities.golden.json",
+        "tools/demo/trail-running/expected/trail_effort_estimates.golden.json",
+        "tools/demo/trail-running/expected/custom_gpx_upload_estimate.golden.json"
+      ],
+      "status": "done",
+      "owner": "tools/demo/trail-running, Functions/Object sets",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/functions/api-object-sets/",
+        "https://www.palantir.com/docs/foundry/pipeline-builder/pipeline-builder-aip/index.html"
+      ],
+      "tests": [
+        "tools/demo/trail-running/fixtures_test.go",
+        "go test ./tools/demo/trail-running",
+        "python3 tools/demo/trail-running/seed.py --validate"
+      ],
+      "notes": "DEMO.9 is implemented with weighted_knn_trail_profile_v2, a deterministic weighted vector score over distance, elevation gain, grade, altitude, terrain, surface, weather load, and HR profile. Estimates expose feature_weights, target_profile, target_similarity_vector, feature_scores, weighted_feature_scores, similarity_vector_delta, and match_explanation so Workshop can explain why runs were selected."
     },
     {
       "foundry_feature": "Ontology Actions: action type CRUD, schema, rules, validation, and submission criteria",
@@ -977,6 +1197,10 @@
     {
       "foundry_feature": "Ontology Actions: action log, audit publication, metrics, and revert",
       "openfoundry_surface": [
+        "libs/ontology-kernel/handlers/actions/action_log_materialization.go",
+        "libs/ontology-kernel/handlers/actions/execute.go",
+        "libs/ontology-kernel/handlers/actions/batch.go",
+        "libs/ontology-kernel/handlers/actions/inline_edit.go",
         "libs/ontology-kernel/handlers/actions/metrics.go",
         "services/ontology-actions-service/cmd/ontology-actions-service/main.go",
         "docs/architecture/legacy-migrations/ontology-actions-service/20260503000000_action_log.sql",
@@ -991,7 +1215,7 @@
         "services/ontology-actions-service/internal/server/server_test.go",
         "libs/ontology-kernel/handlers/actions/execute_test.go"
       ],
-      "notes": "Action metrics/audit plumbing and migrations exist. The user-facing action log object model and revert UX should be verified before marking done."
+      "notes": "ONT.6 is implemented: action submissions now materialize as queryable synthetic ActionLogRecord ontology objects with operation id, actor, target ids, parameters, validation, edits/result, status, failure type, duration, and timestamp for single, batch, and inline-edit paths. The broader row remains partial until user-facing log browsing/revert UX is completed."
     },
     {
       "foundry_feature": "Functions: function package CRUD, templates, authoring metadata, and simulation",
@@ -1025,7 +1249,8 @@
       "owner": "ontology-actions-service, libs/ontology-kernel, libs/python-sidecar",
       "doc_refs": [
         "https://www.palantir.com/docs/foundry/transforms-python/lightweight-overview",
-        "https://www.palantir.com/docs/foundry/action-types/function-actions-getting-started/"
+        "https://www.palantir.com/docs/foundry/action-types/function-actions-getting-started/",
+        "https://www.palantir.com/docs/foundry/data-connection/external-functions"
       ],
       "tests": [
         "libs/ontology-kernel/domain/function_runtime_test.go",
@@ -1033,33 +1258,38 @@
         "services/ontology-actions-service/cmd/ontology-actions-service/main_test.go",
         "libs/python-sidecar/manager_test.go"
       ],
-      "notes": "Inline runtime parsing/validation exists; Python execution depends on sidecar configuration and TypeScript execution uses an embedded runner."
+      "notes": "Inline runtime parsing/validation exists; TypeScript runtime includes a Data Connection external Functions wrapper for configured webhook calls. Python execution depends on sidecar configuration."
     },
     {
       "foundry_feature": "Functions: function-backed actions",
       "openfoundry_surface": [
+        "libs/ontology-kernel/handlers/actions/actions.go",
         "libs/ontology-kernel/handlers/actions/execute.go",
         "libs/ontology-kernel/domain/function_runtime.go",
         "services/ontology-actions-service/internal/server/server.go"
       ],
-      "status": "partial",
+      "status": "done",
       "owner": "ontology-actions-service, libs/ontology-kernel",
       "doc_refs": [
         "https://www.palantir.com/docs/foundry/action-types/function-actions-getting-started/",
         "https://www.palantir.com/docs/foundry/workshop/functions-use/"
       ],
       "tests": [
+        "libs/ontology-kernel/handlers/actions/actions_test.go",
         "libs/ontology-kernel/handlers/actions/execute_test.go",
         "libs/ontology-kernel/handlers/actions/python_sidecar_integration_test.go",
         "libs/ontology-kernel/domain/function_runtime_test.go",
         "apps/web/e2e/workshop-actions.spec.ts"
       ],
-      "notes": "Action execution can invoke functions through the kernel runtime, and WS.16 verifies Workshop can submit a function-backed action form. Stricter Foundry rule-combination semantics still need service-level confirmation."
+      "notes": "Action definitions now resolve package-backed or inline Function rules before create/update, reject mixed Function plus Ontology rules, and execute package-backed functions through the normal action runtime while applying returned object/link/delete edits. WS.16 verifies Workshop can submit a function-backed action form."
     },
     {
       "foundry_feature": "Functions: object sets, filtering, search around, aggregations, and KNN-style retrieval",
       "openfoundry_surface": [
         "apps/web/src/lib/components/apps/widgets/workshopObjectSets.ts",
+        "apps/web/src/lib/components/apps/widgets/WorkshopMapWidget.tsx",
+        "apps/web/src/lib/components/apps/widgets/workshopMap.ts",
+        "apps/web/src/lib/api/ontology.ts",
         "services/object-database-service/internal/handlers/objects_bridge.go",
         "apps/web/src/lib/components/ontology/ObjectSetFilterBuilder.tsx",
         "libs/ontology-kernel/handlers/objectsets/objectsets.go",
@@ -1069,16 +1299,20 @@
       "status": "partial",
       "owner": "ontology-query-service, object-database-service, libs/ontology-kernel, apps/web",
       "doc_refs": [
-        "https://www.palantir.com/docs/foundry/functions/api-object-sets/"
+        "https://www.palantir.com/docs/foundry/functions/api-object-sets/",
+        "https://www.palantir.com/docs/foundry/object-link-types/base-types",
+        "https://www.palantir.com/docs/foundry/object-link-types/link-types-overview/",
+        "https://www.palantir.com/docs/foundry/map/add-to-map"
       ],
       "tests": [
         "apps/web/src/lib/components/apps/widgets/workshopObjectSets.test.ts",
+        "apps/web/src/lib/components/apps/widgets/workshopMap.test.ts",
         "services/object-database-service/internal/server/server_test.go",
         "libs/ontology-kernel/handlers/objectsets/objectsets_test.go",
         "libs/ontology-kernel/domain/search/search_test.go",
         "libs/ontology-kernel/domain/search/iter7d2_drift_test.go"
       ],
-      "notes": "Workshop object-set consumption now uses one declarative query contract for object type starts, chained sets, selected objects, saved sets, filters, sort, count, aggregations, and geospatial search-around; broader Functions SDK-style object-set authoring and KNN retrieval remain partial."
+      "notes": "Workshop object-set consumption now uses one declarative query contract for object type starts, chained sets, selected objects, saved sets, filters, sort, count, aggregations, geospatial search-around, link-type search-around traversal, and KNN vector retrieval over numeric vector/embedding properties. Map can render returned linked_edges as relationship layers between visible object endpoints. Broader generated Functions SDK-style object-set authoring remains partial."
     }
   ]
 }

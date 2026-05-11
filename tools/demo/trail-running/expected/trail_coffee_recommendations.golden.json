@@ -1,0 +1,371 @@
+[
+  {
+    "coffee_geopoint": "39.99042,-105.27918",
+    "coffee_lat": 39.99042,
+    "coffee_lon": -105.27918,
+    "coffee_neighborhood": "South Mesa",
+    "coffee_rating": 4.6,
+    "coffee_shop_id": "cafe-002",
+    "coffee_shop_name": "Pine Ridge Coffee",
+    "coffee_walkup_window": false,
+    "distance_km": 0.3725,
+    "distance_meters": 372.46,
+    "distance_miles": 0.2314,
+    "line_geojson": {
+      "bbox": [
+        -105.27918,
+        39.9871,
+        -105.2786,
+        39.99042
+      ],
+      "coordinates": [
+        [
+          -105.2786,
+          39.9871
+        ],
+        [
+          -105.27918,
+          39.99042
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 1,
+    "recommendation_id": "mesa-overlook-loop-1-cafe-002",
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "trail_id": "mesa-overlook-loop",
+    "trail_name": "Mesa Overlook Loop",
+    "trailhead_geopoint": "39.9871,-105.2786",
+    "trailhead_lat": 39.9871,
+    "trailhead_lon": -105.2786
+  },
+  {
+    "coffee_geopoint": "39.99756,-105.28991",
+    "coffee_lat": 39.99756,
+    "coffee_lon": -105.28991,
+    "coffee_neighborhood": "University Hill",
+    "coffee_rating": 4.3,
+    "coffee_shop_id": "cafe-006",
+    "coffee_shop_name": "Alpenglow Cold Brew",
+    "coffee_walkup_window": false,
+    "distance_km": 1.5103,
+    "distance_meters": 1510.342,
+    "distance_miles": 0.9385,
+    "line_geojson": {
+      "bbox": [
+        -105.28991,
+        39.9871,
+        -105.2786,
+        39.99756
+      ],
+      "coordinates": [
+        [
+          -105.2786,
+          39.9871
+        ],
+        [
+          -105.28991,
+          39.99756
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 2,
+    "recommendation_id": "mesa-overlook-loop-2-cafe-006",
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "trail_id": "mesa-overlook-loop",
+    "trail_name": "Mesa Overlook Loop",
+    "trailhead_geopoint": "39.9871,-105.2786",
+    "trailhead_lat": 39.9871,
+    "trailhead_lon": -105.2786
+  },
+  {
+    "coffee_geopoint": "39.98482,-105.29672",
+    "coffee_lat": 39.98482,
+    "coffee_lon": -105.29672,
+    "coffee_neighborhood": "Chautauqua",
+    "coffee_rating": 4.8,
+    "coffee_shop_id": "cafe-004",
+    "coffee_shop_name": "Switchback Coffee Bar",
+    "coffee_walkup_window": false,
+    "distance_km": 1.5645,
+    "distance_meters": 1564.464,
+    "distance_miles": 0.9721,
+    "line_geojson": {
+      "bbox": [
+        -105.29672,
+        39.98482,
+        -105.2786,
+        39.9871
+      ],
+      "coordinates": [
+        [
+          -105.2786,
+          39.9871
+        ],
+        [
+          -105.29672,
+          39.98482
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 3,
+    "recommendation_id": "mesa-overlook-loop-3-cafe-004",
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "trail_id": "mesa-overlook-loop",
+    "trail_name": "Mesa Overlook Loop",
+    "trailhead_geopoint": "39.9871,-105.2786",
+    "trailhead_lat": 39.9871,
+    "trailhead_lon": -105.2786
+  },
+  {
+    "coffee_geopoint": "39.98482,-105.29672",
+    "coffee_lat": 39.98482,
+    "coffee_lon": -105.29672,
+    "coffee_neighborhood": "Chautauqua",
+    "coffee_rating": 4.8,
+    "coffee_shop_id": "cafe-004",
+    "coffee_shop_name": "Switchback Coffee Bar",
+    "coffee_walkup_window": false,
+    "distance_km": 0.4635,
+    "distance_meters": 463.53,
+    "distance_miles": 0.288,
+    "line_geojson": {
+      "bbox": [
+        -105.3021,
+        39.9842,
+        -105.29672,
+        39.98482
+      ],
+      "coordinates": [
+        [
+          -105.3021,
+          39.9842
+        ],
+        [
+          -105.29672,
+          39.98482
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 1,
+    "recommendation_id": "green-mountain-ascent-1-cafe-004",
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "trail_id": "green-mountain-ascent",
+    "trail_name": "Green Mountain Ascent",
+    "trailhead_geopoint": "39.9842,-105.3021",
+    "trailhead_lat": 39.9842,
+    "trailhead_lon": -105.3021
+  },
+  {
+    "coffee_geopoint": "39.99756,-105.28991",
+    "coffee_lat": 39.99756,
+    "coffee_lon": -105.28991,
+    "coffee_neighborhood": "University Hill",
+    "coffee_rating": 4.3,
+    "coffee_shop_id": "cafe-006",
+    "coffee_shop_name": "Alpenglow Cold Brew",
+    "coffee_walkup_window": false,
+    "distance_km": 1.8126,
+    "distance_meters": 1812.557,
+    "distance_miles": 1.1263,
+    "line_geojson": {
+      "bbox": [
+        -105.3021,
+        39.9842,
+        -105.28991,
+        39.99756
+      ],
+      "coordinates": [
+        [
+          -105.3021,
+          39.9842
+        ],
+        [
+          -105.28991,
+          39.99756
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 2,
+    "recommendation_id": "green-mountain-ascent-2-cafe-006",
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "trail_id": "green-mountain-ascent",
+    "trail_name": "Green Mountain Ascent",
+    "trailhead_geopoint": "39.9842,-105.3021",
+    "trailhead_lat": 39.9842,
+    "trailhead_lon": -105.3021
+  },
+  {
+    "coffee_geopoint": "39.99042,-105.27918",
+    "coffee_lat": 39.99042,
+    "coffee_lon": -105.27918,
+    "coffee_neighborhood": "South Mesa",
+    "coffee_rating": 4.6,
+    "coffee_shop_id": "cafe-002",
+    "coffee_shop_name": "Pine Ridge Coffee",
+    "coffee_walkup_window": false,
+    "distance_km": 2.0716,
+    "distance_meters": 2071.565,
+    "distance_miles": 1.2872,
+    "line_geojson": {
+      "bbox": [
+        -105.3021,
+        39.9842,
+        -105.27918,
+        39.99042
+      ],
+      "coordinates": [
+        [
+          -105.3021,
+          39.9842
+        ],
+        [
+          -105.27918,
+          39.99042
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 3,
+    "recommendation_id": "green-mountain-ascent-3-cafe-002",
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "trail_id": "green-mountain-ascent",
+    "trail_name": "Green Mountain Ascent",
+    "trailhead_geopoint": "39.9842,-105.3021",
+    "trailhead_lat": 39.9842,
+    "trailhead_lon": -105.3021
+  },
+  {
+    "coffee_geopoint": "40.01781,-105.28341",
+    "coffee_lat": 40.01781,
+    "coffee_lon": -105.28341,
+    "coffee_neighborhood": "West Pearl",
+    "coffee_rating": 4.7,
+    "coffee_shop_id": "cafe-001",
+    "coffee_shop_name": "Trailhead Espresso",
+    "coffee_walkup_window": true,
+    "distance_km": 0.5518,
+    "distance_meters": 551.827,
+    "distance_miles": 0.3429,
+    "line_geojson": {
+      "bbox": [
+        -105.289,
+        40.0153,
+        -105.28341,
+        40.01781
+      ],
+      "coordinates": [
+        [
+          -105.289,
+          40.0153
+        ],
+        [
+          -105.28341,
+          40.01781
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 1,
+    "recommendation_id": "boulder-creek-path-1-cafe-001",
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "trail_id": "boulder-creek-path",
+    "trail_name": "Boulder Creek Path East",
+    "trailhead_geopoint": "40.0153,-105.289",
+    "trailhead_lat": 40.0153,
+    "trailhead_lon": -105.289
+  },
+  {
+    "coffee_geopoint": "40.01938,-105.27614",
+    "coffee_lat": 40.01938,
+    "coffee_lon": -105.27614,
+    "coffee_neighborhood": "Downtown",
+    "coffee_rating": 4.4,
+    "coffee_shop_id": "cafe-005",
+    "coffee_shop_name": "Flatiron Pour House",
+    "coffee_walkup_window": true,
+    "distance_km": 1.1854,
+    "distance_meters": 1185.393,
+    "distance_miles": 0.7366,
+    "line_geojson": {
+      "bbox": [
+        -105.289,
+        40.0153,
+        -105.27614,
+        40.01938
+      ],
+      "coordinates": [
+        [
+          -105.289,
+          40.0153
+        ],
+        [
+          -105.27614,
+          40.01938
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 2,
+    "recommendation_id": "boulder-creek-path-2-cafe-005",
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "trail_id": "boulder-creek-path",
+    "trail_name": "Boulder Creek Path East",
+    "trailhead_geopoint": "40.0153,-105.289",
+    "trailhead_lat": 40.0153,
+    "trailhead_lon": -105.289
+  },
+  {
+    "coffee_geopoint": "39.99756,-105.28991",
+    "coffee_lat": 39.99756,
+    "coffee_lon": -105.28991,
+    "coffee_neighborhood": "University Hill",
+    "coffee_rating": 4.3,
+    "coffee_shop_id": "cafe-006",
+    "coffee_shop_name": "Alpenglow Cold Brew",
+    "coffee_walkup_window": false,
+    "distance_km": 1.9741,
+    "distance_meters": 1974.123,
+    "distance_miles": 1.2267,
+    "line_geojson": {
+      "bbox": [
+        -105.28991,
+        39.99756,
+        -105.289,
+        40.0153
+      ],
+      "coordinates": [
+        [
+          -105.289,
+          40.0153
+        ],
+        [
+          -105.28991,
+          39.99756
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 3,
+    "recommendation_id": "boulder-creek-path-3-cafe-006",
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "trail_id": "boulder-creek-path",
+    "trail_name": "Boulder Creek Path East",
+    "trailhead_geopoint": "40.0153,-105.289",
+    "trailhead_lat": 40.0153,
+    "trailhead_lon": -105.289
+  }
+]

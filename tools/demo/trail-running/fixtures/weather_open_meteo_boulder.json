@@ -1,0 +1,20 @@
+{
+  "source": "open-meteo-saved-response",
+  "latitude": 40.015,
+  "longitude": -105.2705,
+  "timezone": "America/Denver",
+  "current_units": {
+    "time": "iso8601",
+    "temperature_2m": "fahrenheit",
+    "relative_humidity_2m": "%",
+    "wind_speed_10m": "mph",
+    "wind_direction_10m": "degrees"
+  },
+  "current": {
+    "time": "2026-05-11T14:00",
+    "temperature_2m": 68.4,
+    "relative_humidity_2m": 34,
+    "wind_speed_10m": 6.2,
+    "wind_direction_10m": 244
+  }
+}

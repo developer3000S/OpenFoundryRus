@@ -49,6 +49,25 @@ const tsGovernedMutationStarter = `export default async function handler(context
   };
 }`
 
+const tsExternalWebhookStarter = `export default async function handler(context) {
+  const weather = await context.sdk.dataConnection.invokeWebhook({
+    sourceId: context.parameters.weatherSourceId,
+    inputs: {
+      latitude: context.parameters.latitude,
+      longitude: context.parameters.longitude,
+    },
+  });
+
+  return {
+    output: {
+      temperature: weather.output_parameters?.temperature ?? null,
+      windSpeed: weather.output_parameters?.wind_speed ?? null,
+      humidity: weather.output_parameters?.humidity ?? null,
+      history: weather.history ?? null,
+    },
+  };
+}`
+
 const pythonAnalysisKitStarter = `def handler(context):
     target = context.get("target_object")
     related = context["sdk"].ontology.search(
@@ -129,6 +148,32 @@ func builtInFunctionAuthoringTemplates() []models.FunctionAuthoringTemplate {
 			},
 		},
 		{
+			ID:            "typescript-external-webhook-wrapper",
+			Runtime:       "typescript",
+			DisplayName:   "TypeScript external webhook wrapper",
+			Description:   "Call a configured Data Connection webhook and reshape its typed output for Workshop or Actions.",
+			Entrypoint:    "default",
+			StarterSource: tsExternalWebhookStarter,
+			DefaultCapabilities: models.FunctionCapabilities{
+				AllowOntologyRead:  false,
+				AllowOntologyWrite: false,
+				AllowAI:            false,
+				AllowNetwork:       false,
+				TimeoutSeconds:     15,
+				MaxSourceBytes:     65_536,
+			},
+			RecommendedUseCases: []string{
+				"external functions",
+				"weather lookups",
+				"API response shaping",
+			},
+			CLIScaffoldTemplate: &tsScaffold,
+			SDKPackages: []string{
+				"@open-foundry/sdk",
+				"@open-foundry/sdk/react",
+			},
+		},
+		{
 			ID:            "python-analysis-kit",
 			Runtime:       "python",
 			DisplayName:   "Python analysis kit",
@@ -149,7 +194,7 @@ func builtInFunctionAuthoringTemplates() []models.FunctionAuthoringTemplate {
 				"AI-assisted diagnostics",
 			},
 			CLIScaffoldTemplate: &pyScaffold,
-			SDKPackages: []string{"openfoundry-sdk"},
+			SDKPackages:         []string{"openfoundry-sdk"},
 		},
 	}
 }

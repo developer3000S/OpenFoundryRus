@@ -469,6 +469,44 @@ export interface ObjectQueryBody {
   include_count?: boolean;
   aggregations?: ObjectSetAggregationSpec[];
   selected_object_ids?: string[];
+  search_around?: ObjectSearchAroundQuery;
+  knn?: ObjectKnnQuery;
+}
+
+export interface ObjectSearchAroundQuery {
+  source_object_ids: string[];
+  link_type_id?: string;
+  link_type_ids?: string[];
+  direction?: 'outgoing' | 'incoming' | 'both' | string;
+  depth?: number;
+  target_object_type_id?: string;
+}
+
+export interface LinkedObjectEdge {
+  link_id: string;
+  link_type_id: string;
+  source_object_id: string;
+  target_object_id: string;
+  direction?: 'outgoing' | 'incoming' | 'both' | string;
+  depth?: number;
+  properties?: Record<string, unknown>;
+}
+
+export interface ObjectKnnQuery {
+  property_name: string;
+  vector: number[];
+  k?: number;
+  k_value?: number;
+  metric?: 'cosine' | 'euclidean' | 'dot' | string;
+}
+
+export interface ObjectKnnResult {
+  object_id: string;
+  rank: number;
+  score: number;
+  distance: number;
+  metric: string;
+  property_name: string;
 }
 
 export interface ObjectQueryResponse {
@@ -478,12 +516,16 @@ export interface ObjectQueryResponse {
   page?: number;
   per_page?: number;
   aggregations?: ObjectSetAggregationResult[];
+  linked_edges?: LinkedObjectEdge[];
+  knn_results?: ObjectKnnResult[];
   object_set?: {
     object_type_id: string;
     filters?: ObjectQueryFilter[];
     sort?: ObjectQuerySort[];
     limit?: number;
     selected_object_ids?: string[];
+    search_around?: ObjectSearchAroundQuery | null;
+    knn?: ObjectKnnQuery | null;
   };
 }
 

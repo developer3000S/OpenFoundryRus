@@ -1,0 +1,7 @@
+coffee_shop_id,name,latitude,longitude,neighborhood,rating,walkup_window,source
+cafe-001,Trailhead Espresso,40.01781,-105.28341,West Pearl,4.7,true,synthetic
+cafe-002,Pine Ridge Coffee,39.99042,-105.27918,South Mesa,4.6,false,synthetic
+cafe-003,Creekside Roasters,40.01592,-105.26430,Central Creek,4.5,true,synthetic
+cafe-004,Switchback Coffee Bar,39.98482,-105.29672,Chautauqua,4.8,false,synthetic
+cafe-005,Flatiron Pour House,40.01938,-105.27614,Downtown,4.4,true,synthetic
+cafe-006,Alpenglow Cold Brew,39.99756,-105.28991,University Hill,4.3,false,synthetic

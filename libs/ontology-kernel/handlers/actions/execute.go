@@ -240,12 +240,48 @@ func ExecuteActionWithRuntime(state *ontologykernel.AppState, fnRuntime ActionFu
 			}
 			failureType := "authentication"
 			_ = emitActionAttemptEvent(r.Context(), state, claims, action, body.TargetObjectID, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+			if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+				action:         action,
+				claims:         claims,
+				targetObjectID: body.TargetObjectID,
+				parameters:     body.Parameters,
+				validation: map[string]any{
+					"valid":  false,
+					"errors": []string{err.Error()},
+				},
+				edits:         map[string]any{"denied": true},
+				status:        "denied",
+				failureType:   &failureType,
+				errorMessage:  err.Error(),
+				justification: body.Justification,
+				startedAt:     startedAt,
+			}); matErr != nil {
+				logActionLogMaterializationFailure(action.ID, matErr)
+			}
 			forbidden(w, err.Error())
 			return
 		}
 		if err := ensureConfirmationJustification(action, body.Justification); err != nil {
 			failureType := "invalid_parameter"
 			_ = emitActionAttemptEvent(r.Context(), state, claims, action, body.TargetObjectID, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+			if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+				action:         action,
+				claims:         claims,
+				targetObjectID: body.TargetObjectID,
+				parameters:     body.Parameters,
+				validation: map[string]any{
+					"valid":  false,
+					"errors": []string{err.Error()},
+				},
+				edits:         map[string]any{},
+				status:        "failure",
+				failureType:   &failureType,
+				errorMessage:  err.Error(),
+				justification: body.Justification,
+				startedAt:     startedAt,
+			}); matErr != nil {
+				logActionLogMaterializationFailure(action.ID, matErr)
+			}
 			invalid(w, err.Error())
 			return
 		}
@@ -253,9 +289,27 @@ func ExecuteActionWithRuntime(state *ontologykernel.AppState, fnRuntime ActionFu
 		// 1. Webhook writeback before plan_action.
 		params := body.Parameters
 		if writeback != nil {
-			if err := runWebhookWriteback(r.Context(), state, writeback, &params); err != nil {
+			if err := runWebhookWriteback(r.Context(), state, claims, writeback, &params); err != nil {
 				failureType := "invalid_parameter"
 				_ = emitActionAttemptEvent(r.Context(), state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+				if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+					action:         action,
+					claims:         claims,
+					targetObjectID: body.TargetObjectID,
+					parameters:     params,
+					validation: map[string]any{
+						"valid":  false,
+						"errors": []string{"webhook writeback failed: " + err.Error()},
+					},
+					edits:         map[string]any{"webhook_writeback": "failed"},
+					status:        "failure",
+					failureType:   &failureType,
+					errorMessage:  err.Error(),
+					justification: body.Justification,
+					startedAt:     startedAt,
+				}); matErr != nil {
+					logActionLogMaterializationFailure(action.ID, matErr)
+				}
 				dbError(w, "webhook writeback failed: "+err.Error())
 				return
 			}
@@ -282,6 +336,24 @@ func ExecuteActionWithRuntime(state *ontologykernel.AppState, fnRuntime ActionFu
 				failureType = "authentication"
 			}
 			_ = emitActionAttemptEvent(r.Context(), state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+			if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+				action:         action,
+				claims:         claims,
+				targetObjectID: body.TargetObjectID,
+				parameters:     params,
+				validation: map[string]any{
+					"valid":  false,
+					"errors": errs,
+				},
+				edits:         map[string]any{"details": errs},
+				status:        status,
+				failureType:   &failureType,
+				errorMessage:  strings.Join(errs, "; "),
+				justification: body.Justification,
+				startedAt:     startedAt,
+			}); matErr != nil {
+				logActionLogMaterializationFailure(action.ID, matErr)
+			}
 			httpStatus := http.StatusBadRequest
 			if status == "denied" {
 				httpStatus = http.StatusForbidden
@@ -303,6 +375,25 @@ func ExecuteActionWithRuntime(state *ontologykernel.AppState, fnRuntime ActionFu
 			}
 			failureType := classifyExecutePlanError(err).AsStr()
 			_ = emitActionAttemptEvent(r.Context(), state, claims, action, body.TargetObjectID, params, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+			if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+				action:         action,
+				claims:         claims,
+				targetObjectID: body.TargetObjectID,
+				parameters:     params,
+				preview:        planPreview(plan),
+				validation: map[string]any{
+					"valid":  true,
+					"errors": []string{},
+				},
+				edits:         map[string]any{"error": err.Error()},
+				status:        "failure",
+				failureType:   &failureType,
+				errorMessage:  err.Error(),
+				justification: body.Justification,
+				startedAt:     startedAt,
+			}); matErr != nil {
+				logActionLogMaterializationFailure(action.ID, matErr)
+			}
 			if errors.Is(err, domain.ErrPythonRuntimeNotWired) {
 				writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 					"error":  "python_runtime_not_wired",
@@ -325,6 +416,23 @@ func ExecuteActionWithRuntime(state *ontologykernel.AppState, fnRuntime ActionFu
 			"object":  jsonAsAny(executed.object),
 			"link":    jsonAsAny(executed.link),
 			"result":  jsonAsAny(executed.result),
+		}
+		if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+			action:         action,
+			claims:         claims,
+			targetObjectID: executed.targetObjectID,
+			parameters:     params,
+			preview:        executed.preview,
+			validation: map[string]any{
+				"valid":  true,
+				"errors": []string{},
+			},
+			edits:         auditResult,
+			status:        "success",
+			justification: body.Justification,
+			startedAt:     startedAt,
+		}); matErr != nil {
+			logActionLogMaterializationFailure(action.ID, matErr)
 		}
 		if auditErr := emitActionAuditEvent(r.Context(), state, claims, action, plan.target,
 			executed.targetObjectID, "success", "low", "",
@@ -1890,6 +1998,48 @@ func decodeParams(raw json.RawMessage) map[string]json.RawMessage {
 	return out
 }
 
+func lookupJSONRawPath(params map[string]json.RawMessage, path string) (json.RawMessage, bool) {
+	path = strings.TrimSpace(path)
+	if path == "" || params == nil {
+		return nil, false
+	}
+	if raw, ok := params[path]; ok {
+		return raw, true
+	}
+	segments := strings.Split(path, ".")
+	if len(segments) == 0 {
+		return nil, false
+	}
+	raw, ok := params[segments[0]]
+	if !ok {
+		return nil, false
+	}
+	for _, segment := range segments[1:] {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return nil, false
+		}
+		next, ok := obj[segment]
+		if !ok {
+			return nil, false
+		}
+		raw = next
+	}
+	return raw, true
+}
+
+func lookupJSONRawPathInRaw(raw json.RawMessage, path string) (json.RawMessage, bool) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return raw, len(bytes.TrimSpace(raw)) > 0
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, false
+	}
+	return lookupJSONRawPath(obj, path)
+}
+
 func validateActionParameterInputs(action models.ActionType, params map[string]json.RawMessage) []string {
 	var errs []string
 	for _, field := range action.InputSchema {
@@ -2086,7 +2236,7 @@ func buildUpdateObjectPatch(
 		var value json.RawMessage
 		switch {
 		case m.InputName != nil:
-			v, ok := paramMap[*m.InputName]
+			v, ok := lookupJSONRawPath(paramMap, *m.InputName)
 			if !ok {
 				return nil, []string{fmt.Sprintf("missing input '%s' for property mapping", *m.InputName)}
 			}

@@ -89,6 +89,8 @@ const NO_OP_RUNTIME: RuntimeApi = {
     filters: [],
     sort: options?.sort ?? [],
     aggregations: [],
+    linkedEdges: [],
+    knnResults: [],
     contract: {
       object_type_id: options?.objectTypeId ?? '',
       filters: [],

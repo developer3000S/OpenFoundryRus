@@ -244,4 +244,131 @@ describe('Workshop object set execution', () => {
     expect(result.source).toBe('search_around');
     expect(result.data.map((entry) => entry.id)).toEqual(['coffee-near']);
   });
+
+  it('pushes link-type search-around traversal to the object database query endpoint', async () => {
+    const variables: WorkshopVariableLike[] = [
+      { id: 'selected_trail', kind: 'object_set_selection', name: 'Selected trail', object_type_id: 'Trail' },
+      {
+        id: 'linked_coffee',
+        kind: 'object_set_definition',
+        name: 'Linked coffee',
+        object_type_id: 'CoffeeShop',
+        metadata: {
+          search_around: {
+            source_variable_id: 'selected_trail',
+            link_type_ids: ['trail_near_coffee'],
+            direction: 'outgoing',
+            depth: 1,
+          },
+        },
+      },
+    ];
+    const engine = createWorkshopVariableEngine(variables, {
+      selectedObjectSets: {
+        selected_trail: [object('trail-1', { name: 'Mesa Trail' }, 'Trail')],
+      },
+    });
+    const fake = deps({ CoffeeShop: [object('coffee-1', { name: 'Boxcar Coffee' }, 'CoffeeShop')] });
+    vi.mocked(fake.queryObjects).mockResolvedValueOnce({
+      data: [object('coffee-1', { name: 'Boxcar Coffee' }, 'CoffeeShop')],
+      total: 1,
+      count: 1,
+      linked_edges: [{
+        link_id: 'trail_near_coffee:trail-1:coffee-1',
+        link_type_id: 'trail_near_coffee',
+        source_object_id: 'trail-1',
+        target_object_id: 'coffee-1',
+        direction: 'outgoing',
+        depth: 1,
+      }],
+    });
+
+    const result = await executeWorkshopObjectSet({ variableId: 'linked_coffee', variables, engine, limit: 25 }, fake);
+
+    expect(fake.queryObjects).toHaveBeenCalledWith('CoffeeShop', {
+      filters: [],
+      sort: [],
+      per_page: 25,
+      limit: 25,
+      include_count: true,
+      aggregations: [],
+      search_around: {
+        source_object_ids: ['trail-1'],
+        link_type_ids: ['trail_near_coffee'],
+        direction: 'outgoing',
+        depth: 1,
+        target_object_type_id: 'CoffeeShop',
+      },
+    });
+    expect(result.source).toBe('search_around');
+    expect(result.data.map((entry) => entry.id)).toEqual(['coffee-1']);
+    expect(result.linkedEdges).toHaveLength(1);
+    expect(result.contract.search_around?.link_type_ids).toEqual(['trail_near_coffee']);
+  });
+
+  it('pushes KNN vector retrieval from a selected object to the object database query endpoint', async () => {
+    const variables: WorkshopVariableLike[] = [
+      { id: 'selected_run', kind: 'object_set_selection', name: 'Selected run', object_type_id: 'Run' },
+      {
+        id: 'similar_runs',
+        kind: 'object_set_definition',
+        name: 'Similar runs',
+        object_type_id: 'Run',
+        static_filters: [{ property_name: 'activity_type', operator: 'equals', value: 'trail' }],
+        metadata: {
+          knn: {
+            source_variable_id: 'selected_run',
+            property_name: 'trail_vector',
+            k: 2,
+            metric: 'euclidean',
+          },
+        },
+      },
+    ];
+    const engine = createWorkshopVariableEngine(variables, {
+      selectedObjectSets: {
+        selected_run: [object('run-anchor', { trail_vector: [6, 120], activity_type: 'trail' }, 'Run')],
+      },
+    });
+    const fake = deps({ Run: [object('run-1', { name: 'Mesa effort', trail_vector: [5, 100] }, 'Run')] });
+    vi.mocked(fake.queryObjects).mockResolvedValueOnce({
+      data: [object('run-1', {
+        name: 'Mesa effort',
+        trail_vector: [5, 100],
+        __of_knn_rank: 1,
+        __of_knn_score: 0.04756,
+      }, 'Run')],
+      total: 1,
+      count: 1,
+      knn_results: [{
+        object_id: 'run-1',
+        rank: 1,
+        score: 0.04756,
+        distance: 20.02498,
+        metric: 'euclidean',
+        property_name: 'trail_vector',
+      }],
+    });
+
+    const result = await executeWorkshopObjectSet({ variableId: 'similar_runs', variables, engine, limit: 25 }, fake);
+
+    expect(fake.queryObjects).toHaveBeenCalledWith('Run', {
+      filters: [{ property_name: 'activity_type', operator: 'equals', value: 'trail' }],
+      sort: [],
+      per_page: 25,
+      limit: 25,
+      include_count: true,
+      aggregations: [],
+      knn: {
+        property_name: 'trail_vector',
+        vector: [6, 120],
+        k: 2,
+        metric: 'euclidean',
+      },
+    });
+    expect(result.source).toBe('knn');
+    expect(result.knnResults).toHaveLength(1);
+    expect(result.contract.knn?.property_name).toBe('trail_vector');
+    expect(result.contract.knn?.vector).toEqual([6, 120]);
+  });
 });

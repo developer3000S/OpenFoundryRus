@@ -600,6 +600,12 @@ func (h *Handlers) CreateConnection(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusBadRequest, "config must be valid JSON")
 		return
 	}
+	normalized, err := normalizeConnectionConfig(body.ConnectorType, body.Config)
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	body.Config = normalized
 	v, err := h.Repo.CreateConnection(r.Context(), &body, caller.Sub)
 	if err != nil {
 		slog.Error("create connection", slog.String("error", err.Error()))
@@ -628,6 +634,23 @@ func (h *Handlers) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusBadRequest, "config must be valid JSON")
 		return
 	}
+	if len(body.Config) > 0 {
+		current, err := h.Repo.GetConnection(r.Context(), id)
+		if err != nil {
+			writeJSONErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if current == nil {
+			writeJSONErr(w, http.StatusNotFound, "connection not found")
+			return
+		}
+		normalized, err := normalizeConnectionConfig(current.ConnectorType, body.Config)
+		if err != nil {
+			writeJSONErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		body.Config = normalized
+	}
 	v, err := h.Repo.UpdateConnection(r.Context(), id, &body)
 	if err != nil {
 		writeJSONErr(w, http.StatusInternalServerError, err.Error())
@@ -638,6 +661,18 @@ func (h *Handlers) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+func normalizeConnectionConfig(connectorType string, raw json.RawMessage) (json.RawMessage, error) {
+	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(connectorType), "-", "_")) {
+	case "rest_api":
+		return models.NormalizeRESTAPISourceConfig(raw)
+	default:
+		if len(raw) == 0 {
+			return raw, nil
+		}
+		return raw, nil
+	}
 }
 
 func (h *Handlers) DeleteConnection(w http.ResponseWriter, r *http.Request) {

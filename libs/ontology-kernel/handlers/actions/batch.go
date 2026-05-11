@@ -147,10 +147,47 @@ func ExecuteActionBatchHandler(state *ontologykernel.AppState) http.HandlerFunc 
 			if err != nil {
 				failureType := classifyExecutePlanError(err).AsStr()
 				_ = emitActionAttemptEvent(r.Context(), state, claims, action, nil, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+				if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+					action:          action,
+					claims:          claims,
+					targetObjectIDs: body.TargetObjectIDs,
+					parameters:      body.Parameters,
+					validation: map[string]any{
+						"valid":  true,
+						"errors": []string{},
+					},
+					edits:         map[string]any{"error": err.Error(), "batch": true},
+					status:        "failure",
+					failureType:   &failureType,
+					errorMessage:  err.Error(),
+					justification: body.Justification,
+					startedAt:     startedAt,
+				}); matErr != nil {
+					logActionLogMaterializationFailure(action.ID, matErr)
+				}
 				dbError(w, err.Error())
 				return
 			}
 			_ = emitActionAttemptEvent(r.Context(), state, claims, action, nil, body.Parameters, "success", time.Since(startedAt).Milliseconds(), nil)
+			if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+				action:          action,
+				claims:          claims,
+				targetObjectIDs: body.TargetObjectIDs,
+				parameters:      body.Parameters,
+				validation: map[string]any{
+					"valid":  true,
+					"errors": []string{},
+				},
+				edits: map[string]any{
+					"batch":  true,
+					"result": jsonAsAny(value),
+				},
+				status:        "success",
+				justification: body.Justification,
+				startedAt:     startedAt,
+			}); matErr != nil {
+				logActionLogMaterializationFailure(action.ID, matErr)
+			}
 			writeJSON(w, http.StatusOK, map[string]any{
 				"total":     total,
 				"succeeded": total,
@@ -189,6 +226,24 @@ func ExecuteActionBatchHandler(state *ontologykernel.AppState) http.HandlerFunc 
 					ft = "authentication"
 				}
 				_ = emitActionAttemptEvent(r.Context(), state, claims, action, &tid, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &ft)
+				if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+					action:         action,
+					claims:         claims,
+					targetObjectID: &tid,
+					parameters:     body.Parameters,
+					validation: map[string]any{
+						"valid":  false,
+						"errors": errs,
+					},
+					edits:         map[string]any{"details": errs, "batch": true},
+					status:        audit,
+					failureType:   &ft,
+					errorMessage:  strings.Join(errs, "; "),
+					justification: body.Justification,
+					startedAt:     startedAt,
+				}); matErr != nil {
+					logActionLogMaterializationFailure(action.ID, matErr)
+				}
 				results = append(results, mustJSON(map[string]any{
 					"target_object_id": tid,
 					"status":           status,
@@ -206,6 +261,25 @@ func ExecuteActionBatchHandler(state *ontologykernel.AppState) http.HandlerFunc 
 				}
 				failureType := classifyExecutePlanError(err).AsStr()
 				_ = emitActionAttemptEvent(r.Context(), state, claims, action, &tid, body.Parameters, "failure", time.Since(startedAt).Milliseconds(), &failureType)
+				if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+					action:         action,
+					claims:         claims,
+					targetObjectID: &tid,
+					parameters:     body.Parameters,
+					preview:        planPreview(plan),
+					validation: map[string]any{
+						"valid":  true,
+						"errors": []string{},
+					},
+					edits:         map[string]any{"error": err.Error(), "batch": true},
+					status:        "failure",
+					failureType:   &failureType,
+					errorMessage:  err.Error(),
+					justification: body.Justification,
+					startedAt:     startedAt,
+				}); matErr != nil {
+					logActionLogMaterializationFailure(action.ID, matErr)
+				}
 				results = append(results, mustJSON(map[string]any{
 					"target_object_id": tid,
 					"status":           "failed",
@@ -233,6 +307,23 @@ func ExecuteActionBatchHandler(state *ontologykernel.AppState) http.HandlerFunc 
 			runWebhookSideEffects(r.Context(), state, claims, claims.Sub, action.ID,
 				executed.targetObjectID, sideEffects, body.Parameters)
 			_ = emitActionAttemptEvent(r.Context(), state, claims, action, executed.targetObjectID, body.Parameters, "success", time.Since(startedAt).Milliseconds(), nil)
+			if matErr := materializeActionLogObject(r.Context(), state, actionLogMaterializationInput{
+				action:         action,
+				claims:         claims,
+				targetObjectID: executed.targetObjectID,
+				parameters:     body.Parameters,
+				preview:        executed.preview,
+				validation: map[string]any{
+					"valid":  true,
+					"errors": []string{},
+				},
+				edits:         auditResult,
+				status:        "success",
+				justification: body.Justification,
+				startedAt:     startedAt,
+			}); matErr != nil {
+				logActionLogMaterializationFailure(action.ID, matErr)
+			}
 			results = append(results, mustJSON(map[string]any{
 				"target_object_id": tid,
 				"status":           "succeeded",

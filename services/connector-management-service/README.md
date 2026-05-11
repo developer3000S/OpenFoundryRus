@@ -11,6 +11,130 @@ identity, `webhook` for outbound callable definitions, and `output_parameters`
 for parsed webhook/action outputs. Legacy `/connections` aliases may remain at
 the HTTP edge, but internal and new product docs should prefer `source`.
 
+## REST API sources
+
+`connector_type: "rest_api"` sources use a normalized config shape for outbound
+webhooks and external HTTP reads. The service accepts either `domain` or
+`base_url` and stores both, plus auth metadata, secret references, worker/runtime
+policy, and source permissions. This lets an Open-Meteo source be configured
+without code changes:
+
+```json
+{
+  "name": "Open-Meteo",
+  "connector_type": "rest_api",
+  "config": {
+    "domain": "api.open-meteo.com",
+    "auth": { "type": "none" },
+    "runtime": {
+      "worker": "foundry",
+      "timeout_ms": 10000,
+      "retry_count": 0,
+      "allowed_methods": ["GET", "POST"]
+    },
+    "permissions": {
+      "discoverable": true,
+      "syncable": false,
+      "invokable": true,
+      "usable_in_code": true,
+      "allowed_egress_hosts": ["api.open-meteo.com"]
+    },
+    "webhook": {
+      "path": "/v1/forecast",
+      "method": "GET",
+      "inputs": [
+        { "id": "latitude", "type": "number", "required": true },
+        { "id": "longitude", "type": "number", "required": true }
+      ],
+      "calls": [
+        {
+          "id": "weather",
+          "method": "GET",
+          "path": "/v1/forecast",
+          "query_params": {
+            "latitude": "{{latitude}}",
+            "longitude": "{{longitude}}",
+            "current": "temperature_2m,wind_speed_10m,relative_humidity_2m"
+          }
+        }
+      ],
+      "outputs": [
+        { "id": "temperature", "type": "number", "extractor": { "from_call": "weather", "path": "/current/temperature_2m" } },
+        { "id": "wind_speed", "type": "number", "extractor": { "from_call": "weather", "path": "/current/wind_speed_10m" } },
+        { "id": "humidity", "type": "number", "extractor": { "from_call": "weather", "path": "/current/relative_humidity_2m" } }
+      ],
+      "timeout_ms": 10000,
+      "concurrency_limit": 10,
+      "rate_limit": { "max_requests": 60, "per_seconds": 60 },
+      "history": { "enabled": true, "retention_days": 30, "store_outputs": true }
+    }
+  }
+}
+```
+
+Supported `auth.type` values are `none`, `basic`, `bearer`, `api_key`, and
+`custom_header`. Local/dev tests may pass `auth.value` or legacy
+`bearer_token`; production configs should prefer `auth.secret_ref` plus the
+credential endpoints.
+
+`POST /api/v1/webhooks/{source_id}/invoke` executes either this `rest_api`
+source-backed webhook model or the legacy absolute-URL webhook config. The
+handler enforces source ownership/invoke permissions, source `invokable`,
+allowed HTTP methods, egress host allowlists, timeout, max call/input/response
+limits, rate limits, and concurrency limits before returning sanitized
+diagnostics and typed `output_parameters`.
+
+Webhook history is persisted when the definition has `history.enabled: true`
+or uses the default history settings. `store_inputs` controls whether request
+inputs are retained; `store_outputs` controls whether parsed
+`output_parameters` are retained. Source owners, admins, or callers with
+webhook read permission can inspect retained entries with:
+
+- `GET /api/v1/webhooks/{source_id}/history`
+- `GET /api/v1/data-connection/sources/{source_id}/webhook-history`
+
+## HTTPS inbound listeners
+
+Sources can also expose an HTTPS listener for external systems that push events
+into OpenFoundry. Listener requests are authenticated by the listener config, so
+the receive routes are intentionally mounted outside JWT auth:
+
+- `POST /api/v1/listeners/{source_id}/events`
+- `POST /api/v1/data-connection/sources/{source_id}/listeners/{listener_id}/events`
+
+Example source config:
+
+```json
+{
+  "listener": {
+    "id": "trail-events",
+    "type": "https",
+    "enabled": true,
+    "auth": {
+      "type": "hmac_sha256",
+      "header": "X-OpenFoundry-Signature",
+      "secret": "dev-only-local-secret"
+    },
+    "destination": {
+      "mode": "object",
+      "object_type_id": "00000000-0000-0000-0000-000000000000"
+    },
+    "limits": {
+      "max_payload_bytes": 1048576
+    }
+  }
+}
+```
+
+The receiver accepts JSON payloads, validates either `hmac_sha256`,
+`shared_secret`, or `none` auth, redacts auth headers before storage, and writes
+an `inbound_listener_events` record with the payload plus destination metadata
+(`event_log`, `dataset`, or `object`). Source owners, admins, or callers with
+listener read permission can inspect received records with:
+
+- `GET /api/v1/listeners/{source_id}/events`
+- `GET /api/v1/data-connection/sources/{source_id}/listener-events`
+
 ## Required in production
 
 | Variable | Description |

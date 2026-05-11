@@ -1,0 +1,182 @@
+[
+  {
+    "distance_meters": 1913.638,
+    "distance_miles": 1.1891,
+    "elevation_gain_ft": 344.49,
+    "elevation_gain_meters": 105.0,
+    "end_lat": 39.98725,
+    "end_lon": -105.27872,
+    "max_elevation_ft": 5935.04,
+    "max_elevation_meters": 1809.0,
+    "min_elevation_ft": 5590.55,
+    "min_elevation_meters": 1704.0,
+    "point_count": 6,
+    "route_bbox": [
+      -105.2859,
+      39.9871,
+      -105.2786,
+      39.9933
+    ],
+    "route_geojson": {
+      "bbox": [
+        -105.2859,
+        39.9871,
+        -105.2786,
+        39.9933
+      ],
+      "coordinates": [
+        [
+          -105.2786,
+          39.9871
+        ],
+        [
+          -105.2821,
+          39.98845
+        ],
+        [
+          -105.2859,
+          39.9909
+        ],
+        [
+          -105.2842,
+          39.9933
+        ],
+        [
+          -105.28055,
+          39.99115
+        ],
+        [
+          -105.27872,
+          39.98725
+        ]
+      ],
+      "type": "LineString"
+    },
+    "source_file": "gpx/mesa_overlook_loop.gpx",
+    "start_lat": 39.9871,
+    "start_lon": -105.2786,
+    "trail_id": "mesa-overlook-loop",
+    "trail_name": "Mesa Overlook Loop",
+    "trailhead_geopoint": "39.9871,-105.2786"
+  },
+  {
+    "distance_meters": 1385.373,
+    "distance_miles": 0.8608,
+    "elevation_gain_ft": 1174.54,
+    "elevation_gain_meters": 358.0,
+    "end_lat": 39.98595,
+    "end_lon": -105.3174,
+    "max_elevation_ft": 7001.31,
+    "max_elevation_meters": 2134.0,
+    "min_elevation_ft": 5826.77,
+    "min_elevation_meters": 1776.0,
+    "point_count": 6,
+    "route_bbox": [
+      -105.3174,
+      39.9842,
+      -105.3021,
+      39.98705
+    ],
+    "route_geojson": {
+      "bbox": [
+        -105.3174,
+        39.9842,
+        -105.3021,
+        39.98705
+      ],
+      "coordinates": [
+        [
+          -105.3021,
+          39.9842
+        ],
+        [
+          -105.3058,
+          39.98485
+        ],
+        [
+          -105.3095,
+          39.9854
+        ],
+        [
+          -105.3123,
+          39.9862
+        ],
+        [
+          -105.31485,
+          39.98705
+        ],
+        [
+          -105.3174,
+          39.98595
+        ]
+      ],
+      "type": "LineString"
+    },
+    "source_file": "gpx/green_mountain_ascent.gpx",
+    "start_lat": 39.9842,
+    "start_lon": -105.3021,
+    "trail_id": "green-mountain-ascent",
+    "trail_name": "Green Mountain Ascent",
+    "trailhead_geopoint": "39.9842,-105.3021"
+  },
+  {
+    "distance_meters": 2835.673,
+    "distance_miles": 1.762,
+    "elevation_gain_ft": 0.0,
+    "elevation_gain_meters": 0.0,
+    "end_lat": 40.01725,
+    "end_lon": -105.2558,
+    "max_elevation_ft": 5367.45,
+    "max_elevation_meters": 1636.0,
+    "min_elevation_ft": 5318.24,
+    "min_elevation_meters": 1621.0,
+    "point_count": 6,
+    "route_bbox": [
+      -105.289,
+      40.0153,
+      -105.2558,
+      40.01725
+    ],
+    "route_geojson": {
+      "bbox": [
+        -105.289,
+        40.0153,
+        -105.2558,
+        40.01725
+      ],
+      "coordinates": [
+        [
+          -105.289,
+          40.0153
+        ],
+        [
+          -105.2825,
+          40.01572
+        ],
+        [
+          -105.2752,
+          40.0161
+        ],
+        [
+          -105.2681,
+          40.01655
+        ],
+        [
+          -105.2618,
+          40.01692
+        ],
+        [
+          -105.2558,
+          40.01725
+        ]
+      ],
+      "type": "LineString"
+    },
+    "source_file": "gpx/boulder_creek_path.gpx",
+    "start_lat": 40.0153,
+    "start_lon": -105.289,
+    "trail_id": "boulder-creek-path",
+    "trail_name": "Boulder Creek Path East",
+    "trailhead_geopoint": "40.0153,-105.289"
+  }
+]

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="OpenFoundry Trail Demo">
+  <metadata>
+    <name>Boulder Creek Path East</name>
+  </metadata>
+  <trk>
+    <name>Boulder Creek Path East</name>
+    <trkseg>
+      <trkpt lat="40.01530" lon="-105.28900"><ele>1636.0</ele></trkpt>
+      <trkpt lat="40.01572" lon="-105.28250"><ele>1632.0</ele></trkpt>
+      <trkpt lat="40.01610" lon="-105.27520"><ele>1628.0</ele></trkpt>
+      <trkpt lat="40.01655" lon="-105.26810"><ele>1625.0</ele></trkpt>
+      <trkpt lat="40.01692" lon="-105.26180"><ele>1622.0</ele></trkpt>
+      <trkpt lat="40.01725" lon="-105.25580"><ele>1621.0</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

@@ -1,0 +1,529 @@
+{
+  "ir_version": "pipeline_ir.v1",
+  "metadata": {
+    "acceptance_scenario": {
+      "checklist_id": "DEMO.3",
+      "description": "Trail Running demo GPX trail ingestion pipeline",
+      "fixture_root": "tools/demo/trail-running"
+    },
+    "crs": "EPSG:4326",
+    "pipeline_type": "FASTER"
+  },
+  "resources": [
+    {
+      "id": "gpx_fixture_files",
+      "name": "Synthetic GPX trail files",
+      "resource_type": "file_set",
+      "metadata": {
+        "fixture_paths": [
+          "fixtures/gpx/mesa_overlook_loop.gpx",
+          "fixtures/gpx/green_mountain_ascent.gpx",
+          "fixtures/gpx/boulder_creek_path.gpx"
+        ],
+        "format": "gpx",
+        "crs": "EPSG:4326"
+      }
+    },
+    {
+      "id": "trail_dataset",
+      "name": "Trail",
+      "rid": "ri.openfoundry.demo.dataset.trail",
+      "resource_type": "dataset",
+      "branch": "main"
+    },
+    {
+      "id": "trail_object_type",
+      "name": "Trail",
+      "rid": "ri.ontology.main.object-type.trail",
+      "resource_type": "object_type"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "gpx_files",
+      "name": "GPX trail files",
+      "resource_id": "gpx_fixture_files"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "gpx_fixture_input",
+      "label": "GPX trail files",
+      "transform_type": "dataset_input",
+      "config": {
+        "fixture_paths": [
+          "fixtures/gpx/mesa_overlook_loop.gpx",
+          "fixtures/gpx/green_mountain_ascent.gpx",
+          "fixtures/gpx/boulder_creek_path.gpx"
+        ],
+        "format": "gpx",
+        "content_column": "raw_gpx",
+        "file_name_column": "source_file"
+      },
+      "output_ports": [
+        {
+          "id": "out",
+          "direction": "output",
+          "port_type": "dataset"
+        }
+      ],
+      "output_schema": {
+        "fields": [
+          {
+            "name": "raw_gpx",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "source_file",
+            "field_type": "string",
+            "nullable": false
+          }
+        ]
+      },
+      "position": {
+        "x": 80,
+        "y": 160
+      }
+    },
+    {
+      "id": "parse_gpx_trails",
+      "label": "Parse GPX to Trail rows",
+      "transform_type": "gpx_parse",
+      "depends_on": [
+        "gpx_fixture_input"
+      ],
+      "config": {
+        "gpx_column": "raw_gpx",
+        "file_name_column": "source_file",
+        "crs": "EPSG:4326",
+        "output_schema": {
+          "fields": [
+            {
+              "name": "trail_id",
+              "field_type": "string",
+              "nullable": false
+            },
+            {
+              "name": "trail_name",
+              "field_type": "string",
+              "nullable": false
+            },
+            {
+              "name": "source_file",
+              "field_type": "string",
+              "nullable": false
+            },
+            {
+              "name": "point_count",
+              "field_type": "integer",
+              "nullable": false
+            },
+            {
+              "name": "distance_miles",
+              "field_type": "double",
+              "nullable": false
+            },
+            {
+              "name": "elevation_gain_ft",
+              "field_type": "double",
+              "nullable": false
+            },
+            {
+              "name": "trailhead_geopoint",
+              "field_type": "geopoint",
+              "nullable": false
+            },
+            {
+              "name": "route_geojson",
+              "field_type": "geojson",
+              "nullable": false
+            },
+            {
+              "name": "route_bbox",
+              "field_type": "bbox",
+              "nullable": false
+            }
+          ]
+        }
+      },
+      "input_ports": [
+        {
+          "id": "in",
+          "direction": "input",
+          "port_type": "dataset"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "out",
+          "direction": "output",
+          "port_type": "dataset"
+        }
+      ],
+      "output_schema": {
+        "fields": [
+          {
+            "name": "trail_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "trail_name",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "source_file",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "point_count",
+            "field_type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "distance_meters",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "distance_miles",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "elevation_gain_meters",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "elevation_gain_ft",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "min_elevation_meters",
+            "field_type": "double",
+            "nullable": true
+          },
+          {
+            "name": "max_elevation_meters",
+            "field_type": "double",
+            "nullable": true
+          },
+          {
+            "name": "min_elevation_ft",
+            "field_type": "double",
+            "nullable": true
+          },
+          {
+            "name": "max_elevation_ft",
+            "field_type": "double",
+            "nullable": true
+          },
+          {
+            "name": "start_lat",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "start_lon",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "end_lat",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "end_lon",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "trailhead_geopoint",
+            "field_type": "geopoint",
+            "nullable": false,
+            "metadata": {
+              "format": "lat,lon",
+              "crs": "EPSG:4326"
+            }
+          },
+          {
+            "name": "route_bbox",
+            "field_type": "bbox",
+            "nullable": false,
+            "metadata": {
+              "coordinate_order": "min_lon,min_lat,max_lon,max_lat",
+              "crs": "EPSG:4326"
+            }
+          },
+          {
+            "name": "route_geojson",
+            "field_type": "geojson",
+            "nullable": false,
+            "metadata": {
+              "geometry_type": "LineString",
+              "coordinate_order": "lon,lat",
+              "crs": "EPSG:4326"
+            }
+          }
+        ],
+        "metadata": {
+          "crs": "EPSG:4326"
+        }
+      },
+      "preview_schema": {
+        "fields": [
+          {
+            "name": "trail_name",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "distance_miles",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "elevation_gain_ft",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "route_geojson",
+            "field_type": "geojson",
+            "nullable": false
+          }
+        ]
+      },
+      "position": {
+        "x": 360,
+        "y": 160
+      }
+    },
+    {
+      "id": "trail_dataset_output",
+      "label": "Trail dataset output",
+      "transform_type": "output_dataset",
+      "depends_on": [
+        "parse_gpx_trails"
+      ],
+      "output_dataset_id": "e3f79350-9d87-4ea8-9a29-7a9ac6b07101",
+      "config": {
+        "_output": {
+          "kind": "dataset",
+          "dataset_name": "Trail",
+          "display_name": "Trail",
+          "dataset_rid": "ri.openfoundry.demo.dataset.trail",
+          "branch": "main",
+          "write_mode": "SNAPSHOT",
+          "file_format": "JSON",
+          "logical_path": "trail-running/trail"
+        }
+      },
+      "input_ports": [
+        {
+          "id": "in",
+          "direction": "input",
+          "port_type": "dataset"
+        }
+      ],
+      "position": {
+        "x": 680,
+        "y": 96
+      }
+    },
+    {
+      "id": "trail_object_output",
+      "label": "Trail object type output",
+      "transform_type": "output_object_type",
+      "depends_on": [
+        "parse_gpx_trails"
+      ],
+      "output_dataset_id": "e3f79350-9d87-4ea8-9a29-7a9ac6b07103",
+      "config": {
+        "_output": {
+          "kind": "object_type",
+          "dataset_rid": "ri.openfoundry.demo.dataset.trail",
+          "object_type_id": "e3f79350-9d87-4ea8-9a29-7a9ac6b08101",
+          "object_type_name": "Trail",
+          "display_name": "Trail",
+          "plural_name": "Trails",
+          "plural_display_name": "Trails",
+          "primary_key": "trail_id",
+          "icon": "route",
+          "color": "#2B6CB0",
+          "editable": false,
+          "property_mapping": [
+            {
+              "source_field": "trail_id",
+              "target_property": "trailId",
+              "display_name": "Trail ID",
+              "property_type": "string",
+              "required": true,
+              "unique_constraint": true
+            },
+            {
+              "source_field": "trail_name",
+              "target_property": "trailName",
+              "display_name": "Trail Name",
+              "property_type": "string",
+              "required": true
+            },
+            {
+              "source_field": "source_file",
+              "target_property": "sourceFile",
+              "display_name": "Source File",
+              "property_type": "string",
+              "required": true
+            },
+            {
+              "source_field": "point_count",
+              "target_property": "pointCount",
+              "display_name": "Point Count",
+              "property_type": "integer",
+              "required": true
+            },
+            {
+              "source_field": "distance_miles",
+              "target_property": "distanceMiles",
+              "display_name": "Distance Miles",
+              "property_type": "double",
+              "required": true
+            },
+            {
+              "source_field": "elevation_gain_ft",
+              "target_property": "elevationGainFt",
+              "display_name": "Elevation Gain Ft",
+              "property_type": "double",
+              "required": true
+            },
+            {
+              "source_field": "min_elevation_ft",
+              "target_property": "minElevationFt",
+              "display_name": "Min Elevation Ft",
+              "property_type": "double"
+            },
+            {
+              "source_field": "max_elevation_ft",
+              "target_property": "maxElevationFt",
+              "display_name": "Max Elevation Ft",
+              "property_type": "double"
+            },
+            {
+              "source_field": "start_lat",
+              "target_property": "startLat",
+              "display_name": "Start Latitude",
+              "property_type": "double",
+              "required": true
+            },
+            {
+              "source_field": "start_lon",
+              "target_property": "startLon",
+              "display_name": "Start Longitude",
+              "property_type": "double",
+              "required": true
+            },
+            {
+              "source_field": "end_lat",
+              "target_property": "endLat",
+              "display_name": "End Latitude",
+              "property_type": "double",
+              "required": true
+            },
+            {
+              "source_field": "end_lon",
+              "target_property": "endLon",
+              "display_name": "End Longitude",
+              "property_type": "double",
+              "required": true
+            },
+            {
+              "source_field": "trailhead_geopoint",
+              "target_property": "trailheadGeopoint",
+              "display_name": "Trailhead GeoPoint",
+              "property_type": "geopoint",
+              "required": true
+            },
+            {
+              "source_field": "route_bbox",
+              "target_property": "routeBbox",
+              "display_name": "Route BBox",
+              "property_type": "bbox",
+              "required": true
+            },
+            {
+              "source_field": "route_geojson",
+              "target_property": "routeGeojson",
+              "display_name": "Route GeoJSON",
+              "property_type": "geoshape",
+              "required": true
+            }
+          ]
+        }
+      },
+      "input_ports": [
+        {
+          "id": "in",
+          "direction": "input",
+          "port_type": "dataset"
+        }
+      ],
+      "position": {
+        "x": 680,
+        "y": 248
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "gpx_fixture_input->parse_gpx_trails",
+      "source_node_id": "gpx_fixture_input",
+      "source_port_id": "out",
+      "target_node_id": "parse_gpx_trails",
+      "target_port_id": "in",
+      "edge_type": "data_dependency"
+    },
+    {
+      "id": "parse_gpx_trails->trail_dataset_output",
+      "source_node_id": "parse_gpx_trails",
+      "source_port_id": "out",
+      "target_node_id": "trail_dataset_output",
+      "target_port_id": "in",
+      "edge_type": "data_dependency"
+    },
+    {
+      "id": "parse_gpx_trails->trail_object_output",
+      "source_node_id": "parse_gpx_trails",
+      "source_port_id": "out",
+      "target_node_id": "trail_object_output",
+      "target_port_id": "in",
+      "edge_type": "data_dependency"
+    }
+  ],
+  "outputs": [
+    {
+      "id": "trail_dataset",
+      "name": "Trail dataset",
+      "output_type": "dataset_output",
+      "resource_id": "trail_dataset",
+      "produced_by": "trail_dataset_output"
+    },
+    {
+      "id": "trail_object_type",
+      "name": "Trail object type",
+      "output_type": "object_type_output",
+      "resource_id": "trail_object_type",
+      "produced_by": "trail_object_output"
+    }
+  ],
+  "version_metadata": {
+    "authoring_version": 1,
+    "created_from": "trail-running-demo-fixture-pack",
+    "updated_by": "DEMO.3"
+  }
+}

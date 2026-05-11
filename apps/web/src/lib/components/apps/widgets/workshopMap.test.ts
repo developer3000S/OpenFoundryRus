@@ -5,6 +5,7 @@ import type { QueryResult } from '@/lib/api/queries';
 
 import {
   buildFeaturesFromGeospatialLayer,
+  buildFeaturesFromLinkedEdges,
   buildFeaturesFromConfiguredLayers,
   buildFeaturesFromObjects,
   buildFeaturesFromQueryResult,
@@ -143,6 +144,71 @@ describe('Workshop Map widget feature shaping', () => {
     expect(features[0].properties.__of_object_id).toBe('trail-1');
     expect(features[0].properties.__of_label).toBe('Betasso Preserve');
     expect(features[0].properties.__of_object_json).toContain('"id":"trail-1"');
+  });
+
+  it('builds visual link features from linked object edges', () => {
+    const [trailLayer, coffeeLayer] = readMapLayerConfigs({
+      layers: [
+        {
+          id: 'trails',
+          title: 'Trails',
+          source: 'object_set',
+          source_variable_id: 'selected-trail',
+          geometry_type: 'point',
+          latitude_field: 'lat',
+          longitude_field: 'lon',
+          label_field: 'name',
+          color: '#7c3aed',
+        },
+        {
+          id: 'coffee',
+          title: 'Coffee shops',
+          source: 'object_set',
+          source_variable_id: 'linked-coffee',
+          geometry_type: 'point',
+          latitude_field: 'lat',
+          longitude_field: 'lon',
+          label_field: 'name',
+          color: '#0f766e',
+        },
+      ],
+    });
+    const features = [
+      ...buildFeaturesFromObjects([
+        {
+          id: 'trail-1',
+          object_type_id: 'Trail',
+          properties: { name: 'Mesa Trail', lat: 40, lon: -105 },
+          created_by: 'test',
+          created_at: '2026-05-11T00:00:00Z',
+          updated_at: '2026-05-11T00:00:00Z',
+        },
+      ], trailLayer),
+      ...buildFeaturesFromObjects([
+        {
+          id: 'coffee-1',
+          object_type_id: 'CoffeeShop',
+          properties: { name: 'Boxcar Coffee', lat: 40.01, lon: -105.01 },
+          created_by: 'test',
+          created_at: '2026-05-11T00:00:00Z',
+          updated_at: '2026-05-11T00:00:00Z',
+        },
+      ], coffeeLayer),
+    ];
+
+    const links = buildFeaturesFromLinkedEdges(features, [{
+      link_id: 'trail_near_coffee:trail-1:coffee-1',
+      link_type_id: 'trail_near_coffee',
+      source_object_id: 'trail-1',
+      target_object_id: 'coffee-1',
+      direction: 'outgoing',
+      depth: 1,
+    }], { layerId: 'links-coffee', layerTitle: 'Coffee links', color: '#ea580c' });
+
+    expect(links).toHaveLength(1);
+    expect(links[0].geometry).toEqual({ type: 'LineString', coordinates: [[-105, 40], [-105.01, 40.01]] });
+    expect(links[0].properties.__of_source).toBe('link');
+    expect(links[0].properties.__of_locked).toBe(true);
   });
 
   it('adds GeoJSON and MVT overlay layers to the MapLibre style', () => {

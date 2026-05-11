@@ -1,0 +1,109 @@
+{
+  "object_type_id": "weather-snapshot",
+  "object_type_rid": "ri.ontology.main.object-type.weather-snapshot",
+  "api_name": "WeatherSnapshot",
+  "display_name": "Weather Snapshot",
+  "plural_display_name": "Weather Snapshots",
+  "status": "experimental",
+  "icon": "cloud-sun",
+  "primary_key": "weather_snapshot_id",
+  "editable": true,
+  "properties": [
+    {
+      "id": "weather_snapshot_id",
+      "api_name": "weatherSnapshotId",
+      "display_name": "Weather Snapshot ID",
+      "base_type": "string",
+      "required": true,
+      "unique": true
+    },
+    {
+      "id": "trail_id",
+      "api_name": "trailId",
+      "display_name": "Trail ID",
+      "base_type": "string",
+      "required": true
+    },
+    {
+      "id": "trail_name",
+      "api_name": "trailName",
+      "display_name": "Trail Name",
+      "base_type": "string",
+      "required": true
+    },
+    {
+      "id": "latitude",
+      "api_name": "latitude",
+      "display_name": "Latitude",
+      "base_type": "double",
+      "required": true
+    },
+    {
+      "id": "longitude",
+      "api_name": "longitude",
+      "display_name": "Longitude",
+      "base_type": "double",
+      "required": true
+    },
+    {
+      "id": "trailhead_geopoint",
+      "api_name": "trailheadGeopoint",
+      "display_name": "Trailhead GeoPoint",
+      "base_type": "geopoint",
+      "required": true,
+      "metadata": {
+        "format": "lat,lon",
+        "crs": "EPSG:4326"
+      }
+    },
+    {
+      "id": "weather_time",
+      "api_name": "weatherTime",
+      "display_name": "Weather Time",
+      "base_type": "timestamp",
+      "required": true
+    },
+    {
+      "id": "temperature_f",
+      "api_name": "temperatureF",
+      "display_name": "Temperature F",
+      "base_type": "double",
+      "required": true
+    },
+    {
+      "id": "humidity_percent",
+      "api_name": "humidityPercent",
+      "display_name": "Humidity Percent",
+      "base_type": "double",
+      "required": true
+    },
+    {
+      "id": "wind_speed_mph",
+      "api_name": "windSpeedMph",
+      "display_name": "Wind Speed MPH",
+      "base_type": "double",
+      "required": true
+    },
+    {
+      "id": "wind_direction_degrees",
+      "api_name": "windDirectionDegrees",
+      "display_name": "Wind Direction Degrees",
+      "base_type": "double",
+      "required": true
+    },
+    {
+      "id": "source",
+      "api_name": "source",
+      "display_name": "Source",
+      "base_type": "string",
+      "required": true
+    },
+    {
+      "id": "writeback_status",
+      "api_name": "writebackStatus",
+      "display_name": "Writeback Status",
+      "base_type": "string",
+      "required": true
+    }
+  ]
+}

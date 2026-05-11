@@ -1,0 +1,62 @@
+[
+  {
+    "coffee_shop_id": "cafe-001",
+    "name": "Trailhead Espresso",
+    "latitude": 40.01781,
+    "longitude": -105.28341,
+    "neighborhood": "West Pearl",
+    "rating": 4.7,
+    "walkup_window": true,
+    "source": "synthetic"
+  },
+  {
+    "coffee_shop_id": "cafe-002",
+    "name": "Pine Ridge Coffee",
+    "latitude": 39.99042,
+    "longitude": -105.27918,
+    "neighborhood": "South Mesa",
+    "rating": 4.6,
+    "walkup_window": false,
+    "source": "synthetic"
+  },
+  {
+    "coffee_shop_id": "cafe-003",
+    "name": "Creekside Roasters",
+    "latitude": 40.01592,
+    "longitude": -105.2643,
+    "neighborhood": "Central Creek",
+    "rating": 4.5,
+    "walkup_window": true,
+    "source": "synthetic"
+  },
+  {
+    "coffee_shop_id": "cafe-004",
+    "name": "Switchback Coffee Bar",
+    "latitude": 39.98482,
+    "longitude": -105.29672,
+    "neighborhood": "Chautauqua",
+    "rating": 4.8,
+    "walkup_window": false,
+    "source": "synthetic"
+  },
+  {
+    "coffee_shop_id": "cafe-005",
+    "name": "Flatiron Pour House",
+    "latitude": 40.01938,
+    "longitude": -105.27614,
+    "neighborhood": "Downtown",
+    "rating": 4.4,
+    "walkup_window": true,
+    "source": "synthetic"
+  },
+  {
+    "coffee_shop_id": "cafe-006",
+    "name": "Alpenglow Cold Brew",
+    "latitude": 39.99756,
+    "longitude": -105.28991,
+    "neighborhood": "University Hill",
+    "rating": 4.3,
+    "walkup_window": false,
+    "source": "synthetic"
+  }
+]

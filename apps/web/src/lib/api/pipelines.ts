@@ -30,6 +30,19 @@ export interface PipelineIRSchema {
   metadata?: Record<string, unknown>;
 }
 
+export interface ParseGPXUploadResponse {
+  row: Record<string, unknown>;
+  schema: PipelineIRField[];
+  trail: Record<string, unknown>;
+  meta: Record<string, unknown>;
+}
+
+export interface ParseGPXUploadOptions {
+  trailId?: string;
+  trailName?: string;
+  sourceName?: string;
+}
+
 export interface PipelineIRValidationError {
   node_id?: string;
   edge_id?: string;
@@ -147,6 +160,33 @@ export function pipelineDAGWithNodes(dag: PipelineDAG | null | undefined, nodes:
     return { ...dag, nodes };
   }
   return nodes;
+}
+
+export async function parseGPXUpload(file: File, options: ParseGPXUploadOptions = {}) {
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+  if (options.trailId) formData.append('trail_id', options.trailId);
+  if (options.trailName) formData.append('trail_name', options.trailName);
+  if (options.sourceName) formData.append('source_name', options.sourceName);
+
+  const response = await fetch('/api/v1/pipelines/geospatial/gpx/parse', {
+    method: 'POST',
+    headers: api.authorizationHeaders(),
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    const raw = error?.error ?? error?.message;
+    const message = typeof raw === 'string'
+      ? raw
+      : raw && typeof raw === 'object' && typeof raw.message === 'string'
+        ? raw.message
+        : response.statusText || 'GPX upload failed';
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<ParseGPXUploadResponse>;
 }
 
 export type PipelineType =

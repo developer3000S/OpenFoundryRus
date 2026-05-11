@@ -5,6 +5,10 @@ import {
   type ObjectInstance,
   type ObjectQueryFilter,
   type ObjectQuerySort,
+  type ObjectSearchAroundQuery,
+  type LinkedObjectEdge,
+  type ObjectKnnQuery,
+  type ObjectKnnResult,
   type ObjectSetAggregationResult,
   type ObjectSetAggregationSpec,
   type ObjectSetEvaluationResponse,
@@ -37,10 +41,12 @@ export interface WorkshopObjectSetExecutionResult {
   total: number;
   count: number;
   objectTypeId: string;
-  source: 'object_type' | 'object_set' | 'selected_objects' | 'saved_object_set' | 'search_around';
+  source: 'object_type' | 'object_set' | 'selected_objects' | 'saved_object_set' | 'search_around' | 'knn';
   filters: WorkshopVariableFilter[];
   sort: ObjectQuerySort[];
   aggregations: ObjectSetAggregationResult[];
+  linkedEdges: LinkedObjectEdge[];
+  knnResults: ObjectKnnResult[];
   contract: WorkshopObjectSetQueryContract;
 }
 
@@ -52,6 +58,8 @@ export interface WorkshopObjectSetQueryContract {
   include_count: boolean;
   aggregations: ObjectSetAggregationSpec[];
   selected_object_ids?: string[];
+  search_around?: ObjectSearchAroundQuery;
+  knn?: ObjectKnnQuery;
 }
 
 export interface WorkshopObjectSetExecutorDependencies {
@@ -183,8 +191,11 @@ async function executeObjectSetInternal(
 
   const searchAround = readSearchAroundConfig(variable);
   if (searchAround) {
-    const base = await executeObjectTypeObjectSet(objectTypeId, allFilters, limit, sort, aggregations, includeCount, deps);
     const anchors = await executeAnchorObjectSet(searchAround, variables, request.engine, limit, deps, seen);
+    if (searchAround.kind === 'linked') {
+      return executeLinkedSearchAroundObjectSet(objectTypeId, allFilters, limit, sort, aggregations, includeCount, anchors, searchAround, deps);
+    }
+    const base = await executeObjectTypeObjectSet(objectTypeId, allFilters, limit, sort, aggregations, includeCount, deps);
     const filtered = applySearchAround(base.data, anchors, searchAround);
     const ordered = applyObjectSetSort(filtered, sort);
     return objectSetResult({
@@ -199,6 +210,11 @@ async function executeObjectSetInternal(
       aggregations,
       aggregationRows: filtered,
     });
+  }
+
+  const knn = readKNNConfig(variable, limit);
+  if (knn) {
+    return executeKNNObjectSet(objectTypeId, allFilters, limit, sort, aggregations, includeCount, knn, variables, request.engine, deps, seen);
   }
 
   const savedObjectSetId = savedObjectSetIdForVariable(variable);
@@ -266,6 +282,65 @@ async function executeObjectSetInternal(
   return executeObjectTypeObjectSet(objectTypeId, allFilters, limit, sort, aggregations, includeCount, deps);
 }
 
+async function executeKNNObjectSet(
+  objectTypeId: string,
+  filters: WorkshopVariableFilter[],
+  limit: number,
+  sort: ObjectQuerySort[],
+  aggregations: ObjectSetAggregationSpec[],
+  includeCount: boolean,
+  knn: KNNConfig,
+  variables: WorkshopVariableLike[],
+  engine: WorkshopVariableEngineResult | null | undefined,
+  deps: WorkshopObjectSetExecutorDependencies,
+  seen: Set<string>,
+): Promise<WorkshopObjectSetExecutionResult> {
+  const vector = await resolveKNNVector(knn, variables, engine, deps, seen, limit);
+  const knnQuery: ObjectKnnQuery = {
+    property_name: knn.propertyName,
+    vector,
+    k: knn.k,
+    metric: knn.metric,
+  };
+  if (!objectTypeId || vector.length === 0) {
+    return objectSetResult({
+      data: [],
+      total: 0,
+      objectTypeId,
+      source: 'knn',
+      filters,
+      sort,
+      limit,
+      includeCount,
+      aggregations,
+      knn: knnQuery,
+    });
+  }
+  const response = await deps.queryObjects(objectTypeId, {
+    filters: objectSetQueryFilters(filters),
+    sort,
+    per_page: limit,
+    limit,
+    include_count: includeCount,
+    aggregations,
+    knn: knnQuery,
+  });
+  return objectSetResult({
+    data: response.data,
+    total: response.count ?? response.total,
+    objectTypeId,
+    source: 'knn',
+    filters,
+    sort,
+    limit,
+    includeCount,
+    aggregations,
+    responseAggregations: response.aggregations,
+    knnResults: response.knn_results ?? [],
+    knn: response.object_set?.knn ?? knnQuery,
+  });
+}
+
 async function executeObjectTypeObjectSet(
   objectTypeId: string,
   filters: WorkshopVariableFilter[],
@@ -310,6 +385,64 @@ async function executeObjectTypeObjectSet(
   });
 }
 
+async function executeLinkedSearchAroundObjectSet(
+  objectTypeId: string,
+  filters: WorkshopVariableFilter[],
+  limit: number,
+  sort: ObjectQuerySort[],
+  aggregations: ObjectSetAggregationSpec[],
+  includeCount: boolean,
+  anchors: ObjectInstance[],
+  searchAround: LinkedSearchAroundConfig,
+  deps: WorkshopObjectSetExecutorDependencies,
+): Promise<WorkshopObjectSetExecutionResult> {
+  const sourceObjectIds = uniqueNonEmpty(anchors.map((object) => object.id));
+  const searchAroundQuery: ObjectSearchAroundQuery = {
+    source_object_ids: sourceObjectIds,
+    link_type_ids: searchAround.linkTypeIds,
+    direction: searchAround.direction,
+    depth: searchAround.depth,
+    target_object_type_id: objectTypeId,
+  };
+  if (!objectTypeId || sourceObjectIds.length === 0 || searchAround.linkTypeIds.length === 0) {
+    return objectSetResult({
+      data: [],
+      total: 0,
+      objectTypeId,
+      source: 'search_around',
+      filters,
+      sort,
+      limit,
+      includeCount,
+      aggregations,
+      searchAround: searchAroundQuery,
+    });
+  }
+  const response = await deps.queryObjects(objectTypeId, {
+    filters: objectSetQueryFilters(filters),
+    sort,
+    per_page: limit,
+    limit,
+    include_count: includeCount,
+    aggregations,
+    search_around: searchAroundQuery,
+  });
+  return objectSetResult({
+    data: response.data,
+    total: response.count ?? response.total,
+    objectTypeId,
+    source: 'search_around',
+    filters,
+    sort,
+    limit,
+    includeCount,
+    aggregations,
+    responseAggregations: response.aggregations,
+    linkedEdges: response.linked_edges ?? [],
+    searchAround: response.object_set?.search_around ?? searchAroundQuery,
+  });
+}
+
 function objectSetResult({
   data,
   total,
@@ -323,6 +456,10 @@ function objectSetResult({
   aggregationRows,
   responseAggregations,
   selectedObjectIds,
+  linkedEdges,
+  searchAround,
+  knnResults,
+  knn,
 }: {
   data: ObjectInstance[];
   total: number;
@@ -336,6 +473,10 @@ function objectSetResult({
   aggregationRows?: ObjectInstance[];
   responseAggregations?: ObjectSetAggregationResult[];
   selectedObjectIds?: string[];
+  linkedEdges?: LinkedObjectEdge[];
+  searchAround?: ObjectSearchAroundQuery;
+  knnResults?: ObjectKnnResult[];
+  knn?: ObjectKnnQuery;
 }): WorkshopObjectSetExecutionResult {
   const normalizedFilters = objectSetQueryFilters(filters);
   const normalizedSort = compactSorts(sort);
@@ -350,6 +491,8 @@ function objectSetResult({
     filters,
     sort: normalizedSort,
     aggregations: aggregationResults,
+    linkedEdges: linkedEdges ?? [],
+    knnResults: knnResults ?? [],
     contract: {
       object_type_id: objectTypeId,
       filters: normalizedFilters,
@@ -358,6 +501,8 @@ function objectSetResult({
       include_count: includeCount,
       aggregations: normalizedAggregations,
       ...(selectedObjectIds && selectedObjectIds.length > 0 ? { selected_object_ids: selectedObjectIds } : {}),
+      ...(searchAround ? { search_around: searchAround } : {}),
+      ...(knn ? { knn } : {}),
     },
   };
 }
@@ -417,6 +562,12 @@ function addString(ids: Set<string>, value: unknown) {
 function addStringArray(ids: Set<string>, value: unknown) {
   if (!Array.isArray(value)) return;
   for (const entry of value) addString(ids, entry);
+}
+
+function appendString(values: string[], value: unknown) {
+  if (typeof value !== 'string') return;
+  const trimmed = value.trim();
+  if (trimmed) values.push(trimmed);
 }
 
 function objectSetQuerySorts(variable: WorkshopVariableLike | null | undefined, explicit: unknown): ObjectQuerySort[] {
@@ -603,8 +754,14 @@ function objectSetEvaluationToObjects(response: ObjectSetEvaluationResponse, fal
   });
 }
 
-interface SearchAroundConfig {
+type SearchAroundConfig = GeoSearchAroundConfig | LinkedSearchAroundConfig;
+
+interface BaseSearchAroundConfig {
   sourceVariableId: string;
+}
+
+interface GeoSearchAroundConfig extends BaseSearchAroundConfig {
+  kind: 'geospatial';
   radius: number;
   units: 'meters' | 'km' | 'miles';
   latitudeProperty: string;
@@ -613,10 +770,86 @@ interface SearchAroundConfig {
   sourceLongitudeProperty: string;
 }
 
+interface LinkedSearchAroundConfig extends BaseSearchAroundConfig {
+  kind: 'linked';
+  linkTypeIds: string[];
+  direction: 'outgoing' | 'incoming' | 'both';
+  depth: number;
+}
+
+interface KNNConfig {
+  propertyName: string;
+  vector: number[];
+  sourceVariableId: string;
+  sourcePropertyName: string;
+  k: number;
+  metric: 'cosine' | 'euclidean' | 'dot';
+}
+
+function readKNNConfig(variable: WorkshopVariableLike | null | undefined, fallbackK: number): KNNConfig | null {
+  const raw = variable?.metadata?.knn ?? variable?.metadata?.nearest_neighbors ?? variable?.metadata?.nearestNeighbors;
+  if (!isRecord(raw)) return null;
+  const propertyName = stringFromRecord(raw, 'property_name') ||
+    stringFromRecord(raw, 'property') ||
+    stringFromRecord(raw, 'vector_property') ||
+    stringFromRecord(raw, 'embedding_property');
+  if (!propertyName) return null;
+  const vector = readNumericVector(raw.vector ?? raw.query_vector ?? raw.queryVector);
+  const sourceVariableId = stringFromRecord(raw, 'source_variable_id') || stringFromRecord(raw, 'sourceVariableId');
+  if (vector.length === 0 && !sourceVariableId) return null;
+  const sourcePropertyName = stringFromRecord(raw, 'source_property_name') ||
+    stringFromRecord(raw, 'source_vector_property') ||
+    stringFromRecord(raw, 'source_embedding_property') ||
+    propertyName;
+  return {
+    propertyName,
+    vector,
+    sourceVariableId,
+    sourcePropertyName,
+    k: clampKNNK(numberFromRecord(raw, 'k') ?? numberFromRecord(raw, 'k_value') ?? numberFromRecord(raw, 'kValue'), fallbackK),
+    metric: normalizeKNNMetric(stringFromRecord(raw, 'metric')),
+  };
+}
+
+async function resolveKNNVector(
+  config: KNNConfig,
+  variables: WorkshopVariableLike[],
+  engine: WorkshopVariableEngineResult | null | undefined,
+  deps: WorkshopObjectSetExecutorDependencies,
+  seen: Set<string>,
+  limit: number,
+): Promise<number[]> {
+  if (config.vector.length > 0) return config.vector;
+  if (!config.sourceVariableId || seen.has(config.sourceVariableId)) return [];
+  seen.add(config.sourceVariableId);
+  const sourceVariable = variables.find((entry) => entry.id === config.sourceVariableId) ?? null;
+  if (!sourceVariable) return [];
+  const source = await executeObjectSetInternal({
+    variable: sourceVariable,
+    variables,
+    engine,
+    objectTypeId: sourceVariable.object_type_id,
+    limit,
+  }, deps, seen);
+  return readNumericVector(source.data[0]?.properties?.[config.sourcePropertyName]);
+}
+
 function readSearchAroundConfig(variable: WorkshopVariableLike | null | undefined): SearchAroundConfig | null {
   const raw = variable?.metadata?.search_around;
   if (!isRecord(raw)) return null;
   const sourceVariableId = stringFromRecord(raw, 'source_variable_id') || stringFromRecord(raw, 'sourceVariableId');
+  const linkTypeIds = readStringList(raw.link_type_ids ?? raw.linkTypeIds ?? raw.link_types ?? raw.linkTypes);
+  appendString(linkTypeIds, raw.link_type_id);
+  appendString(linkTypeIds, raw.linkTypeId);
+  if (sourceVariableId && linkTypeIds.length > 0) {
+    return {
+      kind: 'linked',
+      sourceVariableId,
+      linkTypeIds: uniqueNonEmpty(linkTypeIds),
+      direction: normalizeSearchAroundDirection(stringFromRecord(raw, 'direction')),
+      depth: clampSearchAroundDepth(numberFromRecord(raw, 'depth') ?? 1),
+    };
+  }
   const radius = numberFromRecord(raw, 'radius') ?? numberFromRecord(raw, 'radius_miles') ?? numberFromRecord(raw, 'radius_km');
   if (!sourceVariableId || radius === null || radius <= 0) return null;
   const explicitUnits = stringFromRecord(raw, 'units').toLowerCase();
@@ -628,6 +861,7 @@ function readSearchAroundConfig(variable: WorkshopVariableLike | null | undefine
         ? 'km'
         : 'miles';
   return {
+    kind: 'geospatial',
     sourceVariableId,
     radius,
     units,
@@ -639,6 +873,7 @@ function readSearchAroundConfig(variable: WorkshopVariableLike | null | undefine
 }
 
 function applySearchAround(objects: ObjectInstance[], anchors: ObjectInstance[], config: SearchAroundConfig) {
+  if (config.kind !== 'geospatial') return [];
   if (anchors.length === 0) return [];
   const radiusMeters = config.units === 'meters' ? config.radius : config.units === 'km' ? config.radius * 1000 : config.radius * 1609.344;
   const anchorPoints = anchors
@@ -654,6 +889,18 @@ function applySearchAround(objects: ObjectInstance[], anchors: ObjectInstance[],
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
     return anchorPoints.some((anchor) => haversineMeters(anchor.lat, anchor.lon, lat, lon) <= radiusMeters);
   });
+}
+
+function normalizeSearchAroundDirection(value: string): 'outgoing' | 'incoming' | 'both' {
+  const normalized = value.toLowerCase().trim();
+  if (normalized === 'incoming' || normalized === 'inbound') return 'incoming';
+  if (normalized === 'both' || normalized === 'any' || normalized === 'all') return 'both';
+  return 'outgoing';
+}
+
+function clampSearchAroundDepth(value: number) {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(5, Math.trunc(value)));
 }
 
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -690,6 +937,52 @@ function clampLimit(limit: number | undefined) {
 function stringFromRecord(record: Record<string, unknown> | undefined, key: string): string {
   const value = record?.[key];
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function readStringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string').map((entry) => entry.trim()).filter(Boolean);
+  if (typeof value === 'string') return value.split(',').map((entry) => entry.trim()).filter(Boolean);
+  return [];
+}
+
+function readNumericVector(value: unknown): number[] {
+  if (Array.isArray(value)) {
+    const out = value.map((entry) => Number(entry));
+    return out.every((entry) => Number.isFinite(entry)) ? out : [];
+  }
+  if (typeof value === 'string') {
+    try {
+      return readNumericVector(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function clampKNNK(value: number | null, fallback: number) {
+  const raw = value ?? fallback;
+  if (!Number.isFinite(raw) || raw <= 0) return Math.min(10, DEFAULT_LIMIT);
+  return Math.max(1, Math.min(100, Math.trunc(raw)));
+}
+
+function normalizeKNNMetric(value: string): 'cosine' | 'euclidean' | 'dot' {
+  const normalized = value.toLowerCase().trim();
+  if (normalized === 'euclidean' || normalized === 'l2' || normalized === 'distance') return 'euclidean';
+  if (normalized === 'dot' || normalized === 'dot_product' || normalized === 'inner_product') return 'dot';
+  return 'cosine';
+}
+
+function uniqueNonEmpty(values: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
 }
 
 function numberFromRecord(record: Record<string, unknown>, key: string): number | null {

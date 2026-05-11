@@ -1,8 +1,13 @@
 package actions
 
 import (
+	"encoding/json"
 	"math"
+	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/models"
 )
@@ -119,5 +124,68 @@ func TestScanJSONStringField(t *testing.T) {
 	}
 	if v, ok := scanJSONNumberField(body, "duration_ms"); !ok || v != 42 {
 		t.Errorf("duration_ms: %v, %v", v, ok)
+	}
+}
+
+func TestValidateActionDefinitionAcceptsFunctionPackageRule(t *testing.T) {
+	t.Parallel()
+	state := newTestState(t)
+	objectTypeID := uuid.New()
+	packageID := uuid.New()
+	seedObjectTypeDefinition(t, state, objectTypeID)
+	seedFunctionPackageDefinition(t, state, models.FunctionPackage{
+		ID:      packageID,
+		Name:    "trail_effort",
+		Version: "1.0.0",
+		Runtime: "python",
+		Source:  "result = {'ok': True}",
+	})
+
+	config, _ := json.Marshal(map[string]any{"function_package_id": packageID})
+	err := validateActionDefinition(
+		httptest.NewRequest("POST", "/ontology/actions", nil),
+		state,
+		objectTypeID,
+		"invoke_function",
+		nil,
+		nil,
+		config,
+	)
+	if err != nil {
+		t.Fatalf("validateActionDefinition: %v", err)
+	}
+}
+
+func TestValidateActionDefinitionRejectsMixedFunctionAndOntologyRules(t *testing.T) {
+	t.Parallel()
+	state := newTestState(t)
+	objectTypeID := uuid.New()
+	packageID := uuid.New()
+	seedObjectTypeDefinition(t, state, objectTypeID)
+	seedFunctionPackageDefinition(t, state, models.FunctionPackage{
+		ID:      packageID,
+		Name:    "trail_effort",
+		Version: "1.0.0",
+		Runtime: "python",
+		Source:  "result = {'ok': True}",
+	})
+
+	config, _ := json.Marshal(map[string]any{
+		"operation": map[string]any{
+			"function_package_id": packageID,
+			"property_mappings":   []map[string]any{{"property_name": "status", "input_name": "status"}},
+		},
+	})
+	err := validateActionDefinition(
+		httptest.NewRequest("POST", "/ontology/actions", nil),
+		state,
+		objectTypeID,
+		"invoke_function",
+		nil,
+		nil,
+		config,
+	)
+	if err == nil || !strings.Contains(err.Error(), "function rule cannot be combined with other Ontology rules") {
+		t.Fatalf("expected mixed function/rule rejection, got %v", err)
 	}
 }

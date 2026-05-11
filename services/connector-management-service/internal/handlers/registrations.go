@@ -3,14 +3,20 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -678,8 +684,25 @@ func (h *Handlers) TestConnection(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": result.Success, "message": result.Message, "latency_ms": latency, "details": result.Details})
 }
 
+type webhookHistoryAppender interface {
+	AppendWebhookHistory(ctx context.Context, body *models.CreateWebhookHistoryEntry) (*models.WebhookHistoryEntry, error)
+}
+
+type webhookHistoryLister interface {
+	ListWebhookHistory(ctx context.Context, sourceID uuid.UUID, limit int) ([]models.WebhookHistoryEntry, error)
+}
+
+type inboundListenerEventAppender interface {
+	AppendInboundListenerEvent(ctx context.Context, body *models.CreateInboundListenerEvent) (*models.InboundListenerEvent, error)
+}
+
+type inboundListenerEventLister interface {
+	ListInboundListenerEvents(ctx context.Context, sourceID uuid.UUID, limit int) ([]models.InboundListenerEvent, error)
+}
+
 func (h *Handlers) InvokeWebhook(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireClaims(w, r); !ok {
+	claims, ok := requireClaims(w, r)
+	if !ok {
 		return
 	}
 	id, _, err := routeUUIDParam(r, "id")
@@ -696,53 +719,667 @@ func (h *Handlers) InvokeWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusNotFound, "webhook not found")
 		return
 	}
+	if c.OwnerID != claims.Sub && !claims.HasRole("admin") && !claims.HasPermission("connections", "write") && !claims.HasPermission("webhooks", "invoke") {
+		writeJSONErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	var body models.InvokeWebhookRequest
+	r.Body = http.MaxBytesReader(w, r.Body, int64(models.DefaultWebhookMaxInputBytes))
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSONErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	var def models.WebhookDefinition
-	if err := json.Unmarshal(c.Config, &def); err != nil {
+	def, source, err := webhookDefinitionForConnection(c)
+	if err != nil {
 		writeJSONErr(w, http.StatusBadRequest, "invalid webhook config")
 		return
 	}
-	method := strings.ToUpper(strings.TrimSpace(def.Method))
-	if method == "" {
-		method = http.MethodPost
+	startedAt := time.Now().UTC()
+	recordFailure := func(status int, msg string, callCount int, upstreamStatus *uint16) {
+		_ = h.recordWebhookHistory(r.Context(), id, claims.Sub, def, body.Inputs, "failed", upstreamStatus, nil, msg, startedAt, callCount)
+		writeJSONErr(w, status, msg)
 	}
-	u, err := url.Parse(def.URL)
-	if err != nil || u.Scheme == "" {
-		writeJSONErr(w, http.StatusBadRequest, "invalid webhook url")
+	if source != nil && !source.Permissions.Invokable {
+		recordFailure(http.StatusForbidden, "source is not invokable", 0, nil)
 		return
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(r.Context(), method, def.URL, bytes.NewReader(body.Inputs))
+	if err := models.ValidateWebhookInvocation(def, body.Inputs); err != nil {
+		recordFailure(http.StatusBadRequest, models.SanitizeWebhookDiagnostic(err.Error()), 0, nil)
+		return
+	}
+	release, retryAfter, ok := defaultWebhookInvocationLimiter.acquire(id, def)
+	if !ok {
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
+		recordFailure(http.StatusTooManyRequests, "webhook invocation limit exceeded", 0, nil)
+		return
+	}
+	defer release()
+	timeout := time.Duration(def.TimeoutMS) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	state := map[string]any{}
+	results := make([]models.WebhookCallResult, 0, len(def.Calls))
+	for _, call := range def.Calls {
+		built, err := models.BuildWebhookRequest(def, source, call, body.Inputs, state)
+		if err != nil {
+			recordFailure(http.StatusBadRequest, "invalid webhook request: "+models.SanitizeWebhookDiagnostic(err.Error()), len(results), nil)
+			return
+		}
+		if err := validateWebhookBuiltRequest(source, built); err != nil {
+			recordFailure(http.StatusForbidden, models.SanitizeWebhookDiagnostic(err.Error()), len(results), nil)
+			return
+		}
+		req, err := http.NewRequestWithContext(r.Context(), built.Method, built.URL, bytes.NewReader(built.Body))
+		if err != nil {
+			recordFailure(http.StatusBadRequest, "invalid webhook request", len(results), nil)
+			return
+		}
+		for k, v := range built.Headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			recordFailure(http.StatusBadGateway, "webhook upstream error: "+models.SanitizeWebhookDiagnostic(err.Error()), len(results)+1, nil)
+			return
+		}
+		b, tooLarge := readWebhookResponseBody(resp.Body, def.Limits.MaxResponseBytes)
+		_ = resp.Body.Close()
+		if tooLarge {
+			upstreamStatus := uint16(resp.StatusCode)
+			recordFailure(http.StatusBadGateway, "webhook response exceeded max_response_bytes", len(results)+1, &upstreamStatus)
+			return
+		}
+		var val json.RawMessage = []byte(`null`)
+		if len(strings.TrimSpace(string(b))) > 0 {
+			val = b
+		}
+		result := models.WebhookCallResult{CallID: call.ID, Status: uint16(resp.StatusCode), Response: val}
+		results = append(results, result)
+		if err := models.CaptureWebhookCallResult(def, call, result, state); err != nil {
+			recordFailure(http.StatusBadGateway, "webhook response extraction failed: "+models.SanitizeWebhookDiagnostic(err.Error()), len(results), &result.Status)
+			return
+		}
+	}
+	out, err := models.ExtractWebhookOutputs(def, results)
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid webhook request")
+		var upstreamStatus *uint16
+		if len(results) > 0 {
+			upstreamStatus = &results[len(results)-1].Status
+		}
+		recordFailure(http.StatusBadGateway, "webhook output extraction failed: "+models.SanitizeWebhookDiagnostic(err.Error()), len(results), upstreamStatus)
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range def.Headers {
-		req.Header.Set(k, v)
+	final := json.RawMessage(`null`)
+	status := uint16(0)
+	if len(results) > 0 {
+		final = results[len(results)-1].Response
+		status = results[len(results)-1].Status
 	}
-	resp, err := client.Do(req)
+	var upstreamStatus *uint16
+	if status > 0 {
+		upstreamStatus = &status
+	}
+	history := h.recordWebhookHistory(r.Context(), id, claims.Sub, def, body.Inputs, "succeeded", upstreamStatus, out, "", startedAt, len(results))
+	writeJSON(w, http.StatusOK, models.InvokeWebhookResponse{Status: status, Response: final, OutputParameters: out, History: history})
+}
+
+func (h *Handlers) ListWebhookHistory(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	id, _, err := routeUUIDParam(r, "id", "source_id")
 	if err != nil {
-		writeJSONErr(w, http.StatusBadGateway, "webhook upstream error: "+err.Error())
+		writeJSONErr(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	var val json.RawMessage = []byte(`null`)
-	if len(strings.TrimSpace(string(b))) > 0 {
-		val = b
+	if h.Repo == nil {
+		writeRoutePending(w, http.StatusServiceUnavailable, "repository_unavailable", "connection repository is not configured")
+		return
 	}
-	var decoded map[string]json.RawMessage
-	_ = json.Unmarshal(val, &decoded)
-	out := json.RawMessage(`{}`)
-	if decoded != nil && decoded["output_parameters"] != nil {
-		out = decoded["output_parameters"]
+	c, err := h.Repo.GetConnection(r.Context(), id)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to load webhook")
+		return
 	}
-	writeJSON(w, http.StatusOK, models.InvokeWebhookResponse{Status: uint16(resp.StatusCode), Response: val, OutputParameters: out})
+	if c == nil {
+		writeJSONErr(w, http.StatusNotFound, "webhook not found")
+		return
+	}
+	if c.OwnerID != claims.Sub && !claims.HasRole("admin") && !claims.HasPermission("connections", "read") && !claims.HasPermission("webhooks", "read") {
+		writeJSONErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	lister, ok := h.Repo.(webhookHistoryLister)
+	if !ok {
+		writeRoutePending(w, http.StatusServiceUnavailable, "webhook_history_repository_unavailable", "webhook history repository is not configured")
+		return
+	}
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			writeJSONErr(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+		limit = parsed
+	}
+	items, err := lister.ListWebhookHistory(r.Context(), id, limit)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to list webhook history")
+		return
+	}
+	writeJSON(w, http.StatusOK, models.ListResponse[models.WebhookHistoryEntry]{Items: items})
+}
+
+func (h *Handlers) ReceiveInboundListener(w http.ResponseWriter, r *http.Request) {
+	id, _, err := routeUUIDParam(r, "id", "source_id")
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if h.Repo == nil {
+		writeRoutePending(w, http.StatusServiceUnavailable, "repository_unavailable", "connection repository is not configured")
+		return
+	}
+	appender, ok := h.Repo.(inboundListenerEventAppender)
+	if !ok {
+		writeRoutePending(w, http.StatusServiceUnavailable, "inbound_listener_repository_unavailable", "inbound listener repository is not configured")
+		return
+	}
+	c, err := h.Repo.GetConnection(r.Context(), id)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to load listener source")
+		return
+	}
+	if c == nil {
+		writeJSONErr(w, http.StatusNotFound, "listener source not found")
+		return
+	}
+	listenerID := strings.TrimSpace(chi.URLParam(r, "listener_id"))
+	def, err := inboundListenerDefinitionForConnection(c, listenerID)
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	limit := def.Limits.MaxPayloadBytes
+	if limit <= 0 {
+		limit = models.DefaultInboundListenerMaxPayloadBytes
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, int64(limit))
+	payload, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "listener payload exceeded max_payload_bytes")
+		return
+	}
+	payload = bytes.TrimSpace(payload)
+	if len(payload) == 0 {
+		writeJSONErr(w, http.StatusBadRequest, "listener payload is empty")
+		return
+	}
+	if !json.Valid(payload) {
+		writeJSONErr(w, http.StatusBadRequest, "listener payload must be valid JSON")
+		return
+	}
+	signatureVerified, authErr := verifyInboundListenerAuth(def, r.Header, payload)
+	if authErr != nil {
+		status := http.StatusUnauthorized
+		var typed inboundListenerAuthError
+		if errors.As(authErr, &typed) {
+			status = typed.status
+		}
+		writeJSONErr(w, status, authErr.Error())
+		return
+	}
+	headers := sanitizeInboundListenerHeaders(r.Header, def.Auth.Header)
+	event, err := appender.AppendInboundListenerEvent(r.Context(), &models.CreateInboundListenerEvent{
+		SourceID:          id,
+		ListenerID:        def.ID,
+		EventID:           inboundListenerExternalEventID(r.Header, payload),
+		Status:            "accepted",
+		SignatureVerified: signatureVerified,
+		Payload:           append(json.RawMessage(nil), payload...),
+		Headers:           headers,
+		Destination:       def.Destination,
+	})
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to store inbound listener event")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, models.ReceiveInboundListenerResponse{
+		EventID:           event.ID,
+		SourceID:          event.SourceID,
+		ListenerID:        event.ListenerID,
+		Status:            event.Status,
+		SignatureVerified: event.SignatureVerified,
+		Destination:       event.Destination,
+	})
+}
+
+func (h *Handlers) ListInboundListenerEvents(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireClaims(w, r)
+	if !ok {
+		return
+	}
+	id, _, err := routeUUIDParam(r, "id", "source_id")
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if h.Repo == nil {
+		writeRoutePending(w, http.StatusServiceUnavailable, "repository_unavailable", "connection repository is not configured")
+		return
+	}
+	c, err := h.Repo.GetConnection(r.Context(), id)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to load listener source")
+		return
+	}
+	if c == nil {
+		writeJSONErr(w, http.StatusNotFound, "listener source not found")
+		return
+	}
+	if c.OwnerID != claims.Sub && !claims.HasRole("admin") && !claims.HasPermission("connections", "read") && !claims.HasPermission("listeners", "read") {
+		writeJSONErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	lister, ok := h.Repo.(inboundListenerEventLister)
+	if !ok {
+		writeRoutePending(w, http.StatusServiceUnavailable, "inbound_listener_repository_unavailable", "inbound listener repository is not configured")
+		return
+	}
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			writeJSONErr(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+		limit = parsed
+	}
+	items, err := lister.ListInboundListenerEvents(r.Context(), id, limit)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, "failed to list inbound listener events")
+		return
+	}
+	writeJSON(w, http.StatusOK, models.ListResponse[models.InboundListenerEvent]{Items: items})
+}
+
+func (h *Handlers) recordWebhookHistory(ctx context.Context, sourceID uuid.UUID, userID uuid.UUID, def *models.WebhookDefinition, inputs json.RawMessage, status string, httpStatus *uint16, outputs json.RawMessage, errorMessage string, startedAt time.Time, callCount int) json.RawMessage {
+	if def == nil {
+		return json.RawMessage(`{"enabled":false,"stored":false}`)
+	}
+	retentionDays := def.History.RetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	summary := map[string]any{
+		"enabled":        def.History.Enabled,
+		"retention_days": retentionDays,
+		"stored":         false,
+		"stored_inputs":  def.History.Enabled && def.History.StoreInputs,
+		"stored_outputs": def.History.Enabled && def.History.StoreOutputs,
+		"call_count":     callCount,
+		"status":         status,
+	}
+	if !def.History.Enabled {
+		return marshalWebhookHistorySummary(summary)
+	}
+	appender, ok := h.Repo.(webhookHistoryAppender)
+	if !ok {
+		summary["error"] = "history repository unavailable"
+		return marshalWebhookHistorySummary(summary)
+	}
+	finishedAt := time.Now().UTC()
+	if startedAt.IsZero() {
+		startedAt = finishedAt
+	}
+	var storedInputs json.RawMessage
+	if def.History.StoreInputs && len(inputs) > 0 {
+		storedInputs = append(json.RawMessage(nil), inputs...)
+	}
+	var storedOutputs json.RawMessage
+	if def.History.StoreOutputs && len(outputs) > 0 {
+		storedOutputs = append(json.RawMessage(nil), outputs...)
+	}
+	visibility := "hidden"
+	if def.History.StoreInputs {
+		visibility = "stored"
+	}
+	var errPtr *string
+	if strings.TrimSpace(errorMessage) != "" {
+		sanitized := models.SanitizeWebhookDiagnostic(errorMessage)
+		errPtr = &sanitized
+	}
+	entry, err := appender.AppendWebhookHistory(ctx, &models.CreateWebhookHistoryEntry{
+		SourceID:   sourceID,
+		UserID:     userID,
+		Status:     status,
+		HTTPStatus: httpStatus,
+		InputPolicy: models.WebhookHistoryInputPolicy{
+			StoreInputs:  def.History.StoreInputs,
+			StoreOutputs: def.History.StoreOutputs,
+			Visibility:   visibility,
+		},
+		Inputs:             storedInputs,
+		OutputParameters:   storedOutputs,
+		Error:              errPtr,
+		CallCount:          callCount,
+		StartedAt:          startedAt,
+		FinishedAt:         finishedAt,
+		RetentionExpiresAt: finishedAt.Add(time.Duration(retentionDays) * 24 * time.Hour),
+	})
+	if err != nil {
+		summary["error"] = "history persist failed"
+		return marshalWebhookHistorySummary(summary)
+	}
+	summary["stored"] = true
+	summary["entry_id"] = entry.ID
+	summary["created_at"] = entry.CreatedAt
+	summary["retention_expires_at"] = entry.RetentionExpiresAt
+	return marshalWebhookHistorySummary(summary)
+}
+
+func marshalWebhookHistorySummary(summary map[string]any) json.RawMessage {
+	body, err := json.Marshal(summary)
+	if err != nil {
+		return json.RawMessage(`{"enabled":false,"stored":false}`)
+	}
+	return body
+}
+
+func webhookDefinitionForConnection(c *models.Connection) (*models.WebhookDefinition, *models.RESTAPISourceConfig, error) {
+	if c == nil {
+		return nil, nil, errors.New("connection is nil")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.ConnectorType)) {
+	case "rest_api", "rest-api":
+		source, err := models.ParseRESTAPISourceConfig(c.Config)
+		if err != nil {
+			return nil, nil, err
+		}
+		def, err := models.WebhookDefinitionFromRESTAPISource(source)
+		return def, source, err
+	default:
+		def, err := models.NormalizeWebhookDefinition(c.Config)
+		return def, nil, err
+	}
+}
+
+func inboundListenerDefinitionForConnection(c *models.Connection, requestedID string) (*models.InboundListenerDefinition, error) {
+	if c == nil {
+		return nil, errors.New("connection is nil")
+	}
+	var envelope struct {
+		Listener  *models.InboundListenerDefinition  `json:"listener"`
+		Listeners []models.InboundListenerDefinition `json:"listeners"`
+	}
+	if err := json.Unmarshal(c.Config, &envelope); err != nil {
+		return nil, fmt.Errorf("invalid listener config: %w", err)
+	}
+	requestedID = strings.TrimSpace(requestedID)
+	if envelope.Listener != nil {
+		def := *envelope.Listener
+		if requestedID == "" || strings.EqualFold(strings.TrimSpace(def.ID), requestedID) || strings.TrimSpace(def.ID) == "" {
+			if err := normalizeInboundListenerDefinition(&def, requestedID); err != nil {
+				return nil, err
+			}
+			return &def, nil
+		}
+	}
+	for _, listener := range envelope.Listeners {
+		if requestedID == "" || strings.EqualFold(strings.TrimSpace(listener.ID), requestedID) {
+			def := listener
+			if err := normalizeInboundListenerDefinition(&def, requestedID); err != nil {
+				return nil, err
+			}
+			return &def, nil
+		}
+	}
+	if requestedID != "" {
+		return nil, fmt.Errorf("listener %q is not configured", requestedID)
+	}
+	return nil, errors.New("listener is not configured for source")
+}
+
+func normalizeInboundListenerDefinition(def *models.InboundListenerDefinition, requestedID string) error {
+	def.ID = strings.TrimSpace(def.ID)
+	if def.ID == "" {
+		def.ID = strings.TrimSpace(requestedID)
+	}
+	if def.ID == "" {
+		def.ID = "default"
+	}
+	def.Type = strings.ToLower(strings.TrimSpace(def.Type))
+	if def.Type == "" {
+		def.Type = "https"
+	}
+	if def.Type != "https" {
+		return fmt.Errorf("listener type %q is not supported", def.Type)
+	}
+	if !def.Enabled {
+		return errors.New("listener is disabled")
+	}
+	def.Auth.Type = strings.ToLower(strings.TrimSpace(def.Auth.Type))
+	if def.Auth.Type == "" {
+		def.Auth.Type = "none"
+	}
+	def.Destination.Mode = strings.ToLower(strings.TrimSpace(def.Destination.Mode))
+	if def.Destination.Mode == "" {
+		def.Destination.Mode = "event_log"
+	}
+	switch def.Destination.Mode {
+	case "event_log", "dataset", "object":
+	default:
+		return fmt.Errorf("listener destination mode %q is not supported", def.Destination.Mode)
+	}
+	if def.Limits.MaxPayloadBytes <= 0 {
+		def.Limits.MaxPayloadBytes = models.DefaultInboundListenerMaxPayloadBytes
+	}
+	return nil
+}
+
+type inboundListenerAuthError struct {
+	status  int
+	message string
+}
+
+func (e inboundListenerAuthError) Error() string { return e.message }
+
+func verifyInboundListenerAuth(def *models.InboundListenerDefinition, headers http.Header, payload []byte) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(def.Auth.Type)) {
+	case "", "none":
+		return false, nil
+	case "shared_secret":
+		secret := strings.TrimSpace(def.Auth.Secret)
+		if secret == "" {
+			return false, inboundListenerAuthError{status: http.StatusServiceUnavailable, message: "listener shared secret is not configured"}
+		}
+		headerName := strings.TrimSpace(def.Auth.Header)
+		if headerName == "" {
+			headerName = "X-OpenFoundry-Token"
+		}
+		got := headers.Get(headerName)
+		if subtle.ConstantTimeCompare([]byte(got), []byte(secret)) != 1 {
+			return false, inboundListenerAuthError{status: http.StatusUnauthorized, message: "listener token is invalid"}
+		}
+		return true, nil
+	case "hmac_sha256", "hmac-sha256", "sha256":
+		secret := strings.TrimSpace(def.Auth.Secret)
+		if secret == "" {
+			return false, inboundListenerAuthError{status: http.StatusServiceUnavailable, message: "listener HMAC secret is not configured"}
+		}
+		headerName := strings.TrimSpace(def.Auth.Header)
+		if headerName == "" {
+			headerName = "X-OpenFoundry-Signature"
+		}
+		got := strings.TrimSpace(headers.Get(headerName))
+		if got == "" {
+			return false, inboundListenerAuthError{status: http.StatusUnauthorized, message: "listener signature is missing"}
+		}
+		got = strings.TrimPrefix(got, "sha256=")
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write(payload)
+		expected := hex.EncodeToString(mac.Sum(nil))
+		if subtle.ConstantTimeCompare([]byte(strings.ToLower(got)), []byte(expected)) != 1 {
+			return false, inboundListenerAuthError{status: http.StatusUnauthorized, message: "listener signature is invalid"}
+		}
+		return true, nil
+	default:
+		return false, inboundListenerAuthError{status: http.StatusBadRequest, message: "listener auth type is not supported"}
+	}
+}
+
+func sanitizeInboundListenerHeaders(headers http.Header, authHeader string) json.RawMessage {
+	redact := strings.ToLower(strings.TrimSpace(authHeader))
+	if redact == "" {
+		redact = "x-openfoundry-signature"
+	}
+	out := map[string][]string{}
+	for key, values := range headers {
+		if strings.EqualFold(key, redact) || strings.EqualFold(key, "authorization") || strings.EqualFold(key, "x-openfoundry-token") {
+			out[key] = []string{"[redacted]"}
+			continue
+		}
+		out[key] = append([]string(nil), values...)
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		return nil
+	}
+	return body
+}
+
+func inboundListenerExternalEventID(headers http.Header, payload json.RawMessage) string {
+	for _, name := range []string{"X-OpenFoundry-Event-Id", "X-Event-Id", "Idempotency-Key"} {
+		if value := strings.TrimSpace(headers.Get(name)); value != "" {
+			return value
+		}
+	}
+	var obj map[string]any
+	if json.Unmarshal(payload, &obj) == nil {
+		for _, key := range []string{"event_id", "eventId", "id"} {
+			if value, ok := obj[key].(string); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	return ""
+}
+
+func validateWebhookBuiltRequest(source *models.RESTAPISourceConfig, built *models.BuiltWebhookRequest) error {
+	if built == nil {
+		return errors.New("webhook request is nil")
+	}
+	if source == nil {
+		return nil
+	}
+	methodAllowed := len(source.Runtime.AllowedMethods) == 0
+	for _, method := range source.Runtime.AllowedMethods {
+		if strings.EqualFold(method, built.Method) {
+			methodAllowed = true
+			break
+		}
+	}
+	if !methodAllowed {
+		return fmt.Errorf("webhook method %s is not allowed by source runtime policy", built.Method)
+	}
+	u, err := url.Parse(built.URL)
+	if err != nil || u.Host == "" {
+		return errors.New("webhook URL is invalid")
+	}
+	if len(source.Permissions.AllowedEgressHosts) > 0 && !webhookHostAllowed(u.Host, source.Permissions.AllowedEgressHosts) {
+		return fmt.Errorf("webhook egress host %s is not allowed by source permissions", u.Host)
+	}
+	return nil
+}
+
+func webhookHostAllowed(host string, allowed []string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	hostname := host
+	if parsedHost := strings.Split(host, ":"); len(parsedHost) > 0 {
+		hostname = parsedHost[0]
+	}
+	for _, candidate := range allowed {
+		candidate = strings.ToLower(strings.TrimSpace(candidate))
+		if candidate == "" {
+			continue
+		}
+		if candidate == host || candidate == hostname {
+			return true
+		}
+		if strings.HasPrefix(candidate, "*.") && strings.HasSuffix(hostname, strings.TrimPrefix(candidate, "*")) {
+			return true
+		}
+	}
+	return false
+}
+
+func readWebhookResponseBody(body io.Reader, maxBytes int) ([]byte, bool) {
+	if maxBytes <= 0 {
+		maxBytes = models.DefaultWebhookMaxResponseBytes
+	}
+	limited := io.LimitReader(body, int64(maxBytes)+1)
+	b, _ := io.ReadAll(limited)
+	if len(b) > maxBytes {
+		return b[:maxBytes], true
+	}
+	return b, false
+}
+
+type webhookInvocationLimiter struct {
+	mu     sync.Mutex
+	active map[uuid.UUID]int
+	recent map[uuid.UUID][]time.Time
+}
+
+var defaultWebhookInvocationLimiter = &webhookInvocationLimiter{
+	active: map[uuid.UUID]int{},
+	recent: map[uuid.UUID][]time.Time{},
+}
+
+func (l *webhookInvocationLimiter) acquire(id uuid.UUID, def *models.WebhookDefinition) (func(), int, bool) {
+	if l == nil || def == nil {
+		return func() {}, 0, true
+	}
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if def.ConcurrencyLimit > 0 && l.active[id] >= def.ConcurrencyLimit {
+		return func() {}, 1, false
+	}
+	if def.RateLimit != nil && def.RateLimit.MaxRequests > 0 && def.RateLimit.PerSeconds > 0 {
+		window := time.Duration(def.RateLimit.PerSeconds) * time.Second
+		cutoff := now.Add(-window)
+		recent := l.recent[id][:0]
+		for _, ts := range l.recent[id] {
+			if ts.After(cutoff) {
+				recent = append(recent, ts)
+			}
+		}
+		if len(recent) >= def.RateLimit.MaxRequests {
+			l.recent[id] = recent
+			retryAfter := int(window.Seconds())
+			if len(recent) > 0 {
+				retryAfter = int(recent[0].Add(window).Sub(now).Seconds()) + 1
+			}
+			return func() {}, retryAfter, false
+		}
+		recent = append(recent, now)
+		l.recent[id] = recent
+	}
+	l.active[id]++
+	return func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		if l.active[id] <= 1 {
+			delete(l.active, id)
+			return
+		}
+		l.active[id]--
+	}, 0, true
 }
 
 func sanitizeIceberg(value string) string {

@@ -17,6 +17,7 @@ package handlers
 import (
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -262,6 +263,47 @@ type queryAggregationResult struct {
 	Count        int    `json:"count"`
 }
 
+type querySearchAround struct {
+	SourceObjectIDs    []string `json:"source_object_ids"`
+	LinkTypeID         string   `json:"link_type_id,omitempty"`
+	LinkTypeIDs        []string `json:"link_type_ids"`
+	Direction          string   `json:"direction,omitempty"`
+	Depth              int      `json:"depth,omitempty"`
+	TargetObjectTypeID string   `json:"target_object_type_id,omitempty"`
+}
+
+type linkedEdgeResponse struct {
+	LinkID         string         `json:"link_id"`
+	LinkTypeID     string         `json:"link_type_id"`
+	SourceObjectID string         `json:"source_object_id"`
+	TargetObjectID string         `json:"target_object_id"`
+	Direction      string         `json:"direction"`
+	Depth          int            `json:"depth"`
+	Properties     map[string]any `json:"properties,omitempty"`
+}
+
+type queryKNN struct {
+	PropertyName      string    `json:"property_name,omitempty"`
+	Property          string    `json:"property,omitempty"`
+	VectorProperty    string    `json:"vector_property,omitempty"`
+	EmbeddingProperty string    `json:"embedding_property,omitempty"`
+	Vector            []float64 `json:"vector,omitempty"`
+	QueryVector       []float64 `json:"query_vector,omitempty"`
+	K                 int       `json:"k,omitempty"`
+	KValue            int       `json:"k_value,omitempty"`
+	KValueCamel       int       `json:"kValue,omitempty"`
+	Metric            string    `json:"metric,omitempty"`
+}
+
+type queryKNNResult struct {
+	ObjectID     string  `json:"object_id"`
+	Rank         int     `json:"rank"`
+	Score        float64 `json:"score"`
+	Distance     float64 `json:"distance"`
+	Metric       string  `json:"metric"`
+	PropertyName string  `json:"property_name"`
+}
+
 type queryRequest struct {
 	// Filters is the WorkshopVariable.static_filter[s] shape — the richer
 	// form with `operator` per filter.
@@ -278,6 +320,8 @@ type queryRequest struct {
 	IncludeCount      bool               `json:"include_count"`
 	Aggregations      []queryAggregation `json:"aggregations"`
 	SelectedObjectIDs []string           `json:"selected_object_ids"`
+	SearchAround      *querySearchAround `json:"search_around,omitempty"`
+	KNN               *queryKNN          `json:"knn,omitempty"`
 }
 
 func matchesFilter(props map[string]any, f queryFilter) bool {
@@ -588,6 +632,202 @@ func isQueryEmptyValue(value any) bool {
 	return strings.TrimSpace(toStringValue(value)) == ""
 }
 
+func applyObjectKNN(items []ontologyObject, config queryKNN, fallbackK int) ([]ontologyObject, []queryKNNResult, map[string]any, error) {
+	propertyName := normalizedKNNPropertyName(config)
+	if propertyName == "" {
+		return nil, nil, nil, &storage.RepoError{Kind: storage.ErrInvalidArgument, Msg: "knn requires a vector property_name"}
+	}
+	queryVector := normalizedKNNVector(config)
+	if len(queryVector) == 0 {
+		return nil, nil, nil, &storage.RepoError{Kind: storage.ErrInvalidArgument, Msg: "knn requires a non-empty vector"}
+	}
+	if len(queryVector) > 2048 {
+		return nil, nil, nil, &storage.RepoError{Kind: storage.ErrInvalidArgument, Msg: "knn vector dimension cannot exceed 2048"}
+	}
+	k, err := normalizedKNNK(config, fallbackK)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	metric := normalizeKNNMetric(config.Metric)
+	type candidate struct {
+		item     ontologyObject
+		score    float64
+		distance float64
+	}
+	candidates := []candidate{}
+	for _, item := range items {
+		vector, ok := numericVectorValue(item.Properties[propertyName])
+		if !ok || len(vector) != len(queryVector) {
+			continue
+		}
+		score, distance, ok := scoreKNNVectors(queryVector, vector, metric)
+		if !ok {
+			continue
+		}
+		candidates = append(candidates, candidate{item: item, score: score, distance: distance})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return strings.Compare(candidates[i].item.ID, candidates[j].item.ID) < 0
+	})
+	if len(candidates) > k {
+		candidates = candidates[:k]
+	}
+	out := make([]ontologyObject, 0, len(candidates))
+	results := make([]queryKNNResult, 0, len(candidates))
+	for idx, candidate := range candidates {
+		item := candidate.item
+		if item.Properties == nil {
+			item.Properties = map[string]any{}
+		}
+		rank := idx + 1
+		item.Properties["__of_knn_rank"] = rank
+		item.Properties["__of_knn_score"] = candidate.score
+		item.Properties["__of_knn_distance"] = candidate.distance
+		item.Properties["__of_knn_metric"] = metric
+		out = append(out, item)
+		results = append(results, queryKNNResult{
+			ObjectID:     item.ID,
+			Rank:         rank,
+			Score:        candidate.score,
+			Distance:     candidate.distance,
+			Metric:       metric,
+			PropertyName: propertyName,
+		})
+	}
+	return out, results, map[string]any{
+		"property_name":           propertyName,
+		"k":                       k,
+		"metric":                  metric,
+		"query_vector_dimension":  len(queryVector),
+		"matched_vector_count":    len(candidates),
+		"max_supported_dimension": 2048,
+	}, nil
+}
+
+func normalizedKNNPropertyName(config queryKNN) string {
+	for _, value := range []string{config.PropertyName, config.Property, config.VectorProperty, config.EmbeddingProperty} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func normalizedKNNVector(config queryKNN) []float64 {
+	if len(config.Vector) > 0 {
+		return config.Vector
+	}
+	return config.QueryVector
+}
+
+func normalizedKNNK(config queryKNN, fallback int) (int, error) {
+	k := config.K
+	if k == 0 {
+		k = config.KValue
+	}
+	if k == 0 {
+		k = config.KValueCamel
+	}
+	explicit := k != 0
+	if k < 0 {
+		return 0, &storage.RepoError{Kind: storage.ErrInvalidArgument, Msg: "knn k must be positive"}
+	}
+	if k == 0 {
+		k = fallback
+	}
+	if k <= 0 {
+		k = 10
+	}
+	if k > 100 {
+		if !explicit {
+			return 100, nil
+		}
+		return 0, &storage.RepoError{Kind: storage.ErrInvalidArgument, Msg: "knn k cannot exceed 100"}
+	}
+	return k, nil
+}
+
+func normalizeKNNMetric(metric string) string {
+	switch strings.ToLower(strings.TrimSpace(metric)) {
+	case "euclidean", "l2", "distance":
+		return "euclidean"
+	case "dot", "dot_product", "inner_product":
+		return "dot"
+	default:
+		return "cosine"
+	}
+}
+
+func numericVectorValue(value any) ([]float64, bool) {
+	switch typed := value.(type) {
+	case []float64:
+		return typed, len(typed) > 0
+	case []int:
+		out := make([]float64, 0, len(typed))
+		for _, entry := range typed {
+			out = append(out, float64(entry))
+		}
+		return out, len(out) > 0
+	case []any:
+		out := make([]float64, 0, len(typed))
+		for _, entry := range typed {
+			number, ok := numericFilterValue(entry)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, number)
+		}
+		return out, len(out) > 0
+	case string:
+		var out []float64
+		if err := json.Unmarshal([]byte(strings.TrimSpace(typed)), &out); err != nil {
+			return nil, false
+		}
+		return out, len(out) > 0
+	default:
+		return nil, false
+	}
+}
+
+func scoreKNNVectors(query []float64, candidate []float64, metric string) (float64, float64, bool) {
+	if len(query) == 0 || len(query) != len(candidate) {
+		return 0, 0, false
+	}
+	switch metric {
+	case "euclidean":
+		total := 0.0
+		for i := range query {
+			delta := query[i] - candidate[i]
+			total += delta * delta
+		}
+		distance := math.Sqrt(total)
+		return 1 / (1 + distance), distance, true
+	case "dot":
+		score := 0.0
+		for i := range query {
+			score += query[i] * candidate[i]
+		}
+		return score, -score, true
+	default:
+		dot := 0.0
+		queryNorm := 0.0
+		candidateNorm := 0.0
+		for i := range query {
+			dot += query[i] * candidate[i]
+			queryNorm += query[i] * query[i]
+			candidateNorm += candidate[i] * candidate[i]
+		}
+		if queryNorm == 0 || candidateNorm == 0 {
+			return 0, 0, false
+		}
+		score := dot / (math.Sqrt(queryNorm) * math.Sqrt(candidateNorm))
+		return score, 1 - score, true
+	}
+}
+
 // QueryObjectsByOntologyType serves POST /api/v1/ontology/types/{type_id}/objects/query.
 // Server-side filter pushdown for the SPA's WorkshopVariable.static_filter / static_filters.
 // Today the InMemory store can't filter natively (no native CQL); we materialise
@@ -657,6 +897,32 @@ func (h *Handlers) QueryObjectsByOntologyType(w http.ResponseWriter, r *http.Req
 			selectedIDs[trimmed] = true
 		}
 	}
+	linkedEdges := []linkedEdgeResponse{}
+	searchAroundContract := map[string]any(nil)
+	if body.SearchAround != nil {
+		searchIDs, edges, err := h.resolveLinkedSearchAround(r, tenant, typeID, *body.SearchAround)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(selectedIDs) > 0 {
+			for id := range selectedIDs {
+				if !searchIDs[id] {
+					delete(selectedIDs, id)
+				}
+			}
+		} else {
+			selectedIDs = searchIDs
+		}
+		linkedEdges = edges
+		searchAroundContract = map[string]any{
+			"source_object_ids":     compactStrings(body.SearchAround.SourceObjectIDs),
+			"link_type_ids":         normalizedSearchAroundLinkTypeIDs(*body.SearchAround),
+			"direction":             normalizeSearchAroundDirection(body.SearchAround.Direction),
+			"depth":                 clampSearchAroundDepth(body.SearchAround.Depth),
+			"target_object_type_id": string(typeID),
+		}
+	}
 
 	matched := make([]ontologyObject, 0)
 	for _, idx := range deduped {
@@ -680,7 +946,18 @@ func (h *Handlers) QueryObjectsByOntologyType(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	sortOntologyObjects(matched, body.Sort)
+	knnResults := []queryKNNResult(nil)
+	knnContract := map[string]any(nil)
+	if body.KNN != nil {
+		var err error
+		matched, knnResults, knnContract, err = applyObjectKNN(matched, *body.KNN, int(perPage))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else {
+		sortOntologyObjects(matched, body.Sort)
+	}
 	aggregations := computeObjectQueryAggregations(matched, body.Aggregations)
 	total := len(matched)
 	start := (page - 1) * int(perPage)
@@ -692,6 +969,22 @@ func (h *Handlers) QueryObjectsByOntologyType(w http.ResponseWriter, r *http.Req
 		end = total
 	}
 	pageItems := matched[start:end]
+	pageIDs := map[string]bool{}
+	for _, item := range pageItems {
+		pageIDs[item.ID] = true
+	}
+	pageLinkedEdges := linkedEdges[:0]
+	for _, edge := range linkedEdges {
+		if pageIDs[edge.SourceObjectID] || pageIDs[edge.TargetObjectID] {
+			pageLinkedEdges = append(pageLinkedEdges, edge)
+		}
+	}
+	pageKNNResults := knnResults[:0]
+	for _, result := range knnResults {
+		if pageIDs[result.ObjectID] {
+			pageKNNResults = append(pageKNNResults, result)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data":         pageItems,
@@ -700,6 +993,8 @@ func (h *Handlers) QueryObjectsByOntologyType(w http.ResponseWriter, r *http.Req
 		"page":         page,
 		"per_page":     perPage,
 		"aggregations": aggregations,
+		"linked_edges": pageLinkedEdges,
+		"knn_results":  pageKNNResults,
 		"object_set": map[string]any{
 			"object_type_id":      string(typeID),
 			"filters":             body.Filters,
@@ -708,8 +1003,180 @@ func (h *Handlers) QueryObjectsByOntologyType(w http.ResponseWriter, r *http.Req
 			"include_count":       body.IncludeCount,
 			"aggregations":        body.Aggregations,
 			"selected_object_ids": body.SelectedObjectIDs,
+			"search_around":       searchAroundContract,
+			"knn":                 knnContract,
 		},
 	})
+}
+
+func (h *Handlers) resolveLinkedSearchAround(
+	r *http.Request,
+	tenant storage.TenantId,
+	targetTypeID storage.TypeId,
+	config querySearchAround,
+) (map[string]bool, []linkedEdgeResponse, error) {
+	sourceIDs := compactStrings(config.SourceObjectIDs)
+	if len(sourceIDs) == 0 {
+		return map[string]bool{}, []linkedEdgeResponse{}, nil
+	}
+	linkTypeIDs := normalizedSearchAroundLinkTypeIDs(config)
+	if len(linkTypeIDs) == 0 {
+		return nil, nil, &storage.RepoError{Kind: storage.ErrInvalidArgument, Msg: "search_around requires at least one link_type_id"}
+	}
+	direction := normalizeSearchAroundDirection(config.Direction)
+	depth := clampSearchAroundDepth(config.Depth)
+	limit := 5000
+	targetIDs := map[string]bool{}
+	edges := []linkedEdgeResponse{}
+	seenEdges := map[string]bool{}
+	seenNodes := map[string]bool{}
+	frontier := sourceIDs
+	for _, id := range sourceIDs {
+		seenNodes[id] = true
+	}
+
+	for currentDepth := 1; currentDepth <= depth && len(frontier) > 0 && len(targetIDs) < limit; currentDepth++ {
+		nextFrontier := []string{}
+		for _, nodeID := range frontier {
+			for _, linkTypeID := range linkTypeIDs {
+				if direction == "outgoing" || direction == "both" {
+					items, err := collectOutgoingSearchAroundLinks(r, h.Links, tenant, storage.LinkTypeId(linkTypeID), storage.ObjectId(nodeID), limit-len(edges))
+					if err != nil {
+						return nil, nil, err
+					}
+					for _, link := range items {
+						edge, neighbor := linkedSearchAroundEdge(link, "outgoing", currentDepth)
+						if !seenEdges[edge.LinkID] {
+							seenEdges[edge.LinkID] = true
+							edges = append(edges, edge)
+						}
+						if !seenNodes[neighbor] {
+							seenNodes[neighbor] = true
+							nextFrontier = append(nextFrontier, neighbor)
+						}
+						targetIDs[neighbor] = true
+					}
+				}
+				if direction == "incoming" || direction == "both" {
+					items, err := collectIncomingSearchAroundLinks(r, h.Links, tenant, storage.LinkTypeId(linkTypeID), storage.ObjectId(nodeID), limit-len(edges))
+					if err != nil {
+						return nil, nil, err
+					}
+					for _, link := range items {
+						edge, neighbor := linkedSearchAroundEdge(link, "incoming", currentDepth)
+						if !seenEdges[edge.LinkID] {
+							seenEdges[edge.LinkID] = true
+							edges = append(edges, edge)
+						}
+						if !seenNodes[neighbor] {
+							seenNodes[neighbor] = true
+							nextFrontier = append(nextFrontier, neighbor)
+						}
+						targetIDs[neighbor] = true
+					}
+				}
+			}
+		}
+		frontier = nextFrontier
+	}
+
+	if config.TargetObjectTypeID != "" && storage.TypeId(strings.TrimSpace(config.TargetObjectTypeID)) != targetTypeID {
+		targetIDs = map[string]bool{}
+	}
+	return targetIDs, edges, nil
+}
+
+func collectOutgoingSearchAroundLinks(r *http.Request, links storage.LinkStore, tenant storage.TenantId, linkType storage.LinkTypeId, from storage.ObjectId, budget int) ([]storage.Link, error) {
+	if budget <= 0 {
+		return nil, nil
+	}
+	res, err := links.ListOutgoing(r.Context(), tenant, linkType, from, storage.Page{Size: uint32(clampInt(budget, 1, 5000))}, parseConsistency(r.URL.Query().Get("consistency")))
+	if err != nil {
+		return nil, err
+	}
+	return res.Items, nil
+}
+
+func collectIncomingSearchAroundLinks(r *http.Request, links storage.LinkStore, tenant storage.TenantId, linkType storage.LinkTypeId, to storage.ObjectId, budget int) ([]storage.Link, error) {
+	if budget <= 0 {
+		return nil, nil
+	}
+	res, err := links.ListIncoming(r.Context(), tenant, linkType, to, storage.Page{Size: uint32(clampInt(budget, 1, 5000))}, parseConsistency(r.URL.Query().Get("consistency")))
+	if err != nil {
+		return nil, err
+	}
+	return res.Items, nil
+}
+
+func linkedSearchAroundEdge(link storage.Link, direction string, depth int) (linkedEdgeResponse, string) {
+	props := map[string]any{}
+	if link.Payload != nil && len(*link.Payload) > 0 {
+		_ = json.Unmarshal(*link.Payload, &props)
+	}
+	edge := linkedEdgeResponse{
+		LinkID:         stableSearchAroundLinkID(link),
+		LinkTypeID:     string(link.LinkType),
+		SourceObjectID: string(link.From),
+		TargetObjectID: string(link.To),
+		Direction:      direction,
+		Depth:          depth,
+		Properties:     props,
+	}
+	if direction == "incoming" {
+		return edge, string(link.From)
+	}
+	return edge, string(link.To)
+}
+
+func stableSearchAroundLinkID(link storage.Link) string {
+	return strings.Join([]string{string(link.LinkType), string(link.From), string(link.To)}, ":")
+}
+
+func normalizedSearchAroundLinkTypeIDs(config querySearchAround) []string {
+	ids := compactStrings(config.LinkTypeIDs)
+	if strings.TrimSpace(config.LinkTypeID) != "" {
+		ids = append(ids, strings.TrimSpace(config.LinkTypeID))
+	}
+	return compactStrings(ids)
+}
+
+func normalizeSearchAroundDirection(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "incoming", "inbound":
+		return "incoming"
+	case "both", "any", "all":
+		return "both"
+	default:
+		return "outgoing"
+	}
+}
+
+func clampSearchAroundDepth(depth int) int {
+	return clampInt(depth, 1, 5)
+}
+
+func clampInt(value, min, max int) int {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func compactStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 // CreateObjectByOntologyType serves POST /api/v1/ontology/types/{type_id}/objects.

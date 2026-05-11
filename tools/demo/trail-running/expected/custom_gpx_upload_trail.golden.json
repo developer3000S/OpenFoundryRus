@@ -1,0 +1,62 @@
+[
+  {
+    "distance_meters": 1816.191,
+    "distance_miles": 1.1285,
+    "elevation_gain_ft": 823.49,
+    "elevation_gain_meters": 251.0,
+    "end_lat": 40.0101,
+    "end_lon": -105.2984,
+    "max_elevation_ft": 6676.51,
+    "max_elevation_meters": 2035.0,
+    "min_elevation_ft": 5853.02,
+    "min_elevation_meters": 1784.0,
+    "point_count": 6,
+    "route_bbox": [
+      -105.3089,
+      40.0028,
+      -105.2984,
+      40.0113
+    ],
+    "route_geojson": {
+      "bbox": [
+        -105.3089,
+        40.0028,
+        -105.2984,
+        40.0113
+      ],
+      "coordinates": [
+        [
+          -105.3032,
+          40.0028
+        ],
+        [
+          -105.3068,
+          40.0041
+        ],
+        [
+          -105.3089,
+          40.0069
+        ],
+        [
+          -105.3061,
+          40.0097
+        ],
+        [
+          -105.3017,
+          40.0113
+        ],
+        [
+          -105.2984,
+          40.0101
+        ]
+      ],
+      "type": "LineString"
+    },
+    "source_file": "gpx/custom_dawn_ridge.gpx",
+    "start_lat": 40.0028,
+    "start_lon": -105.3032,
+    "trail_id": "custom-dawn-ridge",
+    "trail_name": "Custom Dawn Ridge",
+    "trailhead_geopoint": "40.0028,-105.3032"
+  }
+]

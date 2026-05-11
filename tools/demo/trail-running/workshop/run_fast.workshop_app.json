@@ -1,0 +1,1016 @@
+{
+  "id": "trail-running-run-fast",
+  "name": "Run Fast",
+  "slug": "run-fast",
+  "description": "Published Workshop acceptance app for the synthetic Trail Running demo.",
+  "status": "published",
+  "pages": [
+    {
+      "id": "trail-overview",
+      "name": "Trail Overview",
+      "path": "/",
+      "description": "Trail list, filters, effort chart, and current weather metrics.",
+      "visible": true,
+      "layout": {
+        "kind": "grid",
+        "columns": 12,
+        "gap": "16px",
+        "max_width": "1180px"
+      },
+      "widgets": [
+        {
+          "id": "trail-filters",
+          "widget_type": "filter_list",
+          "title": "Filters",
+          "description": "Filter trail objects for the overview widgets.",
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          },
+          "props": {
+            "source_variable_id": "trail-set",
+            "output_variable_id": "trail-filter",
+            "layout": "pills",
+            "allow_add_remove": true,
+            "filters": [
+              {
+                "id": "trail-name-filter",
+                "property_name": "trail_name",
+                "display_name": "Trail Name",
+                "component": "text",
+                "values": []
+              }
+            ]
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "trail-table",
+          "widget_type": "object_table",
+          "title": "Trail List",
+          "description": "Selectable Trail object table.",
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 7,
+            "height": 4
+          },
+          "props": {
+            "source_variable_id": "filtered-trails",
+            "columns": [
+              "trail_name",
+              "distance_miles",
+              "elevation_gain_ft",
+              "start_lat",
+              "start_lon"
+            ],
+            "default_sort_property": "trail_name",
+            "default_sort_direction": "asc",
+            "row_height_lines": 1,
+            "wrap_values": false,
+            "multi_select": true,
+            "active_object_variable_id": "trail-active",
+            "selected_object_set_variable_id": "trail-selected",
+            "enable_inline_edit": false
+          },
+          "binding": null,
+          "events": [
+            {
+              "id": "open-trail-detail",
+              "trigger": "select",
+              "kind": "navigate",
+              "target": "/trail",
+              "label": "Open trail detail"
+            }
+          ],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "trail-distance-chart",
+          "widget_type": "chart_xy",
+          "title": "Trail Distances",
+          "description": "Distance bars with estimated pace overlay.",
+          "position": {
+            "x": 7,
+            "y": 0,
+            "width": 5,
+            "height": 4
+          },
+          "props": {
+            "layers": [
+              {
+                "id": "trail-distance-bars",
+                "title": "Trail distance",
+                "data_input": "object_set",
+                "source_variable_id": "trail-estimates",
+                "object_type_id": "TrailEffortEstimate",
+                "layer_type": "bar",
+                "show_labels": true,
+                "x_property": "trail_name",
+                "series_metric": "avg",
+                "series_property": "distance_miles"
+              },
+              {
+                "id": "estimated-pace-line",
+                "title": "Estimated pace",
+                "data_input": "object_set",
+                "source_variable_id": "trail-estimates",
+                "object_type_id": "TrailEffortEstimate",
+                "layer_type": "line",
+                "show_labels": true,
+                "x_property": "trail_name",
+                "series_metric": "avg",
+                "series_property": "estimated_pace_min_per_mile"
+              }
+            ],
+            "bar_orientation": "vertical",
+            "show_legend": true,
+            "show_tooltips": true,
+            "output_filter_variable_id": "chart-trail-filter",
+            "selected_object_set_variable_id": "chart-selected-estimates"
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "weather-metrics",
+          "widget_type": "metric",
+          "title": "Weather Conditions",
+          "description": "Current weather snapshot for the default selected trail.",
+          "position": {
+            "x": 7,
+            "y": 4,
+            "width": 5,
+            "height": 2
+          },
+          "props": {
+            "label": "Weather Conditions in Boulder, CO",
+            "layout_style": "card",
+            "direction": "horizontal",
+            "template": "stacked",
+            "metric_size": "regular",
+            "metrics": [
+              {
+                "id": "temperature",
+                "label": "Current Temperature",
+                "value_type": "number",
+                "variable_id": "weather-temperature",
+                "format": {
+                  "kind": "unit",
+                  "precision": 1,
+                  "unit": "Fahrenheit"
+                },
+                "conditional_formatting": [
+                  {
+                    "operator": "gte",
+                    "value": 80,
+                    "tone": "warning"
+                  }
+                ]
+              },
+              {
+                "id": "wind-speed",
+                "label": "Current Windspeed",
+                "value_type": "number",
+                "variable_id": "weather-wind-speed",
+                "format": {
+                  "kind": "unit",
+                  "precision": 1,
+                  "unit": "mph"
+                }
+              },
+              {
+                "id": "humidity",
+                "label": "Current Humidity",
+                "value_type": "number",
+                "variable_id": "weather-humidity",
+                "format": {
+                  "kind": "unit",
+                  "precision": 0,
+                  "suffix": "%"
+                }
+              }
+            ]
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "weather-action",
+          "widget_type": "button_group",
+          "title": "Weather Actions",
+          "description": "Fetch weather for the selected trail.",
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 1
+          },
+          "props": {
+            "orientation": "horizontal",
+            "fill_horizontal": false,
+            "buttons": [
+              {
+                "id": "fetch-weather",
+                "label": "Get Weather",
+                "on_click_kind": "action",
+                "action_type_id": "FetchTrailWeather",
+                "default_layout": "form",
+                "switch_layout": false,
+                "conditional_visibility": false,
+                "parameter_defaults": {
+                  "trail_id": {
+                    "kind": "static",
+                    "static_value": "boulder-creek-path",
+                    "visibility": "visible"
+                  },
+                  "trail_name": {
+                    "kind": "static",
+                    "static_value": "Boulder Creek Path East",
+                    "visibility": "visible"
+                  },
+                  "latitude": {
+                    "kind": "static",
+                    "static_value": 40.0153,
+                    "visibility": "visible"
+                  },
+                  "longitude": {
+                    "kind": "static",
+                    "static_value": -105.289,
+                    "visibility": "visible"
+                  },
+                  "trailhead_geopoint": {
+                    "kind": "static",
+                    "static_value": "40.0153,-105.289",
+                    "visibility": "disabled"
+                  }
+                }
+              }
+            ]
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "trail-map-page",
+      "name": "Trail Map",
+      "path": "/map",
+      "description": "Map with trailheads, trail routes, coffee shops, and trail-to-coffee lines.",
+      "visible": true,
+      "layout": {
+        "kind": "grid",
+        "columns": 12,
+        "gap": "16px",
+        "max_width": "1180px"
+      },
+      "widgets": [
+        {
+          "id": "trail-coffee-map",
+          "widget_type": "map",
+          "title": "Trail Starts & Coffee Shops",
+          "description": "MapLibre map for trailheads, routes, cafes, and nearest-coffee links.",
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 6
+          },
+          "props": {
+            "base_layer_kind": "blank",
+            "center_lat": 39.998,
+            "center_lon": -105.289,
+            "zoom": 12,
+            "output_variable_id": "map-active-trail",
+            "output_object_set_variable_id": "map-selected-trails",
+            "layers": [
+              {
+                "id": "trail-starts",
+                "title": "Trail Starts",
+                "source": "object_set",
+                "source_variable_id": "trail-set",
+                "geometry_type": "point",
+                "latitude_field": "start_lat",
+                "longitude_field": "start_lon",
+                "label_field": "trail_name",
+                "color": "#7c3aed",
+                "radius": 7,
+                "cluster_enabled": true,
+                "cluster_radius": 72,
+                "cluster_max_zoom": 9,
+                "visible": true
+              },
+              {
+                "id": "trail-routes",
+                "title": "Trail Routes",
+                "source": "object_set",
+                "source_variable_id": "trail-set",
+                "geometry_type": "line",
+                "geometry_field": "route_geojson",
+                "label_field": "trail_name",
+                "color": "#c2410c",
+                "line_width": 4,
+                "visible": true
+              },
+              {
+                "id": "coffee-shops",
+                "title": "Coffee Shops",
+                "source": "object_set",
+                "source_variable_id": "coffee-set",
+                "geometry_type": "point",
+                "latitude_field": "latitude",
+                "longitude_field": "longitude",
+                "label_field": "name",
+                "color": "#0f766e",
+                "radius": 6,
+                "visible": true
+              },
+              {
+                "id": "trail-coffee-lines",
+                "title": "Distance to Coffee",
+                "source": "object_set",
+                "source_variable_id": "trail-coffee-recommendations",
+                "geometry_type": "line",
+                "geometry_field": "line_geojson",
+                "label_field": "coffee_shop_name",
+                "color": "#d97706",
+                "line_width": 2,
+                "visible": true
+              }
+            ],
+            "overlay_layers": []
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "nearest-coffee-table",
+          "widget_type": "object_table",
+          "title": "Nearest Coffee Shops",
+          "description": "Nearest cafes ranked by Haversine distance from each trailhead.",
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 3
+          },
+          "props": {
+            "source_variable_id": "trail-coffee-recommendations",
+            "columns": [
+              "trail_name",
+              "coffee_shop_name",
+              "rank",
+              "distance_miles",
+              "coffee_rating"
+            ],
+            "default_sort_property": "rank",
+            "default_sort_direction": "asc",
+            "row_height_lines": 1,
+            "wrap_values": false,
+            "multi_select": false,
+            "enable_inline_edit": false
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "trail-detail-page",
+      "name": "Trail Detail",
+      "path": "/trail",
+      "description": "Selected trail properties, estimated effort, and nearest coffee recommendations.",
+      "visible": true,
+      "layout": {
+        "kind": "grid",
+        "columns": 12,
+        "gap": "16px",
+        "max_width": "1180px"
+      },
+      "widgets": [
+        {
+          "id": "selected-trail-title",
+          "widget_type": "object_set_title",
+          "title": "Selected Trail",
+          "description": "Title for the selected/default trail.",
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          },
+          "props": {
+            "source_variable_id": "selected-trail-detail",
+            "title_property": "trail_name",
+            "show_icon": true,
+            "empty_text": "No trail selected"
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "selected-trail-properties",
+          "widget_type": "property_list",
+          "title": "Selected Trail Details",
+          "description": "Core GPX-derived Trail properties.",
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 5,
+            "height": 4
+          },
+          "props": {
+            "source_variable_id": "selected-trail-detail",
+            "items": [
+              {
+                "id": "trail-details",
+                "property_names": [
+                  "trail_name",
+                  "distance_miles",
+                  "elevation_gain_ft",
+                  "start_lat",
+                  "start_lon",
+                  "trailhead_geopoint"
+                ]
+              }
+            ],
+            "properties": [
+              "trail_name",
+              "distance_miles",
+              "elevation_gain_ft",
+              "start_lat",
+              "start_lon",
+              "trailhead_geopoint"
+            ],
+            "number_of_columns": 1,
+            "hide_nulls": true,
+            "value_layout": "below",
+            "enable_value_wrapping": true
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "effort-metrics",
+          "widget_type": "metric",
+          "title": "Effort Estimate",
+          "description": "Function-style effort estimate metrics.",
+          "position": {
+            "x": 5,
+            "y": 1,
+            "width": 7,
+            "height": 2
+          },
+          "props": {
+            "label": "Estimated Effort for Boulder Creek Path East",
+            "layout_style": "card",
+            "direction": "horizontal",
+            "template": "stacked",
+            "metric_size": "regular",
+            "metrics": [
+              {
+                "id": "estimated-pace",
+                "label": "Est Pace Min Per Mile",
+                "value_type": "number",
+                "variable_id": "detail-estimated-pace",
+                "format": {
+                  "kind": "unit",
+                  "precision": 2,
+                  "unit": "min/mi"
+                }
+              },
+              {
+                "id": "estimated-effort",
+                "label": "Est Effort",
+                "value_type": "number",
+                "variable_id": "detail-estimated-effort",
+                "format": {
+                  "kind": "number",
+                  "precision": 1
+                }
+              },
+              {
+                "id": "estimated-max-hr",
+                "label": "Est Max Hr",
+                "value_type": "number",
+                "variable_id": "detail-estimated-max-hr",
+                "format": {
+                  "kind": "unit",
+                  "precision": 0,
+                  "unit": "bpm"
+                }
+              },
+              {
+                "id": "estimate-confidence",
+                "label": "Confidence",
+                "value_type": "number",
+                "variable_id": "detail-confidence",
+                "format": {
+                  "kind": "percent",
+                  "precision": 1
+                }
+              }
+            ]
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "similar-runs-detail",
+          "widget_type": "property_list",
+          "title": "Estimator Inputs",
+          "description": "Similarity model and run count.",
+          "position": {
+            "x": 5,
+            "y": 3,
+            "width": 7,
+            "height": 2
+          },
+          "props": {
+            "source_variable_id": "selected-trail-estimate",
+            "items": [
+              {
+                "id": "estimate-details",
+                "property_names": [
+                  "similarity_model",
+                  "similar_run_count",
+                  "best_similarity_score",
+                  "average_similarity_score"
+                ]
+              }
+            ],
+            "number_of_columns": 2,
+            "hide_nulls": true,
+            "value_layout": "below",
+            "enable_value_wrapping": true
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "selected-coffee-table",
+          "widget_type": "object_table",
+          "title": "Coffee Recommendations",
+          "description": "Nearest coffee shops for the selected/default trail.",
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 12,
+            "height": 3
+          },
+          "props": {
+            "source_variable_id": "selected-trail-coffee",
+            "columns": [
+              "coffee_shop_name",
+              "rank",
+              "distance_miles",
+              "coffee_neighborhood",
+              "coffee_rating"
+            ],
+            "default_sort_property": "rank",
+            "default_sort_direction": "asc",
+            "row_height_lines": 1,
+            "wrap_values": false,
+            "multi_select": false,
+            "enable_inline_edit": false
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "custom-gpx-upload-page",
+      "name": "Upload GPX",
+      "path": "/upload",
+      "description": "Upload a GPX file, parse it into a Trail object, and create an effort estimate.",
+      "visible": true,
+      "layout": {
+        "kind": "grid",
+        "columns": 12,
+        "gap": "16px",
+        "max_width": "1180px"
+      },
+      "widgets": [
+        {
+          "id": "custom-gpx-upload",
+          "widget_type": "media_uploader",
+          "title": "Custom GPX Upload",
+          "description": "Parse a GPX file into the Trail object type and refresh the app.",
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          },
+          "props": {
+            "upload_mode": "gpx_trail",
+            "text": "Upload GPX",
+            "intent": "success",
+            "allowed_extensions": ".gpx,application/gpx+xml",
+            "multi_file": false,
+            "trail_object_type_id": "Trail",
+            "estimate_object_type_id": "TrailEffortEstimate",
+            "estimate_function_package_id": "estimateTrailEffort"
+          },
+          "binding": null,
+          "events": [
+            {
+              "id": "refresh-after-custom-gpx-upload",
+              "trigger": "on_upload",
+              "action": "refresh",
+              "kind": "refresh",
+              "label": "Refresh after GPX upload",
+              "config": {}
+            }
+          ],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "uploaded-trails-table",
+          "widget_type": "object_table",
+          "title": "Uploaded Trails",
+          "description": "Trail objects after GPX upload.",
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 8,
+            "height": 4
+          },
+          "props": {
+            "source_variable_id": "trail-set",
+            "columns": [
+              "trail_name",
+              "distance_miles",
+              "elevation_gain_ft",
+              "start_lat",
+              "start_lon"
+            ],
+            "default_sort_property": "trail_name",
+            "default_sort_direction": "asc",
+            "row_height_lines": 1,
+            "wrap_values": false,
+            "multi_select": false,
+            "enable_inline_edit": false
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        },
+        {
+          "id": "uploaded-effort-estimates",
+          "widget_type": "object_table",
+          "title": "Uploaded Effort Estimates",
+          "description": "Effort estimates created from uploaded GPX trails.",
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 12,
+            "height": 3
+          },
+          "props": {
+            "source_variable_id": "trail-estimates",
+            "columns": [
+              "trail_name",
+              "estimated_pace_min_per_mile",
+              "estimated_perceived_effort",
+              "estimated_max_heartrate",
+              "confidence"
+            ],
+            "default_sort_property": "trail_name",
+            "default_sort_direction": "asc",
+            "row_height_lines": 1,
+            "wrap_values": false,
+            "multi_select": false,
+            "enable_inline_edit": false
+          },
+          "binding": null,
+          "events": [],
+          "actions": [],
+          "children": []
+        }
+      ]
+    }
+  ],
+  "theme": {
+    "name": "Trail Running",
+    "primary_color": "#0f766e",
+    "accent_color": "#c2410c",
+    "background_color": "#f8fafc",
+    "surface_color": "#ffffff",
+    "text_color": "#0f172a",
+    "heading_font": "Inter",
+    "body_font": "Inter",
+    "border_radius": 8,
+    "logo_url": null
+  },
+  "settings": {
+    "home_page_id": "trail-overview",
+    "navigation_style": "tabs",
+    "max_width": "1180px",
+    "show_branding": false,
+    "custom_css": null,
+    "builder_experience": "workshop",
+    "ontology_source_type_id": null,
+    "object_set_variables": [],
+    "workshop_variables": [
+      {
+        "id": "trail-set",
+        "kind": "object_set_definition",
+        "name": "Trails",
+        "object_type_id": "Trail",
+        "metadata": {
+          "sort": [
+            {
+              "property_name": "trail_name",
+              "direction": "asc"
+            }
+          ]
+        }
+      },
+      {
+        "id": "trail-filter",
+        "kind": "filter_output",
+        "name": "Trail filter",
+        "object_type_id": "Trail",
+        "source_widget_id": "trail-filters"
+      },
+      {
+        "id": "filtered-trails",
+        "kind": "object_set_definition",
+        "name": "Filtered trails",
+        "object_type_id": "Trail",
+        "source_variable_id": "trail-set",
+        "filter_variable_id": "trail-filter"
+      },
+      {
+        "id": "trail-active",
+        "kind": "object_set_active_object",
+        "name": "Active trail",
+        "object_type_id": "Trail",
+        "source_widget_id": "trail-table"
+      },
+      {
+        "id": "trail-selected",
+        "kind": "object_set_selection",
+        "name": "Selected trails",
+        "object_type_id": "Trail",
+        "source_widget_id": "trail-table"
+      },
+      {
+        "id": "chart-trail-filter",
+        "kind": "filter_output",
+        "name": "Chart trail filter",
+        "object_type_id": "TrailEffortEstimate",
+        "source_widget_id": "trail-distance-chart"
+      },
+      {
+        "id": "chart-selected-estimates",
+        "kind": "object_set_selection",
+        "name": "Chart selected estimates",
+        "object_type_id": "TrailEffortEstimate",
+        "source_widget_id": "trail-distance-chart"
+      },
+      {
+        "id": "trail-estimates",
+        "kind": "object_set_definition",
+        "name": "Trail effort estimates",
+        "object_type_id": "TrailEffortEstimate",
+        "metadata": {
+          "sort": [
+            {
+              "property_name": "trail_name",
+              "direction": "asc"
+            }
+          ]
+        }
+      },
+      {
+        "id": "coffee-set",
+        "kind": "object_set_definition",
+        "name": "Coffee shops",
+        "object_type_id": "CoffeeShop",
+        "metadata": {
+          "sort": [
+            {
+              "property_name": "name",
+              "direction": "asc"
+            }
+          ]
+        }
+      },
+      {
+        "id": "trail-coffee-recommendations",
+        "kind": "object_set_definition",
+        "name": "Trail coffee recommendations",
+        "object_type_id": "TrailCoffeeRecommendation",
+        "metadata": {
+          "sort": [
+            {
+              "property_name": "trail_name",
+              "direction": "asc"
+            },
+            {
+              "property_name": "rank",
+              "direction": "asc"
+            }
+          ]
+        }
+      },
+      {
+        "id": "trail-coffee-links",
+        "kind": "object_set_definition",
+        "name": "Trail coffee links",
+        "object_type_id": "TrailCoffeeLink"
+      },
+      {
+        "id": "map-active-trail",
+        "kind": "object_set_active_object",
+        "name": "Map active trail",
+        "object_type_id": "Trail",
+        "source_widget_id": "trail-coffee-map"
+      },
+      {
+        "id": "map-selected-trails",
+        "kind": "object_set_selection",
+        "name": "Map selected trails",
+        "object_type_id": "Trail",
+        "source_widget_id": "trail-coffee-map"
+      },
+      {
+        "id": "selected-trail-detail",
+        "kind": "object_set_definition",
+        "name": "Selected trail detail",
+        "object_type_id": "Trail",
+        "static_filter": {
+          "property_name": "trail_id",
+          "operator": "equals",
+          "value": "boulder-creek-path"
+        }
+      },
+      {
+        "id": "selected-trail-estimate",
+        "kind": "object_set_definition",
+        "name": "Selected trail estimate",
+        "object_type_id": "TrailEffortEstimate",
+        "static_filter": {
+          "property_name": "trail_id",
+          "operator": "equals",
+          "value": "boulder-creek-path"
+        }
+      },
+      {
+        "id": "selected-trail-coffee",
+        "kind": "object_set_definition",
+        "name": "Selected trail coffee",
+        "object_type_id": "TrailCoffeeRecommendation",
+        "static_filter": {
+          "property_name": "trail_id",
+          "operator": "equals",
+          "value": "boulder-creek-path"
+        },
+        "metadata": {
+          "sort": [
+            {
+              "property_name": "rank",
+              "direction": "asc"
+            }
+          ]
+        }
+      },
+      {
+        "id": "weather-temperature",
+        "kind": "numeric",
+        "name": "Current temperature",
+        "object_type_id": "",
+        "default_value": 68.4
+      },
+      {
+        "id": "weather-wind-speed",
+        "kind": "numeric",
+        "name": "Current wind speed",
+        "object_type_id": "",
+        "default_value": 6.2
+      },
+      {
+        "id": "weather-humidity",
+        "kind": "numeric",
+        "name": "Current humidity",
+        "object_type_id": "",
+        "default_value": 34
+      },
+      {
+        "id": "detail-estimated-pace",
+        "kind": "numeric",
+        "name": "Detail estimated pace",
+        "object_type_id": "",
+        "default_value": 9.14
+      },
+      {
+        "id": "detail-estimated-effort",
+        "kind": "numeric",
+        "name": "Detail estimated effort",
+        "object_type_id": "",
+        "default_value": 5.4
+      },
+      {
+        "id": "detail-estimated-max-hr",
+        "kind": "numeric",
+        "name": "Detail estimated max HR",
+        "object_type_id": "",
+        "default_value": 164.8
+      },
+      {
+        "id": "detail-confidence",
+        "kind": "numeric",
+        "name": "Detail confidence",
+        "object_type_id": "",
+        "default_value": 0.768
+      }
+    ],
+    "consumer_mode": {
+      "enabled": false,
+      "allow_guest_access": false,
+      "portal_title": null,
+      "portal_subtitle": null,
+      "primary_cta_label": null,
+      "primary_cta_url": null
+    },
+    "interactive_workshop": {
+      "enabled": false,
+      "title": null,
+      "subtitle": null,
+      "briefing_template": null,
+      "primary_scenario_widget_id": null,
+      "primary_agent_widget_id": null,
+      "suggested_questions": [],
+      "scenario_presets": []
+    },
+    "workshop_header": {
+      "title": "Run Fast",
+      "icon": "activity",
+      "color": "#0f766e"
+    },
+    "slate": {
+      "enabled": false,
+      "framework": "react",
+      "package_name": "",
+      "entry_file": "",
+      "sdk_import": "",
+      "workspace": {
+        "enabled": false,
+        "repository_id": null,
+        "layout": "",
+        "runtime": "",
+        "dev_command": "",
+        "preview_command": "",
+        "files": []
+      },
+      "quiver_embed": {
+        "enabled": false,
+        "primary_type_id": null,
+        "secondary_type_id": null,
+        "join_field": null,
+        "secondary_join_field": null,
+        "date_field": null,
+        "metric_field": null,
+        "group_field": null,
+        "selected_group": null
+      }
+    }
+  },
+  "template_key": "trail-running-demo",
+  "created_by": "demo",
+  "published_version_id": "trail-running-run-fast-v1",
+  "created_at": "2026-05-11T00:00:00Z",
+  "updated_at": "2026-05-11T00:00:00Z"
+}

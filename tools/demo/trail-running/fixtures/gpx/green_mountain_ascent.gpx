@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="OpenFoundry Trail Demo">
+  <metadata>
+    <name>Green Mountain Ascent</name>
+  </metadata>
+  <trk>
+    <name>Green Mountain Ascent</name>
+    <trkseg>
+      <trkpt lat="39.98420" lon="-105.30210"><ele>1776.0</ele></trkpt>
+      <trkpt lat="39.98485" lon="-105.30580"><ele>1842.0</ele></trkpt>
+      <trkpt lat="39.98540" lon="-105.30950"><ele>1925.0</ele></trkpt>
+      <trkpt lat="39.98620" lon="-105.31230"><ele>1998.0</ele></trkpt>
+      <trkpt lat="39.98705" lon="-105.31485"><ele>2072.0</ele></trkpt>
+      <trkpt lat="39.98595" lon="-105.31740"><ele>2134.0</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

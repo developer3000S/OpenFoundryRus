@@ -1,0 +1,877 @@
+{
+  "ir_version": "pipeline_ir.v1",
+  "metadata": {
+    "acceptance_scenario": {
+      "checklist_id": "DEMO.5",
+      "description": "Trail Running demo coffee recommendation pipeline",
+      "fixture_root": "tools/demo/trail-running"
+    },
+    "crs": "EPSG:4326",
+    "pipeline_type": "FASTER"
+  },
+  "resources": [
+    {
+      "id": "trail_dataset",
+      "name": "Trail",
+      "rid": "ri.openfoundry.demo.dataset.trail",
+      "resource_type": "dataset",
+      "branch": "main"
+    },
+    {
+      "id": "coffee_shop_fixture",
+      "name": "Synthetic Coffee Shops",
+      "resource_type": "file",
+      "metadata": {
+        "fixture_path": "fixtures/coffee_shops.json",
+        "format": "json",
+        "crs": "EPSG:4326"
+      }
+    },
+    {
+      "id": "coffee_shop_dataset",
+      "name": "CoffeeShop",
+      "rid": "ri.openfoundry.demo.dataset.coffee-shop",
+      "resource_type": "dataset",
+      "branch": "main"
+    },
+    {
+      "id": "trail_coffee_recommendation_dataset",
+      "name": "TrailCoffeeRecommendation",
+      "rid": "ri.openfoundry.demo.dataset.trail-coffee-recommendation",
+      "resource_type": "dataset",
+      "branch": "main"
+    },
+    {
+      "id": "trail_coffee_link_dataset",
+      "name": "TrailCoffeeLink",
+      "rid": "ri.openfoundry.demo.dataset.trail-coffee-link",
+      "resource_type": "dataset",
+      "branch": "main"
+    },
+    {
+      "id": "coffee_shop_object_type",
+      "name": "CoffeeShop",
+      "rid": "ri.ontology.main.object-type.coffee-shop",
+      "resource_type": "object_type"
+    },
+    {
+      "id": "trail_coffee_recommendation_object_type",
+      "name": "TrailCoffeeRecommendation",
+      "rid": "ri.ontology.main.object-type.trail-coffee-recommendation",
+      "resource_type": "object_type"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "trails",
+      "name": "Trail rows",
+      "resource_id": "trail_dataset"
+    },
+    {
+      "id": "coffee_shops",
+      "name": "Coffee shop rows",
+      "resource_id": "coffee_shop_fixture"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "trail_rows_input",
+      "label": "Trail dataset rows",
+      "transform_type": "dataset_input",
+      "config": {
+        "fixture_path": "expected/trails.golden.json",
+        "format": "json"
+      },
+      "output_ports": [
+        {
+          "id": "out",
+          "direction": "output",
+          "port_type": "dataset"
+        }
+      ],
+      "output_schema": {
+        "fields": [
+          {
+            "name": "trail_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "trail_name",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "start_lat",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "start_lon",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "trailhead_geopoint",
+            "field_type": "geopoint",
+            "nullable": false
+          },
+          {
+            "name": "route_geojson",
+            "field_type": "geojson",
+            "nullable": false
+          }
+        ],
+        "metadata": {
+          "crs": "EPSG:4326"
+        }
+      },
+      "position": {
+        "x": 80,
+        "y": 120
+      }
+    },
+    {
+      "id": "coffee_shop_rows_input",
+      "label": "Coffee shop rows",
+      "transform_type": "dataset_input",
+      "config": {
+        "fixture_path": "fixtures/coffee_shops.json",
+        "format": "json"
+      },
+      "output_ports": [
+        {
+          "id": "out",
+          "direction": "output",
+          "port_type": "dataset"
+        }
+      ],
+      "output_schema": {
+        "fields": [
+          {
+            "name": "coffee_shop_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "name",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "latitude",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "longitude",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "neighborhood",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "rating",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "walkup_window",
+            "field_type": "boolean",
+            "nullable": false
+          }
+        ],
+        "metadata": {
+          "crs": "EPSG:4326"
+        }
+      },
+      "position": {
+        "x": 80,
+        "y": 360
+      }
+    },
+    {
+      "id": "nearest_coffee_by_trail",
+      "label": "Nearest coffee shops by trailhead",
+      "transform_type": "geo_nearest_neighbor_join",
+      "depends_on": [
+        "trail_rows_input",
+        "coffee_shop_rows_input"
+      ],
+      "config": {
+        "_geo_join": {
+          "mode": "nearest",
+          "join_type": "left",
+          "left_lat_column": "start_lat",
+          "left_lon_column": "start_lon",
+          "right_lat_column": "latitude",
+          "right_lon_column": "longitude",
+          "unit": "miles",
+          "k": 3,
+          "distance_column": "distance_miles",
+          "rank_column": "rank",
+          "right_prefix": "coffee_",
+          "auto_select_left": true,
+          "right_columns": [
+            "coffee_shop_id",
+            "name",
+            "latitude",
+            "longitude",
+            "neighborhood",
+            "rating",
+            "walkup_window"
+          ],
+          "max_left_rows": 500,
+          "max_right_rows": 1000,
+          "max_candidate_pairs": 100000
+        },
+        "postprocess": {
+          "source_file": "pipelines/coffee_recommendations.py",
+          "entrypoint": "build_coffee_recommendations",
+          "nearest_n": 3,
+          "model": "haversine_trailhead_to_cafe_v1"
+        }
+      },
+      "input_ports": [
+        {
+          "id": "trails",
+          "direction": "input",
+          "port_type": "dataset"
+        },
+        {
+          "id": "coffee",
+          "direction": "input",
+          "port_type": "dataset"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "out",
+          "direction": "output",
+          "port_type": "dataset"
+        }
+      ],
+      "output_schema": {
+        "fields": [
+          {
+            "name": "recommendation_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "trail_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "trail_name",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "coffee_shop_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "coffee_shop_name",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "rank",
+            "field_type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "distance_meters",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "distance_km",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "distance_miles",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "trailhead_lat",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "trailhead_lon",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "trailhead_geopoint",
+            "field_type": "geopoint",
+            "nullable": false
+          },
+          {
+            "name": "coffee_lat",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "coffee_lon",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "coffee_geopoint",
+            "field_type": "geopoint",
+            "nullable": false
+          },
+          {
+            "name": "coffee_neighborhood",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "coffee_rating",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "coffee_walkup_window",
+            "field_type": "boolean",
+            "nullable": false
+          },
+          {
+            "name": "line_geojson",
+            "field_type": "geojson",
+            "nullable": false
+          },
+          {
+            "name": "recommendation_model",
+            "field_type": "string",
+            "nullable": false
+          }
+        ],
+        "metadata": {
+          "crs": "EPSG:4326",
+          "distance_unit": "miles",
+          "relationship": "Trail -> CoffeeShop"
+        }
+      },
+      "preview_schema": {
+        "fields": [
+          {
+            "name": "trail_name",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "coffee_shop_name",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "rank",
+            "field_type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "distance_miles",
+            "field_type": "double",
+            "nullable": false
+          }
+        ]
+      },
+      "position": {
+        "x": 400,
+        "y": 240
+      }
+    },
+    {
+      "id": "trail_coffee_link_table",
+      "label": "Trail to Coffee link rows",
+      "transform_type": "python",
+      "depends_on": [
+        "nearest_coffee_by_trail"
+      ],
+      "config": {
+        "source_file": "pipelines/coffee_recommendations.py",
+        "entrypoint": "build_link_row",
+        "source": "from pathlib import Path\nimport importlib.util\n\npath = Path('tools/demo/trail-running/pipelines/coffee_recommendations.py')\nif not path.exists():\n    path = Path('pipelines/coffee_recommendations.py')\nspec = importlib.util.spec_from_file_location('coffee_recommendations', path)\nmodule = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\nresult_rows = [module.build_link_row(row) for row in input_rows]\n"
+      },
+      "input_ports": [
+        {
+          "id": "in",
+          "direction": "input",
+          "port_type": "dataset"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "out",
+          "direction": "output",
+          "port_type": "dataset"
+        }
+      ],
+      "output_schema": {
+        "fields": [
+          {
+            "name": "link_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "link_type_api_name",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "source_object_type",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "source_object_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_object_type",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_object_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "trail_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "coffee_shop_id",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "rank",
+            "field_type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "distance_meters",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "distance_miles",
+            "field_type": "double",
+            "nullable": false
+          },
+          {
+            "name": "line_geojson",
+            "field_type": "geojson",
+            "nullable": false
+          },
+          {
+            "name": "relationship_label",
+            "field_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "recommendation_model",
+            "field_type": "string",
+            "nullable": false
+          }
+        ],
+        "metadata": {
+          "crs": "EPSG:4326",
+          "source_object_type": "Trail",
+          "target_object_type": "CoffeeShop"
+        }
+      },
+      "position": {
+        "x": 720,
+        "y": 360
+      }
+    },
+    {
+      "id": "coffee_shop_dataset_output",
+      "label": "CoffeeShop dataset output",
+      "transform_type": "output_dataset",
+      "depends_on": [
+        "coffee_shop_rows_input"
+      ],
+      "output_dataset_id": "c3f79350-9d87-4ea8-9a29-7a9ac6b09101",
+      "config": {
+        "_output": {
+          "kind": "dataset",
+          "dataset_name": "CoffeeShop",
+          "display_name": "CoffeeShop",
+          "dataset_rid": "ri.openfoundry.demo.dataset.coffee-shop",
+          "branch": "main",
+          "write_mode": "SNAPSHOT",
+          "file_format": "JSON",
+          "logical_path": "trail-running/coffee_shop"
+        }
+      },
+      "input_ports": [
+        {
+          "id": "in",
+          "direction": "input",
+          "port_type": "dataset"
+        }
+      ],
+      "position": {
+        "x": 720,
+        "y": 96
+      }
+    },
+    {
+      "id": "coffee_shop_object_output",
+      "label": "CoffeeShop object type output",
+      "transform_type": "output_object_type",
+      "depends_on": [
+        "coffee_shop_rows_input"
+      ],
+      "output_dataset_id": "c3f79350-9d87-4ea8-9a29-7a9ac6b09103",
+      "config": {
+        "_output": {
+          "kind": "object_type",
+          "dataset_rid": "ri.openfoundry.demo.dataset.coffee-shop",
+          "object_type_id": "c3f79350-9d87-4ea8-9a29-7a9ac6b09201",
+          "object_type_name": "CoffeeShop",
+          "display_name": "Coffee Shop",
+          "plural_name": "CoffeeShops",
+          "plural_display_name": "Coffee Shops",
+          "primary_key": "coffee_shop_id",
+          "icon": "coffee",
+          "color": "#8B5E34",
+          "editable": false,
+          "property_mapping": [
+            {
+              "source_field": "coffee_shop_id",
+              "target_property": "coffeeShopId",
+              "display_name": "Coffee Shop ID",
+              "property_type": "string",
+              "required": true,
+              "unique_constraint": true
+            },
+            {
+              "source_field": "name",
+              "target_property": "name",
+              "display_name": "Name",
+              "property_type": "string",
+              "required": true
+            },
+            {
+              "source_field": "latitude",
+              "target_property": "latitude",
+              "display_name": "Latitude",
+              "property_type": "double",
+              "required": true
+            },
+            {
+              "source_field": "longitude",
+              "target_property": "longitude",
+              "display_name": "Longitude",
+              "property_type": "double",
+              "required": true
+            },
+            {
+              "source_field": "neighborhood",
+              "target_property": "neighborhood",
+              "display_name": "Neighborhood",
+              "property_type": "string",
+              "required": true
+            },
+            {
+              "source_field": "rating",
+              "target_property": "rating",
+              "display_name": "Rating",
+              "property_type": "double",
+              "required": true
+            },
+            {
+              "source_field": "walkup_window",
+              "target_property": "walkupWindow",
+              "display_name": "Walkup Window",
+              "property_type": "boolean",
+              "required": true
+            }
+          ]
+        }
+      },
+      "input_ports": [
+        {
+          "id": "in",
+          "direction": "input",
+          "port_type": "dataset"
+        }
+      ],
+      "position": {
+        "x": 720,
+        "y": 184
+      }
+    },
+    {
+      "id": "trail_coffee_recommendation_dataset_output",
+      "label": "TrailCoffeeRecommendation dataset output",
+      "transform_type": "output_dataset",
+      "depends_on": [
+        "nearest_coffee_by_trail"
+      ],
+      "output_dataset_id": "c3f79350-9d87-4ea8-9a29-7a9ac6b09301",
+      "config": {
+        "_output": {
+          "kind": "dataset",
+          "dataset_name": "TrailCoffeeRecommendation",
+          "display_name": "TrailCoffeeRecommendation",
+          "dataset_rid": "ri.openfoundry.demo.dataset.trail-coffee-recommendation",
+          "branch": "main",
+          "write_mode": "SNAPSHOT",
+          "file_format": "JSON",
+          "logical_path": "trail-running/trail_coffee_recommendation"
+        }
+      },
+      "input_ports": [
+        {
+          "id": "in",
+          "direction": "input",
+          "port_type": "dataset"
+        }
+      ],
+      "position": {
+        "x": 1040,
+        "y": 176
+      }
+    },
+    {
+      "id": "trail_coffee_recommendation_object_output",
+      "label": "TrailCoffeeRecommendation object type output",
+      "transform_type": "output_object_type",
+      "depends_on": [
+        "nearest_coffee_by_trail"
+      ],
+      "output_dataset_id": "c3f79350-9d87-4ea8-9a29-7a9ac6b09303",
+      "config": {
+        "_output": {
+          "kind": "object_type",
+          "dataset_rid": "ri.openfoundry.demo.dataset.trail-coffee-recommendation",
+          "object_type_id": "c3f79350-9d87-4ea8-9a29-7a9ac6b09401",
+          "object_type_name": "TrailCoffeeRecommendation",
+          "display_name": "Trail Coffee Recommendation",
+          "plural_name": "TrailCoffeeRecommendations",
+          "plural_display_name": "Trail Coffee Recommendations",
+          "primary_key": "recommendation_id",
+          "icon": "coffee",
+          "color": "#B7791F",
+          "editable": false,
+          "property_mapping": [
+            {
+              "source_field": "recommendation_id",
+              "target_property": "recommendationId",
+              "display_name": "Recommendation ID",
+              "property_type": "string",
+              "required": true,
+              "unique_constraint": true
+            },
+            {
+              "source_field": "trail_id",
+              "target_property": "trailId",
+              "display_name": "Trail ID",
+              "property_type": "string",
+              "required": true
+            },
+            {
+              "source_field": "coffee_shop_id",
+              "target_property": "coffeeShopId",
+              "display_name": "Coffee Shop ID",
+              "property_type": "string",
+              "required": true
+            },
+            {
+              "source_field": "rank",
+              "target_property": "rank",
+              "display_name": "Rank",
+              "property_type": "integer",
+              "required": true
+            },
+            {
+              "source_field": "distance_miles",
+              "target_property": "distanceMiles",
+              "display_name": "Distance Miles",
+              "property_type": "double",
+              "required": true
+            },
+            {
+              "source_field": "line_geojson",
+              "target_property": "lineGeojson",
+              "display_name": "Trail to Coffee Line",
+              "property_type": "geoshape",
+              "required": true
+            }
+          ]
+        }
+      },
+      "input_ports": [
+        {
+          "id": "in",
+          "direction": "input",
+          "port_type": "dataset"
+        }
+      ],
+      "position": {
+        "x": 1040,
+        "y": 264
+      }
+    },
+    {
+      "id": "trail_coffee_link_dataset_output",
+      "label": "TrailCoffeeLink dataset output",
+      "transform_type": "output_dataset",
+      "depends_on": [
+        "trail_coffee_link_table"
+      ],
+      "output_dataset_id": "c3f79350-9d87-4ea8-9a29-7a9ac6b09501",
+      "config": {
+        "_output": {
+          "kind": "dataset",
+          "dataset_name": "TrailCoffeeLink",
+          "display_name": "TrailCoffeeLink",
+          "dataset_rid": "ri.openfoundry.demo.dataset.trail-coffee-link",
+          "branch": "main",
+          "write_mode": "SNAPSHOT",
+          "file_format": "JSON",
+          "logical_path": "trail-running/trail_coffee_link"
+        }
+      },
+      "input_ports": [
+        {
+          "id": "in",
+          "direction": "input",
+          "port_type": "dataset"
+        }
+      ],
+      "position": {
+        "x": 1040,
+        "y": 400
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "trail_rows_input->nearest_coffee_by_trail",
+      "source_node_id": "trail_rows_input",
+      "source_port_id": "out",
+      "target_node_id": "nearest_coffee_by_trail",
+      "target_port_id": "trails",
+      "edge_type": "data_dependency"
+    },
+    {
+      "id": "coffee_shop_rows_input->nearest_coffee_by_trail",
+      "source_node_id": "coffee_shop_rows_input",
+      "source_port_id": "out",
+      "target_node_id": "nearest_coffee_by_trail",
+      "target_port_id": "coffee",
+      "edge_type": "data_dependency"
+    },
+    {
+      "id": "nearest_coffee_by_trail->trail_coffee_link_table",
+      "source_node_id": "nearest_coffee_by_trail",
+      "source_port_id": "out",
+      "target_node_id": "trail_coffee_link_table",
+      "target_port_id": "in",
+      "edge_type": "data_dependency"
+    },
+    {
+      "id": "coffee_shop_rows_input->coffee_shop_dataset_output",
+      "source_node_id": "coffee_shop_rows_input",
+      "source_port_id": "out",
+      "target_node_id": "coffee_shop_dataset_output",
+      "target_port_id": "in",
+      "edge_type": "data_dependency"
+    },
+    {
+      "id": "coffee_shop_rows_input->coffee_shop_object_output",
+      "source_node_id": "coffee_shop_rows_input",
+      "source_port_id": "out",
+      "target_node_id": "coffee_shop_object_output",
+      "target_port_id": "in",
+      "edge_type": "data_dependency"
+    },
+    {
+      "id": "nearest_coffee_by_trail->trail_coffee_recommendation_dataset_output",
+      "source_node_id": "nearest_coffee_by_trail",
+      "source_port_id": "out",
+      "target_node_id": "trail_coffee_recommendation_dataset_output",
+      "target_port_id": "in",
+      "edge_type": "data_dependency"
+    },
+    {
+      "id": "nearest_coffee_by_trail->trail_coffee_recommendation_object_output",
+      "source_node_id": "nearest_coffee_by_trail",
+      "source_port_id": "out",
+      "target_node_id": "trail_coffee_recommendation_object_output",
+      "target_port_id": "in",
+      "edge_type": "data_dependency"
+    },
+    {
+      "id": "trail_coffee_link_table->trail_coffee_link_dataset_output",
+      "source_node_id": "trail_coffee_link_table",
+      "source_port_id": "out",
+      "target_node_id": "trail_coffee_link_dataset_output",
+      "target_port_id": "in",
+      "edge_type": "data_dependency"
+    }
+  ],
+  "outputs": [
+    {
+      "id": "coffee_shop_dataset",
+      "name": "CoffeeShop dataset",
+      "output_type": "dataset_output",
+      "resource_id": "coffee_shop_dataset",
+      "produced_by": "coffee_shop_dataset_output"
+    },
+    {
+      "id": "coffee_shop_object_type",
+      "name": "CoffeeShop object type",
+      "output_type": "object_type_output",
+      "resource_id": "coffee_shop_object_type",
+      "produced_by": "coffee_shop_object_output"
+    },
+    {
+      "id": "trail_coffee_recommendation_dataset",
+      "name": "TrailCoffeeRecommendation dataset",
+      "output_type": "dataset_output",
+      "resource_id": "trail_coffee_recommendation_dataset",
+      "produced_by": "trail_coffee_recommendation_dataset_output"
+    },
+    {
+      "id": "trail_coffee_recommendation_object_type",
+      "name": "TrailCoffeeRecommendation object type",
+      "output_type": "object_type_output",
+      "resource_id": "trail_coffee_recommendation_object_type",
+      "produced_by": "trail_coffee_recommendation_object_output"
+    },
+    {
+      "id": "trail_coffee_link_dataset",
+      "name": "TrailCoffeeLink dataset",
+      "output_type": "dataset_output",
+      "resource_id": "trail_coffee_link_dataset",
+      "produced_by": "trail_coffee_link_dataset_output"
+    }
+  ],
+  "version_metadata": {
+    "authoring_version": 1,
+    "created_from": "trail-running-demo-fixture-pack",
+    "updated_by": "DEMO.5"
+  }
+}

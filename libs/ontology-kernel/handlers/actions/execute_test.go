@@ -602,6 +602,56 @@ func seedPropertyDefinition(t *testing.T, state *ontologykernel.AppState, object
 	}
 }
 
+func seedFunctionPackageDefinition(t *testing.T, state *ontologykernel.AppState, pkg models.FunctionPackage) {
+	t.Helper()
+	now := time.Now().UTC()
+	if pkg.ID == uuid.Nil {
+		pkg.ID = uuid.New()
+	}
+	if pkg.Name == "" {
+		pkg.Name = "fn_" + pkg.ID.String()[:8]
+	}
+	if pkg.Version == "" {
+		pkg.Version = "1.0.0"
+	}
+	if pkg.DisplayName == "" {
+		pkg.DisplayName = pkg.Name
+	}
+	if pkg.Runtime == "" {
+		pkg.Runtime = "python"
+	}
+	if pkg.Entrypoint == "" {
+		pkg.Entrypoint = "default"
+	}
+	if pkg.Capabilities.TimeoutSeconds == 0 {
+		pkg.Capabilities = models.DefaultFunctionCapabilities()
+	}
+	if pkg.OwnerID == uuid.Nil {
+		pkg.OwnerID = uuid.New()
+	}
+	if pkg.CreatedAt.IsZero() {
+		pkg.CreatedAt = now
+	}
+	if pkg.UpdatedAt.IsZero() {
+		pkg.UpdatedAt = now
+	}
+	payload, _ := json.Marshal(pkg)
+	owner := pkg.OwnerID.String()
+	created := pkg.CreatedAt.UnixMilli()
+	updated := pkg.UpdatedAt.UnixMilli()
+	_, err := state.Stores.Definitions.Put(context.Background(), storage.DefinitionRecord{
+		Kind:        storage.DefinitionKind("function_package"),
+		ID:          storage.DefinitionId(pkg.ID.String()),
+		OwnerID:     &owner,
+		Payload:     payload,
+		CreatedAtMs: &created,
+		UpdatedAtMs: &updated,
+	}, nil)
+	if err != nil {
+		t.Fatalf("seed function package: %v", err)
+	}
+}
+
 func seedInterfaceDefinition(t *testing.T, state *ontologykernel.AppState, interfaceID uuid.UUID) {
 	t.Helper()
 	now := time.Now().UTC()
@@ -805,6 +855,72 @@ func (f staticActionFunctionRuntime) ExecuteInlineFunction(context.Context, *ont
 	return f.result, nil
 }
 
+func TestPlanInvokeFunctionPackageActionAppliesObjectPatch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	state := newTestState(t)
+	objectTypeID := uuid.New()
+	objectID := uuid.New()
+	packageID := uuid.New()
+	seedObjectTypeDefinition(t, state, objectTypeID)
+	seedPropertyDefinition(t, state, objectTypeID, "status", "string")
+	seedFunctionPackageDefinition(t, state, models.FunctionPackage{
+		ID:      packageID,
+		Name:    "trail_effort",
+		Version: "1.0.0",
+		Runtime: "python",
+		Source:  "result = {'object_patch': {'status': 'closed'}, 'output': {'ok': True}}",
+	})
+	_, err := state.Stores.Objects.Put(ctx, storage.Object{
+		Tenant:      storage.TenantId("default"),
+		ID:          storage.ObjectId(objectID.String()),
+		TypeID:      storage.TypeId(objectTypeID.String()),
+		Payload:     json.RawMessage(`{"status":"open"}`),
+		UpdatedAtMs: time.Now().UTC().UnixMilli(),
+	}, nil)
+	if err != nil {
+		t.Fatalf("seed object: %v", err)
+	}
+	config, _ := json.Marshal(map[string]any{"function_package_id": packageID})
+	action := models.ActionType{
+		ID:            uuid.New(),
+		ObjectTypeID:  objectTypeID,
+		OperationKind: "invoke_function",
+		Name:          "run_trail_effort",
+		Config:        config,
+	}
+	req := &models.ValidateActionRequest{TargetObjectID: &objectID, Parameters: json.RawMessage(`{}`)}
+	claims := &authmw.Claims{Sub: uuid.New(), Roles: []string{"admin"}}
+	plan, errs := planAction(ctx, state, claims, action, req)
+	if len(errs) > 0 {
+		t.Fatalf("planAction: %v", errs)
+	}
+	if plan.inlineFunction == nil || plan.inlineFunction.Package == nil || plan.inlineFunction.Package.ID != packageID {
+		t.Fatalf("function package was not resolved into plan: %+v", plan.inlineFunction)
+	}
+
+	executed, err := executePlanWithRuntime(ctx, state, claims, action, plan, staticActionFunctionRuntime{
+		result: json.RawMessage(`{"object_patch":{"status":"closed"},"output":{"ok":true}}`),
+	})
+	if err != nil {
+		t.Fatalf("executePlanWithRuntime: %v", err)
+	}
+	if executed.targetObjectID == nil || *executed.targetObjectID != objectID || len(executed.object) == 0 {
+		t.Fatalf("execution did not report target object update: %+v", executed)
+	}
+	stored, err := state.Stores.Objects.Get(ctx, storage.TenantId("default"), storage.ObjectId(objectID.String()), storage.Strong())
+	if err != nil {
+		t.Fatalf("load object: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(stored.Payload, &payload); err != nil {
+		t.Fatalf("payload json: %v", err)
+	}
+	if payload["status"] != "closed" {
+		t.Fatalf("object patch was not applied: %+v", payload)
+	}
+}
+
 func TestExecuteActionAuditFailureDoesNotBreakSuccessResponse(t *testing.T) {
 	t.Parallel()
 	state := newTestState(t)
@@ -905,6 +1021,153 @@ func TestExecutePlanInvokeWebhookHTTPReturnsResult(t *testing.T) {
 	}
 	if string(executed.result) != `{"ok":true}` {
 		t.Fatalf("result drift: %s", executed.result)
+	}
+}
+
+func TestExecuteActionWebhookWritebackFeedsObjectEditAndSideEffect(t *testing.T) {
+	ctx := context.Background()
+	state := newTestState(t)
+	objectTypeID := uuid.New()
+	objectID := uuid.New()
+	writebackID := uuid.New()
+	sideEffectID := uuid.New()
+	actorID := uuid.New()
+	seedObjectTypeDefinition(t, state, objectTypeID)
+	seedPropertyDefinition(t, state, objectTypeID, "temperature_f", "double")
+	seedPropertyDefinition(t, state, objectTypeID, "wind_mph", "double")
+	if _, err := state.Stores.Objects.Put(ctx, storage.Object{
+		Tenant:      storage.TenantId("default"),
+		ID:          storage.ObjectId(objectID.String()),
+		TypeID:      storage.TypeId(objectTypeID.String()),
+		Payload:     json.RawMessage(`{"temperature_f":0,"wind_mph":0}`),
+		UpdatedAtMs: time.Now().UTC().UnixMilli(),
+	}, nil); err != nil {
+		t.Fatalf("seed object: %v", err)
+	}
+
+	connectorHits := map[string]int{}
+	connector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			t.Errorf("missing connector bearer token: %q", authHeader)
+		} else if claims, err := authmw.DecodeToken(state.JWTConfig, strings.TrimPrefix(authHeader, "Bearer ")); err != nil {
+			t.Errorf("connector bearer token did not decode: %v", err)
+		} else if !claims.HasPermission("webhooks", "invoke") {
+			t.Errorf("connector bearer token lacks webhook invoke permission: %+v", claims.Permissions)
+		}
+
+		var body struct {
+			Inputs map[string]json.RawMessage `json:"inputs"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode connector body: %v", err)
+		}
+		switch r.URL.Path {
+		case "/api/v1/webhooks/" + writebackID.String() + "/invoke":
+			connectorHits["writeback"]++
+			if got := string(body.Inputs["latitude"]); got != "40.016353" {
+				t.Errorf("writeback latitude mapping drift: %s", got)
+			}
+			if got := string(body.Inputs["longitude"]); got != "-105.34458" {
+				t.Errorf("writeback nested longitude mapping drift: %s", got)
+			}
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"output_parameters":{"temperature":84,"wind_speed":4.8}}`))
+		case "/api/v1/webhooks/" + sideEffectID.String() + "/invoke":
+			connectorHits["side_effect"]++
+			if got := string(body.Inputs["temperature"]); got != "84" {
+				t.Errorf("side-effect input mapping drift: %s", got)
+			}
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"output_parameters":{"notified":true}}`))
+		default:
+			t.Errorf("unexpected connector path: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer connector.Close()
+	state.ConnectorManagementServiceURL = connector.URL
+	state.HTTPClient = connector.Client()
+
+	config, _ := json.Marshal(map[string]any{
+		"operation": map[string]any{
+			"property_mappings": []map[string]any{
+				{"property_name": "temperature_f", "input_name": "webhook_output.temperature"},
+				{"property_name": "wind_mph", "input_name": "wind"},
+			},
+		},
+		"webhook_writeback": map[string]any{
+			"webhook_id": writebackID.String(),
+			"input_mappings": []map[string]any{
+				{"webhook_input_name": "latitude", "action_input_name": "latitude"},
+				{"webhook_input_name": "longitude", "action_input_name": "trail.longitude"},
+			},
+			"output_mappings": []map[string]any{
+				{"webhook_output_name": "wind_speed", "action_parameter_name": "wind"},
+			},
+		},
+		"webhook_side_effects": []map[string]any{
+			{
+				"webhook_id": sideEffectID.String(),
+				"input_mappings": []map[string]any{
+					{"webhook_input_name": "temperature", "action_input_name": "webhook_output.temperature"},
+				},
+			},
+		},
+	})
+	now := time.Now().UTC()
+	action := models.ActionType{
+		ID:            uuid.New(),
+		ObjectTypeID:  objectTypeID,
+		OperationKind: "update_object",
+		Name:          "get_weather",
+		DisplayName:   "Get Weather",
+		Config:        config,
+		OwnerID:       actorID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	record, err := domain.ActionToRecord(action)
+	if err != nil {
+		t.Fatalf("ActionToRecord: %v", err)
+	}
+	if _, err := state.Stores.Definitions.Put(ctx, record, nil); err != nil {
+		t.Fatalf("seed action: %v", err)
+	}
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", action.ID.String())
+	claims := &authmw.Claims{Sub: actorID, Email: "runner@example.com", Roles: []string{"admin"}}
+	reqCtx := context.WithValue(authmw.ContextWithClaims(ctx, claims), chi.RouteCtxKey, rctx)
+	body, _ := json.Marshal(map[string]any{
+		"target_object_id": objectID,
+		"parameters": map[string]any{
+			"latitude": 40.016353,
+			"trail": map[string]any{
+				"longitude": -105.34458,
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/ontology/actions/"+action.ID.String()+"/execute", bytes.NewReader(body)).WithContext(reqCtx)
+	rec := httptest.NewRecorder()
+
+	ExecuteAction(state).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if connectorHits["writeback"] != 1 || connectorHits["side_effect"] != 1 {
+		t.Fatalf("connector hit drift: %+v", connectorHits)
+	}
+	stored, err := state.Stores.Objects.Get(ctx, storage.TenantId("default"), storage.ObjectId(objectID.String()), storage.Strong())
+	if err != nil {
+		t.Fatalf("load object: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(stored.Payload, &payload); err != nil {
+		t.Fatalf("payload json: %v", err)
+	}
+	if payload["temperature_f"] != float64(84) || payload["wind_mph"] != 4.8 {
+		t.Fatalf("webhook outputs were not applied to object edit: %+v", payload)
 	}
 }
 

@@ -1,0 +1,188 @@
+{
+  "action_id": "fetch_trail_weather",
+  "api_name": "FetchTrailWeather",
+  "name": "fetch_trail_weather",
+  "display_name": "Get Weather",
+  "description": "Fetch current Open-Meteo weather for a selected trailhead and write a WeatherSnapshot object.",
+  "object_type_api_name": "WeatherSnapshot",
+  "operation_kind": "create_or_modify_object",
+  "input_schema": [
+    {
+      "name": "trail_id",
+      "type": "string",
+      "required": true,
+      "description": "Selected Trail primary key."
+    },
+    {
+      "name": "trail_name",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "latitude",
+      "type": "number",
+      "required": true
+    },
+    {
+      "name": "longitude",
+      "type": "number",
+      "required": true
+    },
+    {
+      "name": "trailhead_geopoint",
+      "type": "string",
+      "required": true
+    }
+  ],
+  "form_schema": {
+    "sections": [
+      {
+        "id": "trail",
+        "title": "Selected Trail",
+        "parameter_names": [
+          "trail_id",
+          "trail_name",
+          "latitude",
+          "longitude"
+        ],
+        "columns": 2
+      }
+    ],
+    "parameter_overrides": [
+      {
+        "parameter_name": "trail_id",
+        "default_value": {
+          "kind": "active_object_property",
+          "property": "trail_id"
+        },
+        "hidden": true
+      },
+      {
+        "parameter_name": "trail_name",
+        "default_value": {
+          "kind": "active_object_property",
+          "property": "trail_name"
+        },
+        "disabled": true
+      },
+      {
+        "parameter_name": "latitude",
+        "default_value": {
+          "kind": "active_object_property",
+          "property": "start_lat"
+        },
+        "disabled": true
+      },
+      {
+        "parameter_name": "longitude",
+        "default_value": {
+          "kind": "active_object_property",
+          "property": "start_lon"
+        },
+        "disabled": true
+      }
+    ]
+  },
+  "config": {
+    "operation": {
+      "object_id_input_name": "weather_snapshot_id",
+      "property_mappings": [
+        {
+          "property_name": "weather_snapshot_id",
+          "input_name": "weather_snapshot_id"
+        },
+        {
+          "property_name": "trail_id",
+          "input_name": "trail_id"
+        },
+        {
+          "property_name": "trail_name",
+          "input_name": "trail_name"
+        },
+        {
+          "property_name": "latitude",
+          "input_name": "latitude"
+        },
+        {
+          "property_name": "longitude",
+          "input_name": "longitude"
+        },
+        {
+          "property_name": "trailhead_geopoint",
+          "input_name": "trailhead_geopoint"
+        },
+        {
+          "property_name": "weather_time",
+          "input_name": "webhook_output.weather_time"
+        },
+        {
+          "property_name": "temperature_f",
+          "input_name": "webhook_output.temperature_f"
+        },
+        {
+          "property_name": "humidity_percent",
+          "input_name": "webhook_output.humidity_percent"
+        },
+        {
+          "property_name": "wind_speed_mph",
+          "input_name": "webhook_output.wind_speed_mph"
+        },
+        {
+          "property_name": "wind_direction_degrees",
+          "input_name": "webhook_output.wind_direction_degrees"
+        },
+        {
+          "property_name": "source",
+          "value": "open-meteo"
+        },
+        {
+          "property_name": "writeback_status",
+          "value": "succeeded"
+        }
+      ]
+    },
+    "webhook_writeback": {
+      "webhook_id": "open_meteo_current_weather",
+      "output_parameter_alias": "webhook_output",
+      "input_mappings": [
+        {
+          "webhook_input_name": "latitude",
+          "action_input_name": "latitude"
+        },
+        {
+          "webhook_input_name": "longitude",
+          "action_input_name": "longitude"
+        }
+      ],
+      "output_mappings": [
+        {
+          "webhook_output_name": "weather_time",
+          "action_parameter_name": "weather_time"
+        },
+        {
+          "webhook_output_name": "temperature_f",
+          "action_parameter_name": "temperature_f"
+        },
+        {
+          "webhook_output_name": "humidity_percent",
+          "action_parameter_name": "humidity_percent"
+        },
+        {
+          "webhook_output_name": "wind_speed_mph",
+          "action_parameter_name": "wind_speed_mph"
+        },
+        {
+          "webhook_output_name": "wind_direction_degrees",
+          "action_parameter_name": "wind_direction_degrees"
+        }
+      ]
+    }
+  },
+  "authorization_policy": {
+    "required_permissions": [
+      "actions:execute",
+      "webhooks:invoke",
+      "objects:write"
+    ]
+  }
+}

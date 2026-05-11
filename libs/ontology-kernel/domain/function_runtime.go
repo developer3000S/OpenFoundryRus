@@ -459,6 +459,12 @@ func loadFunctionPackage(
 	state *ontologykernel.AppState,
 	id uuid.UUID,
 ) (*models.FunctionPackage, error) {
+	if state == nil {
+		return nil, errors.New("function package state is not configured")
+	}
+	if state.DB == nil {
+		return loadFunctionPackageFromDefinitions(ctx, state, id)
+	}
 	var row models.FunctionPackageRow
 	err := state.DB.QueryRow(ctx, `
 		SELECT id, name, version, display_name, description, runtime, source, entrypoint,
@@ -488,6 +494,12 @@ func loadFunctionPackagesByName(
 	state *ontologykernel.AppState,
 	name string,
 ) ([]models.FunctionPackage, error) {
+	if state == nil {
+		return nil, errors.New("function package state is not configured")
+	}
+	if state.DB == nil {
+		return loadFunctionPackagesByNameFromDefinitions(ctx, state, name)
+	}
 	rows, err := state.DB.Query(ctx, `
 		SELECT id, name, version, display_name, description, runtime, source, entrypoint,
 		       capabilities, owner_id, created_at, updated_at
@@ -511,6 +523,56 @@ func loadFunctionPackagesByName(
 		out = append(out, row.IntoPackage())
 	}
 	return out, rows.Err()
+}
+
+func loadFunctionPackageFromDefinitions(
+	ctx context.Context,
+	state *ontologykernel.AppState,
+	id uuid.UUID,
+) (*models.FunctionPackage, error) {
+	if state.Stores.Definitions == nil {
+		return nil, errors.New("function package definition store is not configured")
+	}
+	rec, err := state.Stores.Definitions.Get(ctx, storage.DefinitionKind("function_package"), storage.DefinitionId(id.String()), storage.Strong())
+	if err != nil {
+		return nil, fmt.Errorf("failed to load function package: %w", err)
+	}
+	if rec == nil {
+		return nil, nil
+	}
+	var pkg models.FunctionPackage
+	if err := json.Unmarshal(rec.Payload, &pkg); err != nil {
+		return nil, fmt.Errorf("invalid function package definition: %w", err)
+	}
+	return &pkg, nil
+}
+
+func loadFunctionPackagesByNameFromDefinitions(
+	ctx context.Context,
+	state *ontologykernel.AppState,
+	name string,
+) ([]models.FunctionPackage, error) {
+	if state.Stores.Definitions == nil {
+		return nil, errors.New("function package definition store is not configured")
+	}
+	page, err := state.Stores.Definitions.List(ctx, storage.DefinitionQuery{
+		Kind: storage.DefinitionKind("function_package"),
+		Page: storage.Page{Size: 10_000},
+	}, storage.Strong())
+	if err != nil {
+		return nil, fmt.Errorf("failed to load function packages: %w", err)
+	}
+	out := []models.FunctionPackage{}
+	for _, rec := range page.Items {
+		var pkg models.FunctionPackage
+		if err := json.Unmarshal(rec.Payload, &pkg); err != nil {
+			return nil, fmt.Errorf("invalid function package definition: %w", err)
+		}
+		if pkg.Name == name {
+			out = append(out, pkg)
+		}
+	}
+	return out, nil
 }
 
 // ── Execution dispatcher ────────────────────────────────────────────
@@ -609,6 +671,10 @@ func ExecuteInlinePythonFunction(
 		"serviceToken":       serviceToken,
 		"ontologyServiceUrl": state.OntologyServiceURL,
 		"aiServiceUrl":       state.AIServiceURL,
+		"dataConnection": map[string]any{
+			"connectorManagementServiceUrl": state.ConnectorManagementServiceURL,
+		},
+		"connectorManagementServiceUrl": state.ConnectorManagementServiceURL,
 	}
 	envelopeJSON, err := json.Marshal(envelope)
 	if err != nil {
@@ -691,6 +757,10 @@ func executeInlineTypeScriptFunction(
 		"serviceToken":       serviceToken,
 		"ontologyServiceUrl": state.OntologyServiceURL,
 		"aiServiceUrl":       state.AIServiceURL,
+		"dataConnection": map[string]any{
+			"connectorManagementServiceUrl": state.ConnectorManagementServiceURL,
+		},
+		"connectorManagementServiceUrl": state.ConnectorManagementServiceURL,
 	}
 
 	tempDir, err := os.MkdirTemp("", "of-ontology-inline-ts-*")

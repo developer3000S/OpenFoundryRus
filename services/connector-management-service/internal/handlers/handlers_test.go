@@ -2,6 +2,9 @@ package handlers_test
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -65,6 +68,180 @@ func TestCreateConnectionRejectsEmptyFields(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.CreateConnection(rec, req)
 	assert.Equal(t, 400, rec.Code)
+}
+
+func TestCreateRestAPISourceNormalizesOutboundWebhookModel(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	req := httptest.NewRequest(http.MethodPost, "/sources", strings.NewReader(`{
+		"name":"Open-Meteo",
+		"connector_type":"rest_api",
+		"config":{
+			"domain":"api.open-meteo.com",
+			"auth":{"type":"none"},
+			"runtime":{"worker":"foundry","timeout_ms":15000,"allowed_methods":["get","post"]},
+			"permissions":{"invokable":true},
+			"webhook":{"path":"/v1/forecast"}
+		}
+	}`))
+	req = req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner}))
+	rec := httptest.NewRecorder()
+
+	h.CreateConnection(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var body models.Connection
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	var cfg models.RESTAPISourceConfig
+	require.NoError(t, json.Unmarshal(body.Config, &cfg))
+	require.Equal(t, "Open-Meteo", body.Name)
+	require.Equal(t, "rest_api", body.ConnectorType)
+	require.Equal(t, "api.open-meteo.com", cfg.Domain)
+	require.Equal(t, "https://api.open-meteo.com", cfg.BaseURL)
+	require.Equal(t, "none", cfg.Auth.Type)
+	require.Equal(t, "foundry", cfg.Runtime.Worker)
+	require.Equal(t, 15000, cfg.Runtime.TimeoutMS)
+	require.Equal(t, []string{"GET", "POST"}, cfg.Runtime.AllowedMethods)
+	require.True(t, cfg.Permissions.Invokable)
+	require.Equal(t, []string{"api.open-meteo.com"}, cfg.Permissions.AllowedEgressHosts)
+	require.NotNil(t, cfg.Webhook)
+	require.Equal(t, "GET", cfg.Webhook.Method)
+	require.Equal(t, "/v1/forecast", cfg.Webhook.Path)
+}
+
+func TestCreateRestAPISourceRejectsInvalidDomain(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	req := httptest.NewRequest(http.MethodPost, "/sources", strings.NewReader(`{
+		"name":"bad",
+		"connector_type":"rest_api",
+		"config":{"base_url":"ftp://example.com"}
+	}`))
+	req = req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner}))
+	rec := httptest.NewRecorder()
+
+	h.CreateConnection(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "http or https")
+}
+
+func TestUpdateRestAPISourceNormalizesConfig(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	store.connections[0].ConnectorType = "rest_api"
+	h := &handlers.Handlers{Repo: store}
+	req := httptest.NewRequest(http.MethodPatch, "/sources/"+store.connections[0].ID.String(), strings.NewReader(`{
+		"config":{
+			"base_url":"https://api.example.com/",
+			"auth":{"type":"bearer","secret_ref":"secret://weather-token"},
+			"runtime":{"worker":"agent","timeout_ms":30000,"allowed_methods":["GET"]},
+			"permissions":{"discoverable":true,"invokable":true,"allowed_egress_hosts":["api.example.com"]}
+		}
+	}`))
+	req = req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner}))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", store.connections[0].ID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rec := httptest.NewRecorder()
+
+	h.UpdateConnection(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var body models.Connection
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	var cfg models.RESTAPISourceConfig
+	require.NoError(t, json.Unmarshal(body.Config, &cfg))
+	require.Equal(t, "api.example.com", cfg.Domain)
+	require.Equal(t, "https://api.example.com", cfg.BaseURL)
+	require.Equal(t, "bearer", cfg.Auth.Type)
+	require.Equal(t, "secret://weather-token", cfg.Auth.SecretRef)
+	require.Equal(t, "agent", cfg.Runtime.Worker)
+	require.Equal(t, []string{"GET"}, cfg.Runtime.AllowedMethods)
+}
+
+func TestWebhookHistoryRepositoryContract(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	sourceID := store.connections[0].ID
+	now := time.Now().UTC()
+
+	entry, err := store.AppendWebhookHistory(context.Background(), &models.CreateWebhookHistoryEntry{
+		SourceID: sourceID,
+		UserID:   owner,
+		Status:   "succeeded",
+		InputPolicy: models.WebhookHistoryInputPolicy{
+			StoreOutputs: true,
+			Visibility:   "hidden",
+		},
+		OutputParameters:   json.RawMessage(`{"temperature":84}`),
+		StartedAt:          now.Add(-25 * time.Millisecond),
+		FinishedAt:         now,
+		RetentionExpiresAt: now.Add(time.Hour),
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, entry.ID)
+	require.Positive(t, entry.DurationMS)
+
+	expiredErr := "expired"
+	_, err = store.AppendWebhookHistory(context.Background(), &models.CreateWebhookHistoryEntry{
+		SourceID:           sourceID,
+		UserID:             owner,
+		Status:             "failed",
+		Error:              &expiredErr,
+		StartedAt:          now.Add(-2 * time.Hour),
+		FinishedAt:         now.Add(-2 * time.Hour),
+		RetentionExpiresAt: now.Add(-time.Hour),
+	})
+	require.NoError(t, err)
+
+	items, err := store.ListWebhookHistory(context.Background(), sourceID, 10)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "succeeded", items[0].Status)
+	assert.JSONEq(t, `{"temperature":84}`, string(items[0].OutputParameters))
+
+	items, err = store.ListWebhookHistory(context.Background(), sourceID, 1)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+}
+
+func TestInboundListenerRepositoryContract(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	sourceID := store.connections[0].ID
+	objectTypeID := uuid.New()
+
+	entry, err := store.AppendInboundListenerEvent(context.Background(), &models.CreateInboundListenerEvent{
+		SourceID:          sourceID,
+		ListenerID:        "trail-events",
+		EventID:           "evt-1",
+		Status:            "accepted",
+		SignatureVerified: true,
+		Payload:           json.RawMessage(`{"trail_id":"mule-deer"}`),
+		Destination: models.InboundListenerDestinationConfig{
+			Mode:         "object",
+			ObjectTypeID: &objectTypeID,
+		},
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, entry.ID)
+
+	items, err := store.ListInboundListenerEvents(context.Background(), sourceID, 10)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "trail-events", items[0].ListenerID)
+	assert.Equal(t, "evt-1", items[0].EventID)
+	assert.True(t, items[0].SignatureVerified)
+	assert.Equal(t, objectTypeID, *items[0].Destination.ObjectTypeID)
+	assert.JSONEq(t, `{"trail_id":"mule-deer"}`, string(items[0].Payload))
 }
 
 func TestListConnectionsRequiresAuth(t *testing.T) {
@@ -153,20 +330,22 @@ func TestTestConnectionAdapterErrorMarksConnectionError(t *testing.T) {
 }
 
 type fakeStore struct {
-	connections   []models.Connection
-	syncJobs      map[uuid.UUID][]models.SyncJob
-	mediaSyncs    map[uuid.UUID][]models.MediaSetSync
-	runs          map[uuid.UUID][]models.SyncRun
-	links         map[string]models.VirtualTableSourceLink
-	vtables       map[string]models.VirtualTable
-	registrations map[uuid.UUID][]models.ConnectionRegistration
-	policies      map[uuid.UUID][]models.SourcePolicyBindingResponse
-	agents        []models.ConnectorAgent
+	connections    []models.Connection
+	syncJobs       map[uuid.UUID][]models.SyncJob
+	mediaSyncs     map[uuid.UUID][]models.MediaSetSync
+	runs           map[uuid.UUID][]models.SyncRun
+	links          map[string]models.VirtualTableSourceLink
+	vtables        map[string]models.VirtualTable
+	registrations  map[uuid.UUID][]models.ConnectionRegistration
+	policies       map[uuid.UUID][]models.SourcePolicyBindingResponse
+	agents         []models.ConnectorAgent
+	webhookHistory map[uuid.UUID][]models.WebhookHistoryEntry
+	listenerEvents map[uuid.UUID][]models.InboundListenerEvent
 }
 
 func newFakeStore(owner uuid.UUID) *fakeStore {
 	conn := models.Connection{ID: uuid.New(), Name: "pg", ConnectorType: "postgresql", Config: json.RawMessage(`{}`), Status: "connected", OwnerID: owner, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-	return &fakeStore{connections: []models.Connection{conn}, syncJobs: map[uuid.UUID][]models.SyncJob{}, mediaSyncs: map[uuid.UUID][]models.MediaSetSync{}, runs: map[uuid.UUID][]models.SyncRun{}, links: map[string]models.VirtualTableSourceLink{}, vtables: map[string]models.VirtualTable{}, registrations: map[uuid.UUID][]models.ConnectionRegistration{}, policies: map[uuid.UUID][]models.SourcePolicyBindingResponse{}, agents: []models.ConnectorAgent{}}
+	return &fakeStore{connections: []models.Connection{conn}, syncJobs: map[uuid.UUID][]models.SyncJob{}, mediaSyncs: map[uuid.UUID][]models.MediaSetSync{}, runs: map[uuid.UUID][]models.SyncRun{}, links: map[string]models.VirtualTableSourceLink{}, vtables: map[string]models.VirtualTable{}, registrations: map[uuid.UUID][]models.ConnectionRegistration{}, policies: map[uuid.UUID][]models.SourcePolicyBindingResponse{}, agents: []models.ConnectorAgent{}, webhookHistory: map[uuid.UUID][]models.WebhookHistoryEntry{}, listenerEvents: map[uuid.UUID][]models.InboundListenerEvent{}}
 }
 
 func (f *fakeStore) ListConnections(_ context.Context, ownerID *uuid.UUID) ([]models.Connection, error) {
@@ -513,6 +692,97 @@ func (f *fakeStore) UpdateConnectionConfig(_ context.Context, id uuid.UUID, conf
 	}
 	return nil, nil
 }
+func (f *fakeStore) AppendWebhookHistory(_ context.Context, body *models.CreateWebhookHistoryEntry) (*models.WebhookHistoryEntry, error) {
+	now := time.Now().UTC()
+	if body.StartedAt.IsZero() {
+		body.StartedAt = now
+	}
+	if body.FinishedAt.IsZero() {
+		body.FinishedAt = now
+	}
+	if body.RetentionExpiresAt.IsZero() {
+		body.RetentionExpiresAt = body.FinishedAt.Add(30 * 24 * time.Hour)
+	}
+	durationMS := body.FinishedAt.Sub(body.StartedAt).Milliseconds()
+	if durationMS < 0 {
+		durationMS = 0
+	}
+	entry := models.WebhookHistoryEntry{
+		ID:                 uuid.New(),
+		SourceID:           body.SourceID,
+		UserID:             body.UserID,
+		Status:             body.Status,
+		HTTPStatus:         body.HTTPStatus,
+		InputPolicy:        body.InputPolicy,
+		Inputs:             cloneTestRawMessage(body.Inputs),
+		OutputParameters:   cloneTestRawMessage(body.OutputParameters),
+		Error:              body.Error,
+		CallCount:          body.CallCount,
+		StartedAt:          body.StartedAt,
+		FinishedAt:         body.FinishedAt,
+		DurationMS:         durationMS,
+		RetentionExpiresAt: body.RetentionExpiresAt,
+		CreatedAt:          now,
+	}
+	f.webhookHistory[body.SourceID] = append([]models.WebhookHistoryEntry{entry}, f.webhookHistory[body.SourceID]...)
+	return &entry, nil
+}
+func (f *fakeStore) ListWebhookHistory(_ context.Context, sourceID uuid.UUID, limit int) ([]models.WebhookHistoryEntry, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	now := time.Now().UTC()
+	out := []models.WebhookHistoryEntry{}
+	for _, entry := range f.webhookHistory[sourceID] {
+		if !entry.RetentionExpiresAt.IsZero() && entry.RetentionExpiresAt.Before(now) {
+			continue
+		}
+		out = append(out, entry)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+func (f *fakeStore) AppendInboundListenerEvent(_ context.Context, body *models.CreateInboundListenerEvent) (*models.InboundListenerEvent, error) {
+	now := time.Now().UTC()
+	entry := models.InboundListenerEvent{
+		ID:                uuid.New(),
+		SourceID:          body.SourceID,
+		ListenerID:        body.ListenerID,
+		EventID:           body.EventID,
+		Status:            body.Status,
+		SignatureVerified: body.SignatureVerified,
+		Payload:           cloneTestRawMessage(body.Payload),
+		Headers:           cloneTestRawMessage(body.Headers),
+		Destination:       body.Destination,
+		CreatedAt:         now,
+	}
+	if entry.Status == "" {
+		entry.Status = "accepted"
+	}
+	f.listenerEvents[body.SourceID] = append([]models.InboundListenerEvent{entry}, f.listenerEvents[body.SourceID]...)
+	return &entry, nil
+}
+func (f *fakeStore) ListInboundListenerEvents(_ context.Context, sourceID uuid.UUID, limit int) ([]models.InboundListenerEvent, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	out := []models.InboundListenerEvent{}
+	for _, entry := range f.listenerEvents[sourceID] {
+		out = append(out, entry)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+func cloneTestRawMessage(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
+}
 func (f *fakeStore) ListIcebergNamespaces(_ context.Context) ([]models.Connection, error) {
 	out := []models.Connection{}
 	for _, c := range f.connections {
@@ -627,6 +897,12 @@ func withRouteParam(req *http.Request, key, val string) *http.Request {
 	}
 	rctx.URLParams.Add(key, val)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func listenerHMAC(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(payload))
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
 func TestConnectorAgentHandlersRegisterHeartbeatAndDelete(t *testing.T) {
@@ -1165,6 +1441,213 @@ func TestConnectionWebhookAndIcebergHandlers(t *testing.T) {
 	h.InvokeWebhook(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Contains(t, rec.Body.String(), "output_parameters")
+
+	srvWeather := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/forecast", r.URL.Path)
+		if r.URL.Query().Has("latitude") {
+			assert.Equal(t, "40.016353", r.URL.Query().Get("latitude"))
+			assert.Equal(t, "-105.34458", r.URL.Query().Get("longitude"))
+			assert.Equal(t, "temperature_2m,wind_speed_10m,relative_humidity_2m", r.URL.Query().Get("current"))
+		}
+		_, _ = w.Write([]byte(`{"current":{"temperature_2m":84,"wind_speed_10m":4.8,"relative_humidity_2m":62}}`))
+	}))
+	defer srvWeather.Close()
+	store.connections[0].ConnectorType = "rest_api"
+	store.connections[0].Config = json.RawMessage(`{
+		"base_url":"` + srvWeather.URL + `",
+		"auth":{"type":"none"},
+		"runtime":{"worker":"foundry","timeout_ms":5000},
+		"permissions":{"invokable":true},
+		"webhook":{
+			"method":"GET",
+			"path":"/v1/forecast",
+			"inputs":[
+				{"id":"latitude","type":"number","required":true},
+				{"id":"longitude","type":"number","required":true}
+			],
+			"calls":[{
+				"id":"weather",
+				"method":"GET",
+				"path":"/v1/forecast",
+				"query_params":{
+					"latitude":"{{latitude}}",
+					"longitude":"{{longitude}}",
+					"current":"temperature_2m,wind_speed_10m,relative_humidity_2m"
+				}
+			}],
+			"outputs":[
+				{"id":"temperature","type":"number","extractor":{"from_call":"weather","path":"/current/temperature_2m"}},
+				{"id":"wind_speed","type":"number","extractor":{"from_call":"weather","path":"/current/wind_speed_10m"}},
+				{"id":"humidity","type":"number","extractor":{"from_call":"weather","path":"/current/relative_humidity_2m"}}
+			],
+			"history":{"enabled":true,"retention_days":14,"store_outputs":true}
+		}
+	}`)
+	req = withRouteParam(authedReq(http.MethodPost, "/webhooks/"+source.String()+"/invoke", `{"inputs":{"latitude":40.016353,"longitude":-105.34458}}`, owner), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.InvokeWebhook(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"temperature":84`)
+	assert.Contains(t, rec.Body.String(), `"wind_speed":4.8`)
+	assert.Contains(t, rec.Body.String(), `"humidity":62`)
+	var weatherResp models.InvokeWebhookResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &weatherResp))
+	var weatherHistory map[string]any
+	require.NoError(t, json.Unmarshal(weatherResp.History, &weatherHistory))
+	assert.Equal(t, "succeeded", weatherHistory["status"])
+	assert.Equal(t, true, weatherHistory["stored"])
+	assert.NotEmpty(t, weatherHistory["entry_id"])
+
+	req = withRouteParam(authedReq(http.MethodGet, "/webhooks/"+source.String()+"/history?limit=10", ``, owner), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.ListWebhookHistory(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var historyList models.ListResponse[models.WebhookHistoryEntry]
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &historyList))
+	require.NotEmpty(t, historyList.Items)
+	weatherEntry := historyList.Items[0]
+	assert.Equal(t, source, weatherEntry.SourceID)
+	assert.Equal(t, owner, weatherEntry.UserID)
+	assert.Equal(t, "succeeded", weatherEntry.Status)
+	assert.NotNil(t, weatherEntry.HTTPStatus)
+	assert.Equal(t, uint16(http.StatusOK), *weatherEntry.HTTPStatus)
+	assert.True(t, weatherEntry.InputPolicy.StoreOutputs)
+	assert.False(t, weatherEntry.InputPolicy.StoreInputs)
+	assert.Nil(t, weatherEntry.Inputs)
+	assert.JSONEq(t, `{"temperature":84,"wind_speed":4.8,"humidity":62}`, string(weatherEntry.OutputParameters))
+	assert.WithinDuration(t, time.Now().UTC().Add(14*24*time.Hour), weatherEntry.RetentionExpiresAt, time.Minute)
+
+	store.connections[0].Config = json.RawMessage(`{
+		"base_url":"` + srvWeather.URL + `",
+		"auth":{"type":"none"},
+		"runtime":{"worker":"foundry","allowed_methods":["GET"]},
+		"permissions":{"invokable":false},
+		"webhook":{"method":"GET","path":"/v1/forecast"}
+	}`)
+	req = withRouteParam(authedReq(http.MethodPost, "/webhooks/"+source.String()+"/invoke", `{"inputs":{}}`, owner), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.InvokeWebhook(rec, req)
+	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+
+	store.connections[0].Config = json.RawMessage(`{
+		"base_url":"` + srvWeather.URL + `",
+		"auth":{"type":"none"},
+		"runtime":{"worker":"foundry","allowed_methods":["POST"]},
+		"permissions":{"invokable":true},
+		"webhook":{"method":"GET","path":"/v1/forecast"}
+	}`)
+	req = withRouteParam(authedReq(http.MethodPost, "/webhooks/"+source.String()+"/invoke", `{"inputs":{}}`, owner), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.InvokeWebhook(rec, req)
+	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "method GET")
+
+	req = withRouteParam(authedReq(http.MethodGet, "/webhooks/"+source.String()+"/history?limit=1", ``, owner), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.ListWebhookHistory(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &historyList))
+	require.Len(t, historyList.Items, 1)
+	assert.Equal(t, "failed", historyList.Items[0].Status)
+	require.NotNil(t, historyList.Items[0].Error)
+	assert.Contains(t, *historyList.Items[0].Error, "method GET")
+	assert.Nil(t, historyList.Items[0].Inputs)
+
+	srvLarge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "super-secret", r.URL.Query().Get("api_key"))
+		_, _ = w.Write([]byte(`{"large":"this payload is intentionally larger than the configured limit"}`))
+	}))
+	defer srvLarge.Close()
+	store.connections[0].Config = json.RawMessage(`{
+		"base_url":"` + srvLarge.URL + `",
+		"auth":{"type":"api_key","query_param":"api_key","value":"super-secret"},
+		"runtime":{"worker":"foundry","allowed_methods":["GET"]},
+		"permissions":{"invokable":true},
+		"webhook":{
+			"method":"GET",
+			"path":"/v1/forecast",
+			"limits":{"max_response_bytes":16}
+		}
+	}`)
+	req = withRouteParam(authedReq(http.MethodPost, "/webhooks/"+source.String()+"/invoke", `{"inputs":{}}`, owner), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.InvokeWebhook(rec, req)
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "max_response_bytes")
+	assert.NotContains(t, rec.Body.String(), "super-secret")
+
+	store.connections[0].Config = json.RawMessage(`{
+		"base_url":"` + srvWeather.URL + `",
+		"auth":{"type":"none"},
+		"runtime":{"worker":"foundry","allowed_methods":["GET"]},
+		"permissions":{"invokable":true},
+		"webhook":{
+			"method":"GET",
+			"path":"/v1/forecast",
+			"rate_limit":{"max_requests":1,"per_seconds":60}
+		}
+	}`)
+	req = withRouteParam(authedReq(http.MethodPost, "/webhooks/"+source.String()+"/invoke", `{"inputs":{}}`, owner), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.InvokeWebhook(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	req = withRouteParam(authedReq(http.MethodPost, "/webhooks/"+source.String()+"/invoke", `{"inputs":{}}`, owner), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.InvokeWebhook(rec, req)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+
+	req = withRouteParam(authedReq(http.MethodPost, "/webhooks/"+source.String()+"/invoke", `{"inputs":{}}`, uuid.New()), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.InvokeWebhook(rec, req)
+	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+
+	trailObjectTypeID := uuid.New()
+	store.connections[0].ConnectorType = "rest_api"
+	store.connections[0].Config = json.RawMessage(`{
+		"base_url":"https://ingest.example.test",
+		"auth":{"type":"none"},
+		"runtime":{"worker":"foundry"},
+		"permissions":{"invokable":true},
+		"listener":{
+			"id":"trail-events",
+			"type":"https",
+			"enabled":true,
+			"auth":{"type":"hmac_sha256","header":"X-OpenFoundry-Signature","secret":"listener-secret"},
+			"destination":{"mode":"object","object_type_id":"` + trailObjectTypeID.String() + `"},
+			"limits":{"max_payload_bytes":4096}
+		}
+	}`)
+	listenerPayload := `{"event_id":"evt-trail-1","trail_id":"mule-deer","distance_miles":8.8}`
+	req = withRouteParam(withRouteParam(httptest.NewRequest(http.MethodPost, "/api/v1/data-connection/sources/"+source.String()+"/listeners/trail-events/events", strings.NewReader(listenerPayload)), "source_id", source.String()), "listener_id", "trail-events")
+	req.Header.Set("X-OpenFoundry-Signature", listenerHMAC("listener-secret", listenerPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	h.ReceiveInboundListener(rec, req)
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+	var listenerResp models.ReceiveInboundListenerResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &listenerResp))
+	assert.Equal(t, source, listenerResp.SourceID)
+	assert.Equal(t, "trail-events", listenerResp.ListenerID)
+	assert.True(t, listenerResp.SignatureVerified)
+	assert.Equal(t, "object", listenerResp.Destination.Mode)
+	assert.Equal(t, trailObjectTypeID, *listenerResp.Destination.ObjectTypeID)
+
+	req = withRouteParam(authedReq(http.MethodGet, "/api/v1/data-connection/sources/"+source.String()+"/listener-events?limit=10", ``, owner), "id", source.String())
+	rec = httptest.NewRecorder()
+	h.ListInboundListenerEvents(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var listenerHistory models.ListResponse[models.InboundListenerEvent]
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &listenerHistory))
+	require.Len(t, listenerHistory.Items, 1)
+	assert.Equal(t, "evt-trail-1", listenerHistory.Items[0].EventID)
+	assert.JSONEq(t, listenerPayload, string(listenerHistory.Items[0].Payload))
+	assert.Contains(t, string(listenerHistory.Items[0].Headers), "[redacted]")
+
+	req = withRouteParam(withRouteParam(httptest.NewRequest(http.MethodPost, "/api/v1/data-connection/sources/"+source.String()+"/listeners/trail-events/events", strings.NewReader(listenerPayload)), "source_id", source.String()), "listener_id", "trail-events")
+	req.Header.Set("X-OpenFoundry-Signature", "sha256=bad")
+	rec = httptest.NewRecorder()
+	h.ReceiveInboundListener(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
 
 	store.connections[0].ConnectorType = "postgresql"
 	store.registrations[source] = []models.ConnectionRegistration{{ID: uuid.New(), ConnectionID: source, Selector: "public.orders", DisplayName: "Orders", SourceKind: "table", RegistrationMode: "zero_copy", Metadata: json.RawMessage(`{"supports_zero_copy":true}`)}}

@@ -16,6 +16,7 @@ import (
 	"github.com/openfoundry/openfoundry-go/libs/observability"
 	ontologykernel "github.com/openfoundry/openfoundry-go/libs/ontology-kernel"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/domain"
+	kernelactions "github.com/openfoundry/openfoundry-go/libs/ontology-kernel/handlers/actions"
 	ontologymetrics "github.com/openfoundry/openfoundry-go/libs/ontology-kernel/metrics"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/models"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/stores"
@@ -217,6 +218,72 @@ func TestExecuteActionRouteAppliesUpdateObject(t *testing.T) {
 	}
 	if got := props["temperature"]; got != float64(84) {
 		t.Fatalf("stored temperature drift: got %#v", got)
+	}
+
+	actionLogTypeID := storage.TypeId(kernelactions.ActionLogObjectTypeID.String())
+	actionLogType, err := state.Stores.Definitions.Get(ctx, storage.DefinitionKind("object_type"), storage.DefinitionId(kernelactions.ActionLogObjectTypeID.String()), storage.Strong())
+	if err != nil {
+		t.Fatalf("load action log object type definition: %v", err)
+	}
+	if actionLogType == nil {
+		t.Fatal("expected action log object type definition to be materialized")
+	}
+	parent := storage.DefinitionId(kernelactions.ActionLogObjectTypeID.String())
+	actionLogProperties, err := state.Stores.Definitions.List(ctx, storage.DefinitionQuery{
+		Kind:     storage.DefinitionKind("property"),
+		ParentID: &parent,
+		Page:     storage.Page{Size: 100},
+	}, storage.Strong())
+	if err != nil {
+		t.Fatalf("list action log property definitions: %v", err)
+	}
+	if len(actionLogProperties.Items) < 10 {
+		t.Fatalf("expected materialized action log properties, got %d", len(actionLogProperties.Items))
+	}
+
+	actionLogObjects, err := state.Stores.Objects.ListByType(ctx, storage.TenantId("default"), actionLogTypeID, storage.Page{Size: 10}, storage.Strong())
+	if err != nil {
+		t.Fatalf("list action log objects: %v", err)
+	}
+	if len(actionLogObjects.Items) != 1 {
+		t.Fatalf("expected one materialized action log object, got %d", len(actionLogObjects.Items))
+	}
+	var actionLog map[string]any
+	if err := json.Unmarshal(actionLogObjects.Items[0].Payload, &actionLog); err != nil {
+		t.Fatalf("decode action log object: %v", err)
+	}
+	if got := actionLog["action_id"]; got != actionID.String() {
+		t.Fatalf("action log action_id drift: got %#v", got)
+	}
+	if got := actionLog["action_name"]; got != "edit_weather" {
+		t.Fatalf("action log action_name drift: got %#v", got)
+	}
+	if got := actionLog["operation_kind"]; got != models.ActionOperationKindUpdateObject.String() {
+		t.Fatalf("action log operation_kind drift: got %#v", got)
+	}
+	if got := actionLog["status"]; got != "success" {
+		t.Fatalf("action log status drift: got %#v", got)
+	}
+	if got := actionLog["target_object_id"]; got != objectID.String() {
+		t.Fatalf("action log target_object_id drift: got %#v", got)
+	}
+	parameters, ok := actionLog["parameters"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected action log parameters object, got %#v", actionLog["parameters"])
+	}
+	if got := parameters["temperature"]; got != float64(84) {
+		t.Fatalf("action log parameter drift: got %#v", got)
+	}
+	validation, ok := actionLog["validation"].(map[string]any)
+	if !ok || validation["valid"] != true {
+		t.Fatalf("expected successful validation payload, got %#v", actionLog["validation"])
+	}
+	edits, ok := actionLog["edits"].(map[string]any)
+	if !ok || edits["object"] == nil {
+		t.Fatalf("expected edits object payload, got %#v", actionLog["edits"])
+	}
+	if got := actionLog["applied_by_email"]; got != "smoke@openfoundry.test" {
+		t.Fatalf("action log actor drift: got %#v", got)
 	}
 }
 

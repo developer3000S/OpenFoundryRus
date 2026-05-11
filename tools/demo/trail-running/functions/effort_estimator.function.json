@@ -1,0 +1,66 @@
+{
+  "schema_version": "openfoundry.demo.function.v1",
+  "function_id": "trail_effort_estimator_v1",
+  "api_name": "estimateTrailEffort",
+  "display_name": "Estimate Trail Effort",
+  "runtime": "python",
+  "source_file": "functions/effort_estimator.py",
+  "entrypoint": "estimate_effort",
+  "description": "Estimate trail pace, effort, heart rate, and confidence from the top N most similar historical RunActivity rows.",
+  "inputs": [
+    {
+      "name": "trails",
+      "type": "object_set",
+      "object_type": "Trail",
+      "required": true
+    },
+    {
+      "name": "run_activities",
+      "type": "object_set",
+      "object_type": "RunActivity",
+      "required": true
+    },
+    {
+      "name": "top_n",
+      "type": "integer",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 10
+    }
+  ],
+  "outputs": [
+    {
+      "name": "trail_effort_estimates",
+      "type": "table",
+      "object_type": "TrailEffortEstimate"
+    }
+  ],
+  "model": {
+    "version": "weighted_knn_trail_profile_v2",
+    "features": [
+      "distance_miles",
+      "elevation_gain_ft",
+      "gain_per_mile",
+      "average_elevation_ft",
+      "terrain",
+      "surface",
+      "weather_load",
+      "hr_profile_load"
+    ],
+    "normalization": "range over Trail and RunActivity fixture rows",
+    "scoring": "weighted Euclidean distance over normalized numeric profile features and categorical terrain/surface scores",
+    "feature_weights": {
+      "distance": 0.24,
+      "elevation_gain": 0.18,
+      "grade": 0.14,
+      "altitude": 0.1,
+      "terrain": 0.1,
+      "surface": 0.06,
+      "weather": 0.08,
+      "hr_profile": 0.1
+    },
+    "aggregation": "simple average over top N nearest weighted KNN matches",
+    "confidence": "1 / (1 + average_similarity_score)",
+    "explainability": "each similar run includes feature scores, weighted feature scores, vector deltas, and strongest/gap explanation fields"
+  }
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="OpenFoundry Trail Demo">
+  <metadata><name>Custom Dawn Ridge</name></metadata>
+  <trk>
+    <name>Custom Dawn Ridge</name>
+    <trkseg>
+      <trkpt lat="40.00280" lon="-105.30320"><ele>1784.0</ele></trkpt>
+      <trkpt lat="40.00410" lon="-105.30680"><ele>1842.0</ele></trkpt>
+      <trkpt lat="40.00690" lon="-105.30890"><ele>1908.0</ele></trkpt>
+      <trkpt lat="40.00970" lon="-105.30610"><ele>1972.0</ele></trkpt>
+      <trkpt lat="40.01130" lon="-105.30170"><ele>2035.0</ele></trkpt>
+      <trkpt lat="40.01010" lon="-105.29840"><ele>1996.0</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

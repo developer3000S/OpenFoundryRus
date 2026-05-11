@@ -1,7 +1,7 @@
 import type { StyleSpecification } from 'maplibre-gl';
 
 import type { AppWidget } from '@/lib/api/apps';
-import type { ObjectInstance } from '@/lib/api/ontology';
+import type { LinkedObjectEdge, ObjectInstance } from '@/lib/api/ontology';
 import type { QueryResult } from '@/lib/api/queries';
 
 export type WorkshopMapGeometryKind = 'auto' | 'point' | 'line' | 'polygon';
@@ -367,6 +367,50 @@ export function buildFeaturesFromObjects(
   return features;
 }
 
+export function buildFeaturesFromLinkedEdges(
+  features: WorkshopMapFeature[],
+  edges: LinkedObjectEdge[],
+  options: { layerId?: string; layerTitle?: string; color?: string; lineWidth?: number } = {},
+): WorkshopMapFeature[] {
+  const byObjectID = new Map<string, WorkshopMapFeature>();
+  for (const feature of features) {
+    const objectID = stringifyLabel(feature.properties.__of_object_id);
+    if (objectID && !byObjectID.has(objectID)) byObjectID.set(objectID, feature);
+  }
+  const out: WorkshopMapFeature[] = [];
+  for (const edge of edges) {
+    const source = byObjectID.get(edge.source_object_id);
+    const target = byObjectID.get(edge.target_object_id);
+    const sourcePoint = source ? anchorPointForGeometry(source.geometry) : null;
+    const targetPoint = target ? anchorPointForGeometry(target.geometry) : null;
+    if (!sourcePoint || !targetPoint) continue;
+    const label = stringifyLabel(edge.properties?.label) || stringifyLabel(edge.properties?.name) || edge.link_type_id || 'Linked objects';
+    out.push({
+      type: 'Feature',
+      properties: {
+        ...(edge.properties ?? {}),
+        __of_source: 'link',
+        __of_link_id: edge.link_id,
+        __of_link_type_id: edge.link_type_id,
+        __of_source_object_id: edge.source_object_id,
+        __of_target_object_id: edge.target_object_id,
+        __of_object_id: edge.link_id,
+        __of_label: label,
+        __of_layer_id: options.layerId || `link-${edge.link_type_id}`,
+        __of_layer_title: options.layerTitle || 'Linked objects',
+        __of_color: options.color || '#ea580c',
+        __of_line_width: options.lineWidth ?? 2,
+        __of_locked: true,
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: [sourcePoint, targetPoint],
+      },
+    });
+  }
+  return out;
+}
+
 export function buildFeaturesFromGeospatialLayer(
   features: Array<{ id?: string; label?: string; geometry?: unknown; properties?: unknown }>,
   layer: WorkshopMapLayerConfig,
@@ -403,6 +447,32 @@ export function buildFeaturesFromGeospatialLayer(
       };
     })
     .filter((feature): feature is WorkshopMapFeature => Boolean(feature));
+}
+
+function anchorPointForGeometry(geometry: WorkshopMapGeometry): [number, number] | null {
+  const points = flattenGeometryPoints(geometry);
+  if (points.length === 0) return null;
+  if (points.length === 1) return points[0];
+  const sum = points.reduce(
+    (acc, [lon, lat]) => ({ lon: acc.lon + lon, lat: acc.lat + lat }),
+    { lon: 0, lat: 0 },
+  );
+  return [sum.lon / points.length, sum.lat / points.length];
+}
+
+function flattenGeometryPoints(geometry: WorkshopMapGeometry): [number, number][] {
+  switch (geometry.type) {
+    case 'Point':
+      return [geometry.coordinates];
+    case 'MultiPoint':
+    case 'LineString':
+      return geometry.coordinates;
+    case 'MultiLineString':
+    case 'Polygon':
+      return geometry.coordinates.flat();
+    case 'MultiPolygon':
+      return geometry.coordinates.flat(2);
+  }
 }
 
 export function buildFeaturesFromConfiguredLayers(layers: WorkshopMapLayerConfig[]): WorkshopMapFeature[] {

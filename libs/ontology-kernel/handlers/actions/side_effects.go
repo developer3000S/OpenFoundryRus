@@ -48,24 +48,35 @@ import (
 // the writeback / side-effect / notification slots are read here;
 // `operation` and `batched_execution` are handled elsewhere.
 type actionConfigEnvelope struct {
-	Operation               json.RawMessage                  `json:"operation,omitempty"`
-	NotificationSideEffects []notificationSideEffectConfig   `json:"notification_side_effects,omitempty"`
-	WebhookWriteback        *webhookCallConfig               `json:"webhook_writeback,omitempty"`
-	WebhookSideEffects      []webhookCallConfig              `json:"webhook_side_effects,omitempty"`
-	BatchedExecution        bool                             `json:"batched_execution,omitempty"`
+	Operation               json.RawMessage                `json:"operation,omitempty"`
+	NotificationSideEffects []notificationSideEffectConfig `json:"notification_side_effects,omitempty"`
+	WebhookWriteback        *webhookCallConfig             `json:"webhook_writeback,omitempty"`
+	WebhookSideEffects      []webhookCallConfig            `json:"webhook_side_effects,omitempty"`
+	BatchedExecution        bool                           `json:"batched_execution,omitempty"`
 }
 
 // webhookCallConfig mirrors `pub struct WebhookCallConfig`.
 type webhookCallConfig struct {
-	WebhookID             uuid.UUID              `json:"webhook_id"`
-	InputMappings         []webhookInputMapping  `json:"input_mappings,omitempty"`
-	OutputParameterAlias  *string                `json:"output_parameter_alias,omitempty"`
+	WebhookID            uuid.UUID              `json:"webhook_id"`
+	InputMappings        []webhookInputMapping  `json:"input_mappings,omitempty"`
+	OutputMappings       []webhookOutputMapping `json:"output_mappings,omitempty"`
+	OutputParameterAlias *string                `json:"output_parameter_alias,omitempty"`
 }
 
 // webhookInputMapping mirrors `pub struct WebhookInputMapping`.
 type webhookInputMapping struct {
 	WebhookInputName string `json:"webhook_input_name"`
 	ActionInputName  string `json:"action_input_name"`
+}
+
+// webhookOutputMapping copies a named webhook output parameter back into the
+// action parameter bag. The aliases keep older client experiments working
+// while the canonical keys stay explicit.
+type webhookOutputMapping struct {
+	WebhookOutputName   string `json:"webhook_output_name,omitempty"`
+	WebhookOutputPath   string `json:"webhook_output_path,omitempty"`
+	ActionInputName     string `json:"action_input_name,omitempty"`
+	ActionParameterName string `json:"action_parameter_name,omitempty"`
 }
 
 // notificationSideEffectConfig mirrors
@@ -153,6 +164,7 @@ func splitWebhookConfigs(config json.RawMessage) (*webhookCallConfig, []webhookC
 func invokeRegisteredWebhook(
 	ctx context.Context,
 	state *ontologykernel.AppState,
+	claims *authmw.Claims,
 	webhook *webhookCallConfig,
 	actionParameters json.RawMessage,
 ) (json.RawMessage, error) {
@@ -163,7 +175,7 @@ func invokeRegisteredWebhook(
 	var paramMap map[string]json.RawMessage
 	_ = json.Unmarshal(actionParameters, &paramMap)
 	for _, mapping := range webhook.InputMappings {
-		if v, ok := paramMap[mapping.ActionInputName]; ok {
+		if v, ok := lookupJSONRawPath(paramMap, mapping.ActionInputName); ok {
 			inputs[mapping.WebhookInputName] = v
 		}
 	}
@@ -175,6 +187,13 @@ func invokeRegisteredWebhook(
 		return nil, fmt.Errorf("webhook invocation failed: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
+	if state.JWTConfig != nil && claims != nil {
+		authHeader, err := issueServiceTokenFor(state, claims, "ontology-action-webhook")
+		if err != nil {
+			return nil, fmt.Errorf("failed to issue service token for webhook invocation: %w", err)
+		}
+		req.Header.Set("authorization", authHeader)
+	}
 	client := state.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
@@ -207,10 +226,11 @@ func invokeRegisteredWebhook(
 func runWebhookWriteback(
 	ctx context.Context,
 	state *ontologykernel.AppState,
+	claims *authmw.Claims,
 	config *webhookCallConfig,
 	parameters *json.RawMessage,
 ) error {
-	resp, err := invokeRegisteredWebhook(ctx, state, config, *parameters)
+	resp, err := invokeRegisteredWebhook(ctx, state, claims, config, *parameters)
 	if err != nil {
 		return err
 	}
@@ -233,6 +253,22 @@ func runWebhookWriteback(
 		alias = *config.OutputParameterAlias
 	}
 	paramMap[alias] = output
+	for _, mapping := range config.OutputMappings {
+		path := strings.TrimSpace(mapping.WebhookOutputPath)
+		if path == "" {
+			path = strings.TrimSpace(mapping.WebhookOutputName)
+		}
+		name := strings.TrimSpace(mapping.ActionParameterName)
+		if name == "" {
+			name = strings.TrimSpace(mapping.ActionInputName)
+		}
+		if path == "" || name == "" {
+			continue
+		}
+		if value, ok := lookupJSONRawPathInRaw(output, path); ok {
+			paramMap[name] = value
+		}
+	}
 	merged, err := json.Marshal(paramMap)
 	if err != nil {
 		return err
@@ -261,7 +297,7 @@ func runWebhookSideEffects(
 	}
 	for _, cfg := range configs {
 		c := cfg
-		resp, err := invokeRegisteredWebhook(ctx, state, &c, parameters)
+		resp, err := invokeRegisteredWebhook(ctx, state, claims, &c, parameters)
 		if err != nil {
 			log.Printf("ontology action webhook side-effect failed action=%s webhook=%s err=%s",
 				actionID, c.WebhookID, err.Error())
@@ -728,17 +764,20 @@ func sendNotificationRequest(
 // issueServiceToken mirrors `fn issue_service_token`. Mints a service
 // JWT impersonating the actor so audit-service can attribute the
 // event to the right org / classification level.
-func issueServiceToken(state *ontologykernel.AppState, claims *authmw.Claims) (string, error) {
+func issueServiceTokenFor(state *ontologykernel.AppState, claims *authmw.Claims, service string) (string, error) {
 	id, _ := uuid.NewV7()
+	if strings.TrimSpace(service) == "" {
+		service = "ontology-service"
+	}
 	attrs, _ := json.Marshal(map[string]any{
-		"service":                  "ontology-service",
+		"service":                  service,
 		"classification_clearance": "pii",
 		"impersonated_actor_id":    claims.Sub,
 	})
 	c := authmw.BuildAccessClaims(state.JWTConfig, authmw.AccessClaimsInput{
 		UserID:      id,
-		Email:       "ontology-service@internal.openfoundry",
-		Name:        "ontology-service",
+		Email:       service + "@internal.openfoundry",
+		Name:        service,
 		Roles:       []string{"admin"},
 		Permissions: []string{"*:*"},
 		OrgID:       claims.OrgID,
@@ -750,6 +789,10 @@ func issueServiceToken(state *ontologykernel.AppState, claims *authmw.Claims) (s
 		return "", fmt.Errorf("failed to issue service token for audit: %w", err)
 	}
 	return "Bearer " + tok, nil
+}
+
+func issueServiceToken(state *ontologykernel.AppState, claims *authmw.Claims) (string, error) {
+	return issueServiceTokenFor(state, claims, "ontology-service")
 }
 
 // classificationForTarget mirrors `fn classification_for_target`.

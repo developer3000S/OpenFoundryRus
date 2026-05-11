@@ -1,0 +1,308 @@
+[
+  {
+    "coffee_shop_id": "cafe-002",
+    "distance_meters": 372.46,
+    "distance_miles": 0.2314,
+    "line_geojson": {
+      "bbox": [
+        -105.27918,
+        39.9871,
+        -105.2786,
+        39.99042
+      ],
+      "coordinates": [
+        [
+          -105.2786,
+          39.9871
+        ],
+        [
+          -105.27918,
+          39.99042
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_id": "trail-coffee-mesa-overlook-loop-cafe-002",
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 1,
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "relationship_label": "nearest coffee shop",
+    "source_object_id": "mesa-overlook-loop",
+    "source_object_type": "Trail",
+    "target_object_id": "cafe-002",
+    "target_object_type": "CoffeeShop",
+    "trail_id": "mesa-overlook-loop"
+  },
+  {
+    "coffee_shop_id": "cafe-006",
+    "distance_meters": 1510.342,
+    "distance_miles": 0.9385,
+    "line_geojson": {
+      "bbox": [
+        -105.28991,
+        39.9871,
+        -105.2786,
+        39.99756
+      ],
+      "coordinates": [
+        [
+          -105.2786,
+          39.9871
+        ],
+        [
+          -105.28991,
+          39.99756
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_id": "trail-coffee-mesa-overlook-loop-cafe-006",
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 2,
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "relationship_label": "nearest coffee shop",
+    "source_object_id": "mesa-overlook-loop",
+    "source_object_type": "Trail",
+    "target_object_id": "cafe-006",
+    "target_object_type": "CoffeeShop",
+    "trail_id": "mesa-overlook-loop"
+  },
+  {
+    "coffee_shop_id": "cafe-004",
+    "distance_meters": 1564.464,
+    "distance_miles": 0.9721,
+    "line_geojson": {
+      "bbox": [
+        -105.29672,
+        39.98482,
+        -105.2786,
+        39.9871
+      ],
+      "coordinates": [
+        [
+          -105.2786,
+          39.9871
+        ],
+        [
+          -105.29672,
+          39.98482
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_id": "trail-coffee-mesa-overlook-loop-cafe-004",
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 3,
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "relationship_label": "nearest coffee shop",
+    "source_object_id": "mesa-overlook-loop",
+    "source_object_type": "Trail",
+    "target_object_id": "cafe-004",
+    "target_object_type": "CoffeeShop",
+    "trail_id": "mesa-overlook-loop"
+  },
+  {
+    "coffee_shop_id": "cafe-004",
+    "distance_meters": 463.53,
+    "distance_miles": 0.288,
+    "line_geojson": {
+      "bbox": [
+        -105.3021,
+        39.9842,
+        -105.29672,
+        39.98482
+      ],
+      "coordinates": [
+        [
+          -105.3021,
+          39.9842
+        ],
+        [
+          -105.29672,
+          39.98482
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_id": "trail-coffee-green-mountain-ascent-cafe-004",
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 1,
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "relationship_label": "nearest coffee shop",
+    "source_object_id": "green-mountain-ascent",
+    "source_object_type": "Trail",
+    "target_object_id": "cafe-004",
+    "target_object_type": "CoffeeShop",
+    "trail_id": "green-mountain-ascent"
+  },
+  {
+    "coffee_shop_id": "cafe-006",
+    "distance_meters": 1812.557,
+    "distance_miles": 1.1263,
+    "line_geojson": {
+      "bbox": [
+        -105.3021,
+        39.9842,
+        -105.28991,
+        39.99756
+      ],
+      "coordinates": [
+        [
+          -105.3021,
+          39.9842
+        ],
+        [
+          -105.28991,
+          39.99756
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_id": "trail-coffee-green-mountain-ascent-cafe-006",
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 2,
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "relationship_label": "nearest coffee shop",
+    "source_object_id": "green-mountain-ascent",
+    "source_object_type": "Trail",
+    "target_object_id": "cafe-006",
+    "target_object_type": "CoffeeShop",
+    "trail_id": "green-mountain-ascent"
+  },
+  {
+    "coffee_shop_id": "cafe-002",
+    "distance_meters": 2071.565,
+    "distance_miles": 1.2872,
+    "line_geojson": {
+      "bbox": [
+        -105.3021,
+        39.9842,
+        -105.27918,
+        39.99042
+      ],
+      "coordinates": [
+        [
+          -105.3021,
+          39.9842
+        ],
+        [
+          -105.27918,
+          39.99042
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_id": "trail-coffee-green-mountain-ascent-cafe-002",
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 3,
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "relationship_label": "nearest coffee shop",
+    "source_object_id": "green-mountain-ascent",
+    "source_object_type": "Trail",
+    "target_object_id": "cafe-002",
+    "target_object_type": "CoffeeShop",
+    "trail_id": "green-mountain-ascent"
+  },
+  {
+    "coffee_shop_id": "cafe-001",
+    "distance_meters": 551.827,
+    "distance_miles": 0.3429,
+    "line_geojson": {
+      "bbox": [
+        -105.289,
+        40.0153,
+        -105.28341,
+        40.01781
+      ],
+      "coordinates": [
+        [
+          -105.289,
+          40.0153
+        ],
+        [
+          -105.28341,
+          40.01781
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_id": "trail-coffee-boulder-creek-path-cafe-001",
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 1,
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "relationship_label": "nearest coffee shop",
+    "source_object_id": "boulder-creek-path",
+    "source_object_type": "Trail",
+    "target_object_id": "cafe-001",
+    "target_object_type": "CoffeeShop",
+    "trail_id": "boulder-creek-path"
+  },
+  {
+    "coffee_shop_id": "cafe-005",
+    "distance_meters": 1185.393,
+    "distance_miles": 0.7366,
+    "line_geojson": {
+      "bbox": [
+        -105.289,
+        40.0153,
+        -105.27614,
+        40.01938
+      ],
+      "coordinates": [
+        [
+          -105.289,
+          40.0153
+        ],
+        [
+          -105.27614,
+          40.01938
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_id": "trail-coffee-boulder-creek-path-cafe-005",
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 2,
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "relationship_label": "nearest coffee shop",
+    "source_object_id": "boulder-creek-path",
+    "source_object_type": "Trail",
+    "target_object_id": "cafe-005",
+    "target_object_type": "CoffeeShop",
+    "trail_id": "boulder-creek-path"
+  },
+  {
+    "coffee_shop_id": "cafe-006",
+    "distance_meters": 1974.123,
+    "distance_miles": 1.2267,
+    "line_geojson": {
+      "bbox": [
+        -105.28991,
+        39.99756,
+        -105.289,
+        40.0153
+      ],
+      "coordinates": [
+        [
+          -105.289,
+          40.0153
+        ],
+        [
+          -105.28991,
+          39.99756
+        ]
+      ],
+      "type": "LineString"
+    },
+    "link_id": "trail-coffee-boulder-creek-path-cafe-006",
+    "link_type_api_name": "TrailNearbyCoffeeShop",
+    "rank": 3,
+    "recommendation_model": "haversine_trailhead_to_cafe_v1",
+    "relationship_label": "nearest coffee shop",
+    "source_object_id": "boulder-creek-path",
+    "source_object_type": "Trail",
+    "target_object_id": "cafe-006",
+    "target_object_type": "CoffeeShop",
+    "trail_id": "boulder-creek-path"
+  }
+]

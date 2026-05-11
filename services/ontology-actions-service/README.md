@@ -19,6 +19,29 @@ submitted runs, `function_package` for versioned function definitions,
 `function_invocation` for one execution, and `object_set` for reusable or
 evaluated ontology object selections.
 
+## Action webhooks
+
+Action configs may include `webhook_writeback` and `webhook_side_effects` in the
+same envelope as `operation`. Writebacks call
+`CONNECTOR_MANAGEMENT_SERVICE_URL /api/v1/webhooks/{id}/invoke` before ontology
+edits, merge typed `output_parameters` under `webhook_output` (or a configured
+alias), and can expose selected outputs through `output_mappings` for subsequent
+property mappings. Side-effect webhooks run after successful ontology edits and
+are logged best-effort. When `JWT_SECRET`/`JWTConfig` is present, the service
+mints an internal bearer token for connector-management so real deployments hit
+the same authenticated webhook endpoint as users.
+
+## External Functions
+
+TypeScript Functions can call configured Data Connection webhooks through
+`context.sdk.dataConnection.invokeWebhook({ sourceId, inputs })`. The runtime
+injects `CONNECTOR_MANAGEMENT_SERVICE_URL` and the caller's service token into
+the sandbox, so external API calls go through `/api/v1/webhooks/{source_id}/invoke`
+instead of arbitrary network endpoints. This matches the Data Connection
+External Functions pattern: configure a REST API source and webhook first, then
+wrap it with Function logic for Workshop variables, function-backed actions, or
+post-processing.
+
 ## Port status
 
 | Component | Status |

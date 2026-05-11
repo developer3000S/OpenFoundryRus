@@ -1,0 +1,1357 @@
+[
+  {
+    "average_similarity_score": 0.3024,
+    "best_similarity_score": 0.1065,
+    "confidence": 0.768,
+    "distance_miles": 1.762,
+    "elevation_gain_ft": 0.0,
+    "estimate_id": "effort-boulder-creek-path",
+    "estimated_average_heartrate": 142.2,
+    "estimated_max_heartrate": 164.8,
+    "estimated_pace_min_per_mile": 9.14,
+    "estimated_perceived_effort": 5.4,
+    "feature_weights": {
+      "altitude": 0.1,
+      "distance": 0.24,
+      "elevation_gain": 0.18,
+      "grade": 0.14,
+      "hr_profile": 0.1,
+      "surface": 0.06,
+      "terrain": 0.1,
+      "weather": 0.08
+    },
+    "normalization": {
+      "average_elevation_ft": 1105.0,
+      "distance_miles": 6.8442,
+      "elevation_gain_ft": 1450.13,
+      "gain_per_mile": 1364.4749
+    },
+    "similar_run_count": 5,
+    "similar_run_ids": [
+      "run-2026-0006",
+      "run-2026-0003",
+      "run-2026-0008",
+      "run-2026-0001",
+      "run-2026-0005"
+    ],
+    "similar_runs": [
+      {
+        "activity_id": "run-2026-0006",
+        "activity_name": "Synthetic Coffee Jog",
+        "activity_type": "Run",
+        "average_elevation_ft": 5320.0,
+        "average_heartrate": 128.0,
+        "distance_miles": 3.1814,
+        "elevation_gain_ft": 82.02,
+        "feature_scores": {
+          "altitude": 0.0207,
+          "distance": 0.2074,
+          "elevation_gain": 0.0566,
+          "grade": 0.0189,
+          "hr_profile": 0.0577,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": 0.0179
+        },
+        "gain_per_mile": 25.78,
+        "hr_profile_delta": -0.0577,
+        "humidity_percent": 30.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "distance",
+            "hr_profile"
+          ],
+          "strongest_features": [
+            "terrain",
+            "surface",
+            "weather"
+          ],
+          "summary": "flat road run scored against flat road trail profile",
+          "surface_match": true,
+          "terrain_match": true
+        },
+        "max_heartrate": 149.0,
+        "normalized_altitude_delta": -0.0207,
+        "normalized_distance_delta": 0.2074,
+        "normalized_elevation_delta": 0.0566,
+        "normalized_grade_delta": 0.0189,
+        "pace_min_per_mile": 9.43,
+        "perceived_effort": 3.0,
+        "similarity_score": 0.1065,
+        "similarity_vector_delta": {
+          "altitude": -0.0207,
+          "distance": 0.2074,
+          "elevation_gain": 0.0566,
+          "grade": 0.0189,
+          "hr_profile": -0.0577,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": 0.0179
+        },
+        "surface": "road",
+        "surface_delta": 0.0,
+        "temperature_f": 70.0,
+        "terrain": "flat",
+        "terrain_delta": 0.0,
+        "weather_delta": 0.0179,
+        "weighted_feature_scores": {
+          "altitude": 0.0,
+          "distance": 0.0103,
+          "elevation_gain": 0.0006,
+          "grade": 0.0,
+          "hr_profile": 0.0003,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": 0.0
+        },
+        "weighted_similarity_score": 0.1065,
+        "wind_speed_mph": 6.0
+      },
+      {
+        "activity_id": "run-2026-0003",
+        "activity_name": "Synthetic Creek Recovery",
+        "activity_type": "Run",
+        "average_elevation_ft": 5360.0,
+        "average_heartrate": 132.0,
+        "distance_miles": 3.9768,
+        "elevation_gain_ft": 137.8,
+        "feature_scores": {
+          "altitude": 0.0155,
+          "distance": 0.3236,
+          "elevation_gain": 0.095,
+          "grade": 0.0254,
+          "hr_profile": 0.0306,
+          "surface": 0.45,
+          "terrain": 0.2,
+          "weather": 0.0638
+        },
+        "gain_per_mile": 34.65,
+        "hr_profile_delta": 0.0306,
+        "humidity_percent": 35.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "surface",
+            "distance"
+          ],
+          "strongest_features": [
+            "altitude",
+            "grade",
+            "hr_profile"
+          ],
+          "summary": "path mixed run scored against flat road trail profile",
+          "surface_match": false,
+          "terrain_match": false
+        },
+        "max_heartrate": 154.0,
+        "normalized_altitude_delta": 0.0155,
+        "normalized_distance_delta": 0.3236,
+        "normalized_elevation_delta": 0.095,
+        "normalized_grade_delta": 0.0254,
+        "pace_min_per_mile": 8.93,
+        "perceived_effort": 4.0,
+        "similarity_score": 0.2084,
+        "similarity_vector_delta": {
+          "altitude": 0.0155,
+          "distance": 0.3236,
+          "elevation_gain": 0.095,
+          "grade": 0.0254,
+          "hr_profile": 0.0306,
+          "surface": 0.45,
+          "terrain": 0.2,
+          "weather": -0.0638
+        },
+        "surface": "mixed",
+        "surface_delta": 0.45,
+        "temperature_f": 64.0,
+        "terrain": "path",
+        "terrain_delta": 0.2,
+        "weather_delta": -0.0638,
+        "weighted_feature_scores": {
+          "altitude": 0.0,
+          "distance": 0.0251,
+          "elevation_gain": 0.0016,
+          "grade": 0.0001,
+          "hr_profile": 0.0001,
+          "surface": 0.0121,
+          "terrain": 0.004,
+          "weather": 0.0003
+        },
+        "weighted_similarity_score": 0.2084,
+        "wind_speed_mph": 5.0
+      },
+      {
+        "activity_id": "run-2026-0008",
+        "activity_name": "Synthetic Creek Progression",
+        "activity_type": "Run",
+        "average_elevation_ft": 5380.0,
+        "average_heartrate": 141.0,
+        "distance_miles": 4.2875,
+        "elevation_gain_ft": 157.48,
+        "feature_scores": {
+          "altitude": 0.0336,
+          "distance": 0.369,
+          "elevation_gain": 0.1086,
+          "grade": 0.0269,
+          "hr_profile": 0.189,
+          "surface": 0.45,
+          "terrain": 0.2,
+          "weather": 0.0352
+        },
+        "gain_per_mile": 36.73,
+        "hr_profile_delta": 0.189,
+        "humidity_percent": 33.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "surface",
+            "distance"
+          ],
+          "strongest_features": [
+            "grade",
+            "altitude",
+            "weather"
+          ],
+          "summary": "path mixed run scored against flat road trail profile",
+          "surface_match": false,
+          "terrain_match": false
+        },
+        "max_heartrate": 162.0,
+        "normalized_altitude_delta": 0.0336,
+        "normalized_distance_delta": 0.369,
+        "normalized_elevation_delta": 0.1086,
+        "normalized_grade_delta": 0.0269,
+        "pace_min_per_mile": 8.63,
+        "perceived_effort": 5.0,
+        "similarity_score": 0.2342,
+        "similarity_vector_delta": {
+          "altitude": 0.0336,
+          "distance": 0.369,
+          "elevation_gain": 0.1086,
+          "grade": 0.0269,
+          "hr_profile": 0.189,
+          "surface": 0.45,
+          "terrain": 0.2,
+          "weather": -0.0352
+        },
+        "surface": "mixed",
+        "surface_delta": 0.45,
+        "temperature_f": 66.0,
+        "terrain": "path",
+        "terrain_delta": 0.2,
+        "weather_delta": -0.0352,
+        "weighted_feature_scores": {
+          "altitude": 0.0001,
+          "distance": 0.0327,
+          "elevation_gain": 0.0021,
+          "grade": 0.0001,
+          "hr_profile": 0.0036,
+          "surface": 0.0121,
+          "terrain": 0.004,
+          "weather": 0.0001
+        },
+        "weighted_similarity_score": 0.2342,
+        "wind_speed_mph": 5.5
+      },
+      {
+        "activity_id": "run-2026-0001",
+        "activity_name": "Synthetic Mesa Tempo",
+        "activity_type": "Run",
+        "average_elevation_ft": 5710.0,
+        "average_heartrate": 148.0,
+        "distance_miles": 4.8001,
+        "elevation_gain_ft": 583.99,
+        "feature_scores": {
+          "altitude": 0.3323,
+          "distance": 0.4439,
+          "elevation_gain": 0.4027,
+          "grade": 0.0892,
+          "hr_profile": 0.334,
+          "surface": 1.0,
+          "terrain": 0.45,
+          "weather": 0.1362
+        },
+        "gain_per_mile": 121.66,
+        "hr_profile_delta": 0.334,
+        "humidity_percent": 38.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "surface",
+            "terrain"
+          ],
+          "strongest_features": [
+            "grade",
+            "weather",
+            "altitude"
+          ],
+          "summary": "rolling trail run scored against flat road trail profile",
+          "surface_match": false,
+          "terrain_match": false
+        },
+        "max_heartrate": 171.0,
+        "normalized_altitude_delta": 0.3323,
+        "normalized_distance_delta": 0.4439,
+        "normalized_elevation_delta": 0.4027,
+        "normalized_grade_delta": 0.0892,
+        "pace_min_per_mile": 9.17,
+        "perceived_effort": 6.0,
+        "similarity_score": 0.4261,
+        "similarity_vector_delta": {
+          "altitude": 0.3323,
+          "distance": 0.4439,
+          "elevation_gain": 0.4027,
+          "grade": 0.0892,
+          "hr_profile": 0.334,
+          "surface": 1.0,
+          "terrain": 0.45,
+          "weather": -0.1362
+        },
+        "surface": "trail",
+        "surface_delta": 1.0,
+        "temperature_f": 58.0,
+        "terrain": "rolling",
+        "terrain_delta": 0.45,
+        "weather_delta": -0.1362,
+        "weighted_feature_scores": {
+          "altitude": 0.011,
+          "distance": 0.0473,
+          "elevation_gain": 0.0292,
+          "grade": 0.0011,
+          "hr_profile": 0.0112,
+          "surface": 0.06,
+          "terrain": 0.0203,
+          "weather": 0.0015
+        },
+        "weighted_similarity_score": 0.4261,
+        "wind_speed_mph": 4.0
+      },
+      {
+        "activity_id": "run-2026-0005",
+        "activity_name": "Synthetic Hill Repeats",
+        "activity_type": "Run",
+        "average_elevation_ft": 5850.0,
+        "average_heartrate": 162.0,
+        "distance_miles": 4.9834,
+        "elevation_gain_ft": 853.02,
+        "feature_scores": {
+          "altitude": 0.459,
+          "distance": 0.4707,
+          "elevation_gain": 0.5882,
+          "grade": 0.1254,
+          "hr_profile": 0.6323,
+          "surface": 1.0,
+          "terrain": 0.7,
+          "weather": 0.0716
+        },
+        "gain_per_mile": 171.17,
+        "hr_profile_delta": 0.6323,
+        "humidity_percent": 31.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "surface",
+            "terrain"
+          ],
+          "strongest_features": [
+            "weather",
+            "grade"
+          ],
+          "summary": "hilly trail run scored against flat road trail profile",
+          "surface_match": false,
+          "terrain_match": false
+        },
+        "max_heartrate": 188.0,
+        "normalized_altitude_delta": 0.459,
+        "normalized_distance_delta": 0.4707,
+        "normalized_elevation_delta": 0.5882,
+        "normalized_grade_delta": 0.1254,
+        "pace_min_per_mile": 9.53,
+        "perceived_effort": 9.0,
+        "similarity_score": 0.5368,
+        "similarity_vector_delta": {
+          "altitude": 0.459,
+          "distance": 0.4707,
+          "elevation_gain": 0.5882,
+          "grade": 0.1254,
+          "hr_profile": 0.6323,
+          "surface": 1.0,
+          "terrain": 0.7,
+          "weather": -0.0716
+        },
+        "surface": "trail",
+        "surface_delta": 1.0,
+        "temperature_f": 62.0,
+        "terrain": "hilly",
+        "terrain_delta": 0.7,
+        "weather_delta": -0.0716,
+        "weighted_feature_scores": {
+          "altitude": 0.0211,
+          "distance": 0.0532,
+          "elevation_gain": 0.0623,
+          "grade": 0.0022,
+          "hr_profile": 0.04,
+          "surface": 0.06,
+          "terrain": 0.049,
+          "weather": 0.0004
+        },
+        "weighted_similarity_score": 0.5368,
+        "wind_speed_mph": 7.0
+      }
+    ],
+    "similarity_explanation": {
+      "features": [
+        "distance",
+        "elevation_gain",
+        "grade",
+        "altitude",
+        "terrain",
+        "surface",
+        "weather",
+        "hr_profile"
+      ],
+      "method": "weighted KNN over trail profile features",
+      "score_direction": "lower is more similar",
+      "top_match_basis": {
+        "largest_gaps": [
+          "distance",
+          "hr_profile"
+        ],
+        "strongest_features": [
+          "terrain",
+          "surface",
+          "weather"
+        ],
+        "summary": "flat road run scored against flat road trail profile",
+        "surface_match": true,
+        "terrain_match": true
+      }
+    },
+    "similarity_model": "weighted_knn_trail_profile_v2",
+    "target_profile": {
+      "average_elevation_ft": 5342.84,
+      "distance_miles": 1.762,
+      "elevation_gain_ft": 0.0,
+      "gain_per_mile": 0.0,
+      "hr_profile_load": 0.2094,
+      "humidity_percent": 34.0,
+      "surface": "road",
+      "temperature_f": 68.4,
+      "terrain": "flat",
+      "weather_load": 0.2154,
+      "wind_speed_mph": 6.2
+    },
+    "target_similarity_vector": {
+      "altitude": 4.8352,
+      "distance": 0.2574,
+      "elevation_gain": 0.0,
+      "grade": 0.0,
+      "hr_profile": 0.2094,
+      "surface": 0.0,
+      "terrain": 0.0,
+      "weather": 0.2154
+    },
+    "trail_id": "boulder-creek-path",
+    "trail_name": "Boulder Creek Path East"
+  },
+  {
+    "average_similarity_score": 0.5116,
+    "best_similarity_score": 0.4718,
+    "confidence": 0.662,
+    "distance_miles": 0.8608,
+    "elevation_gain_ft": 1174.54,
+    "estimate_id": "effort-green-mountain-ascent",
+    "estimated_average_heartrate": 153.6,
+    "estimated_max_heartrate": 178.8,
+    "estimated_pace_min_per_mile": 10.27,
+    "estimated_perceived_effort": 7.2,
+    "feature_weights": {
+      "altitude": 0.1,
+      "distance": 0.24,
+      "elevation_gain": 0.18,
+      "grade": 0.14,
+      "hr_profile": 0.1,
+      "surface": 0.06,
+      "terrain": 0.1,
+      "weather": 0.08
+    },
+    "normalization": {
+      "average_elevation_ft": 1105.0,
+      "distance_miles": 6.8442,
+      "elevation_gain_ft": 1450.13,
+      "gain_per_mile": 1364.4749
+    },
+    "similar_run_count": 5,
+    "similar_run_ids": [
+      "run-2026-0007",
+      "run-2026-0005",
+      "run-2026-0002",
+      "run-2026-0009",
+      "run-2026-0001"
+    ],
+    "similar_runs": [
+      {
+        "activity_id": "run-2026-0007",
+        "activity_name": "Synthetic Green Easy",
+        "activity_type": "Trail Run",
+        "average_elevation_ft": 6350.0,
+        "average_heartrate": 149.0,
+        "distance_miles": 5.6545,
+        "elevation_gain_ft": 1328.74,
+        "feature_scores": {
+          "altitude": 0.058,
+          "distance": 0.7004,
+          "elevation_gain": 0.1063,
+          "grade": 0.8278,
+          "hr_profile": 0.2541,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": 0.0363
+        },
+        "gain_per_mile": 234.99,
+        "hr_profile_delta": -0.2541,
+        "humidity_percent": 45.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "grade",
+            "distance"
+          ],
+          "strongest_features": [
+            "terrain",
+            "surface",
+            "weather"
+          ],
+          "summary": "mountain trail run scored against mountain trail trail profile",
+          "surface_match": true,
+          "terrain_match": true
+        },
+        "max_heartrate": 173.0,
+        "normalized_altitude_delta": -0.058,
+        "normalized_distance_delta": 0.7004,
+        "normalized_elevation_delta": 0.1063,
+        "normalized_grade_delta": -0.8278,
+        "pace_min_per_mile": 11.26,
+        "perceived_effort": 6.0,
+        "similarity_score": 0.4718,
+        "similarity_vector_delta": {
+          "altitude": -0.058,
+          "distance": 0.7004,
+          "elevation_gain": 0.1063,
+          "grade": -0.8278,
+          "hr_profile": -0.2541,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": -0.0363
+        },
+        "surface": "trail",
+        "surface_delta": 0.0,
+        "temperature_f": 49.0,
+        "terrain": "mountain",
+        "terrain_delta": 0.0,
+        "weather_delta": -0.0363,
+        "weighted_feature_scores": {
+          "altitude": 0.0003,
+          "distance": 0.1177,
+          "elevation_gain": 0.002,
+          "grade": 0.0959,
+          "hr_profile": 0.0065,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": 0.0001
+        },
+        "weighted_similarity_score": 0.4718,
+        "wind_speed_mph": 9.0
+      },
+      {
+        "activity_id": "run-2026-0005",
+        "activity_name": "Synthetic Hill Repeats",
+        "activity_type": "Run",
+        "average_elevation_ft": 5850.0,
+        "average_heartrate": 162.0,
+        "distance_miles": 4.9834,
+        "elevation_gain_ft": 853.02,
+        "feature_scores": {
+          "altitude": 0.5104,
+          "distance": 0.6023,
+          "elevation_gain": 0.2217,
+          "grade": 0.8746,
+          "hr_profile": 0.0209,
+          "surface": 0.0,
+          "terrain": 0.3,
+          "weather": 0.0716
+        },
+        "gain_per_mile": 171.17,
+        "hr_profile_delta": 0.0209,
+        "humidity_percent": 31.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "grade",
+            "distance"
+          ],
+          "strongest_features": [
+            "surface",
+            "hr_profile",
+            "weather"
+          ],
+          "summary": "hilly trail run scored against mountain trail trail profile",
+          "surface_match": true,
+          "terrain_match": false
+        },
+        "max_heartrate": 188.0,
+        "normalized_altitude_delta": -0.5104,
+        "normalized_distance_delta": 0.6023,
+        "normalized_elevation_delta": -0.2217,
+        "normalized_grade_delta": -0.8746,
+        "pace_min_per_mile": 9.53,
+        "perceived_effort": 9.0,
+        "similarity_score": 0.4884,
+        "similarity_vector_delta": {
+          "altitude": -0.5104,
+          "distance": 0.6023,
+          "elevation_gain": -0.2217,
+          "grade": -0.8746,
+          "hr_profile": 0.0209,
+          "surface": 0.0,
+          "terrain": -0.3,
+          "weather": -0.0716
+        },
+        "surface": "trail",
+        "surface_delta": 0.0,
+        "temperature_f": 62.0,
+        "terrain": "hilly",
+        "terrain_delta": -0.3,
+        "weather_delta": -0.0716,
+        "weighted_feature_scores": {
+          "altitude": 0.0261,
+          "distance": 0.0871,
+          "elevation_gain": 0.0088,
+          "grade": 0.1071,
+          "hr_profile": 0.0,
+          "surface": 0.0,
+          "terrain": 0.009,
+          "weather": 0.0004
+        },
+        "weighted_similarity_score": 0.4884,
+        "wind_speed_mph": 7.0
+      },
+      {
+        "activity_id": "run-2026-0002",
+        "activity_name": "Synthetic Green Climb",
+        "activity_type": "Trail Run",
+        "average_elevation_ft": 6425.0,
+        "average_heartrate": 156.0,
+        "distance_miles": 6.0957,
+        "elevation_gain_ft": 1450.13,
+        "feature_scores": {
+          "altitude": 0.0099,
+          "distance": 0.7649,
+          "elevation_gain": 0.19,
+          "grade": 0.8257,
+          "hr_profile": 0.0874,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": 0.0906
+        },
+        "gain_per_mile": 237.89,
+        "hr_profile_delta": -0.0874,
+        "humidity_percent": 42.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "grade",
+            "distance"
+          ],
+          "strongest_features": [
+            "terrain",
+            "surface",
+            "altitude"
+          ],
+          "summary": "mountain trail run scored against mountain trail trail profile",
+          "surface_match": true,
+          "terrain_match": true
+        },
+        "max_heartrate": 183.0,
+        "normalized_altitude_delta": 0.0099,
+        "normalized_distance_delta": 0.7649,
+        "normalized_elevation_delta": 0.19,
+        "normalized_grade_delta": -0.8257,
+        "pace_min_per_mile": 10.66,
+        "perceived_effort": 8.0,
+        "similarity_score": 0.4937,
+        "similarity_vector_delta": {
+          "altitude": 0.0099,
+          "distance": 0.7649,
+          "elevation_gain": 0.19,
+          "grade": -0.8257,
+          "hr_profile": -0.0874,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": -0.0906
+        },
+        "surface": "trail",
+        "surface_delta": 0.0,
+        "temperature_f": 52.0,
+        "terrain": "mountain",
+        "terrain_delta": 0.0,
+        "weather_delta": -0.0906,
+        "weighted_feature_scores": {
+          "altitude": 0.0,
+          "distance": 0.1404,
+          "elevation_gain": 0.0065,
+          "grade": 0.0954,
+          "hr_profile": 0.0008,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": 0.0007
+        },
+        "weighted_similarity_score": 0.4937,
+        "wind_speed_mph": 8.0
+      },
+      {
+        "activity_id": "run-2026-0009",
+        "activity_name": "Synthetic Afternoon Trail",
+        "activity_type": "Trail Run",
+        "average_elevation_ft": 5900.0,
+        "average_heartrate": 153.0,
+        "distance_miles": 6.5244,
+        "elevation_gain_ft": 1181.1,
+        "feature_scores": {
+          "altitude": 0.4652,
+          "distance": 0.8275,
+          "elevation_gain": 0.0045,
+          "grade": 0.8673,
+          "hr_profile": 0.1591,
+          "surface": 0.0,
+          "terrain": 0.3,
+          "weather": 0.1168
+        },
+        "gain_per_mile": 181.03,
+        "hr_profile_delta": -0.1591,
+        "humidity_percent": 27.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "grade",
+            "distance"
+          ],
+          "strongest_features": [
+            "surface",
+            "elevation_gain",
+            "weather"
+          ],
+          "summary": "hilly trail run scored against mountain trail trail profile",
+          "surface_match": true,
+          "terrain_match": false
+        },
+        "max_heartrate": 179.0,
+        "normalized_altitude_delta": -0.4652,
+        "normalized_distance_delta": 0.8275,
+        "normalized_elevation_delta": 0.0045,
+        "normalized_grade_delta": -0.8673,
+        "pace_min_per_mile": 10.75,
+        "perceived_effort": 7.0,
+        "similarity_score": 0.5513,
+        "similarity_vector_delta": {
+          "altitude": -0.4652,
+          "distance": 0.8275,
+          "elevation_gain": 0.0045,
+          "grade": -0.8673,
+          "hr_profile": -0.1591,
+          "surface": 0.0,
+          "terrain": -0.3,
+          "weather": 0.1168
+        },
+        "surface": "trail",
+        "surface_delta": 0.0,
+        "temperature_f": 74.0,
+        "terrain": "hilly",
+        "terrain_delta": -0.3,
+        "weather_delta": 0.1168,
+        "weighted_feature_scores": {
+          "altitude": 0.0216,
+          "distance": 0.1643,
+          "elevation_gain": 0.0,
+          "grade": 0.1053,
+          "hr_profile": 0.0025,
+          "surface": 0.0,
+          "terrain": 0.009,
+          "weather": 0.0011
+        },
+        "weighted_similarity_score": 0.5513,
+        "wind_speed_mph": 12.0
+      },
+      {
+        "activity_id": "run-2026-0001",
+        "activity_name": "Synthetic Mesa Tempo",
+        "activity_type": "Run",
+        "average_elevation_ft": 5710.0,
+        "average_heartrate": 148.0,
+        "distance_miles": 4.8001,
+        "elevation_gain_ft": 583.99,
+        "feature_scores": {
+          "altitude": 0.6371,
+          "distance": 0.5756,
+          "elevation_gain": 0.4072,
+          "grade": 0.9108,
+          "hr_profile": 0.2774,
+          "surface": 0.0,
+          "terrain": 0.55,
+          "weather": 0.1362
+        },
+        "gain_per_mile": 121.66,
+        "hr_profile_delta": -0.2774,
+        "humidity_percent": 38.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "grade",
+            "altitude"
+          ],
+          "strongest_features": [
+            "surface",
+            "weather",
+            "hr_profile"
+          ],
+          "summary": "rolling trail run scored against mountain trail trail profile",
+          "surface_match": true,
+          "terrain_match": false
+        },
+        "max_heartrate": 171.0,
+        "normalized_altitude_delta": -0.6371,
+        "normalized_distance_delta": 0.5756,
+        "normalized_elevation_delta": -0.4072,
+        "normalized_grade_delta": -0.9108,
+        "pace_min_per_mile": 9.17,
+        "perceived_effort": 6.0,
+        "similarity_score": 0.5527,
+        "similarity_vector_delta": {
+          "altitude": -0.6371,
+          "distance": 0.5756,
+          "elevation_gain": -0.4072,
+          "grade": -0.9108,
+          "hr_profile": -0.2774,
+          "surface": 0.0,
+          "terrain": -0.55,
+          "weather": -0.1362
+        },
+        "surface": "trail",
+        "surface_delta": 0.0,
+        "temperature_f": 58.0,
+        "terrain": "rolling",
+        "terrain_delta": -0.55,
+        "weather_delta": -0.1362,
+        "weighted_feature_scores": {
+          "altitude": 0.0406,
+          "distance": 0.0795,
+          "elevation_gain": 0.0299,
+          "grade": 0.1161,
+          "hr_profile": 0.0077,
+          "surface": 0.0,
+          "terrain": 0.0303,
+          "weather": 0.0015
+        },
+        "weighted_similarity_score": 0.5527,
+        "wind_speed_mph": 4.0
+      }
+    ],
+    "similarity_explanation": {
+      "features": [
+        "distance",
+        "elevation_gain",
+        "grade",
+        "altitude",
+        "terrain",
+        "surface",
+        "weather",
+        "hr_profile"
+      ],
+      "method": "weighted KNN over trail profile features",
+      "score_direction": "lower is more similar",
+      "top_match_basis": {
+        "largest_gaps": [
+          "grade",
+          "distance"
+        ],
+        "strongest_features": [
+          "terrain",
+          "surface",
+          "weather"
+        ],
+        "summary": "mountain trail run scored against mountain trail trail profile",
+        "surface_match": true,
+        "terrain_match": true
+      }
+    },
+    "similarity_model": "weighted_knn_trail_profile_v2",
+    "target_profile": {
+      "average_elevation_ft": 6414.04,
+      "distance_miles": 0.8608,
+      "elevation_gain_ft": 1174.54,
+      "gain_per_mile": 1364.47,
+      "hr_profile_load": 0.8207,
+      "humidity_percent": 34.0,
+      "surface": "trail",
+      "temperature_f": 68.4,
+      "terrain": "mountain",
+      "weather_load": 0.2154,
+      "wind_speed_mph": 6.2
+    },
+    "target_similarity_vector": {
+      "altitude": 5.8046,
+      "distance": 0.1258,
+      "elevation_gain": 0.81,
+      "grade": 1.0,
+      "hr_profile": 0.8207,
+      "surface": 1.0,
+      "terrain": 1.0,
+      "weather": 0.2154
+    },
+    "trail_id": "green-mountain-ascent",
+    "trail_name": "Green Mountain Ascent"
+  },
+  {
+    "average_similarity_score": 0.3201,
+    "best_similarity_score": 0.2785,
+    "confidence": 0.758,
+    "distance_miles": 1.1891,
+    "elevation_gain_ft": 344.49,
+    "estimate_id": "effort-mesa-overlook-loop",
+    "estimated_average_heartrate": 142.2,
+    "estimated_max_heartrate": 164.8,
+    "estimated_pace_min_per_mile": 9.14,
+    "estimated_perceived_effort": 5.4,
+    "feature_weights": {
+      "altitude": 0.1,
+      "distance": 0.24,
+      "elevation_gain": 0.18,
+      "grade": 0.14,
+      "hr_profile": 0.1,
+      "surface": 0.06,
+      "terrain": 0.1,
+      "weather": 0.08
+    },
+    "normalization": {
+      "average_elevation_ft": 1105.0,
+      "distance_miles": 6.8442,
+      "elevation_gain_ft": 1450.13,
+      "gain_per_mile": 1364.4749
+    },
+    "similar_run_count": 5,
+    "similar_run_ids": [
+      "run-2026-0001",
+      "run-2026-0003",
+      "run-2026-0008",
+      "run-2026-0005",
+      "run-2026-0006"
+    ],
+    "similar_runs": [
+      {
+        "activity_id": "run-2026-0001",
+        "activity_name": "Synthetic Mesa Tempo",
+        "activity_type": "Run",
+        "average_elevation_ft": 5710.0,
+        "average_heartrate": 148.0,
+        "distance_miles": 4.8001,
+        "elevation_gain_ft": 583.99,
+        "feature_scores": {
+          "altitude": 0.0478,
+          "distance": 0.5276,
+          "elevation_gain": 0.1652,
+          "grade": 0.1232,
+          "hr_profile": 0.1411,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": 0.1362
+        },
+        "gain_per_mile": 121.66,
+        "hr_profile_delta": 0.1411,
+        "humidity_percent": 38.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "distance",
+            "elevation_gain"
+          ],
+          "strongest_features": [
+            "terrain",
+            "surface",
+            "altitude"
+          ],
+          "summary": "rolling trail run scored against rolling trail trail profile",
+          "surface_match": true,
+          "terrain_match": true
+        },
+        "max_heartrate": 171.0,
+        "normalized_altitude_delta": -0.0478,
+        "normalized_distance_delta": 0.5276,
+        "normalized_elevation_delta": 0.1652,
+        "normalized_grade_delta": -0.1232,
+        "pace_min_per_mile": 9.17,
+        "perceived_effort": 6.0,
+        "similarity_score": 0.2785,
+        "similarity_vector_delta": {
+          "altitude": -0.0478,
+          "distance": 0.5276,
+          "elevation_gain": 0.1652,
+          "grade": -0.1232,
+          "hr_profile": 0.1411,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": -0.1362
+        },
+        "surface": "trail",
+        "surface_delta": 0.0,
+        "temperature_f": 58.0,
+        "terrain": "rolling",
+        "terrain_delta": 0.0,
+        "weather_delta": -0.1362,
+        "weighted_feature_scores": {
+          "altitude": 0.0002,
+          "distance": 0.0668,
+          "elevation_gain": 0.0049,
+          "grade": 0.0021,
+          "hr_profile": 0.002,
+          "surface": 0.0,
+          "terrain": 0.0,
+          "weather": 0.0015
+        },
+        "weighted_similarity_score": 0.2785,
+        "wind_speed_mph": 4.0
+      },
+      {
+        "activity_id": "run-2026-0003",
+        "activity_name": "Synthetic Creek Recovery",
+        "activity_type": "Run",
+        "average_elevation_ft": 5360.0,
+        "average_heartrate": 132.0,
+        "distance_miles": 3.9768,
+        "elevation_gain_ft": 137.8,
+        "feature_scores": {
+          "altitude": 0.3645,
+          "distance": 0.4073,
+          "elevation_gain": 0.1425,
+          "grade": 0.1869,
+          "hr_profile": 0.1622,
+          "surface": 0.55,
+          "terrain": 0.25,
+          "weather": 0.0638
+        },
+        "gain_per_mile": 34.65,
+        "hr_profile_delta": -0.1622,
+        "humidity_percent": 35.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "surface",
+            "distance"
+          ],
+          "strongest_features": [
+            "weather",
+            "elevation_gain",
+            "hr_profile"
+          ],
+          "summary": "path mixed run scored against rolling trail trail profile",
+          "surface_match": false,
+          "terrain_match": false
+        },
+        "max_heartrate": 154.0,
+        "normalized_altitude_delta": -0.3645,
+        "normalized_distance_delta": 0.4073,
+        "normalized_elevation_delta": -0.1425,
+        "normalized_grade_delta": -0.1869,
+        "pace_min_per_mile": 8.93,
+        "perceived_effort": 4.0,
+        "similarity_score": 0.2983,
+        "similarity_vector_delta": {
+          "altitude": -0.3645,
+          "distance": 0.4073,
+          "elevation_gain": -0.1425,
+          "grade": -0.1869,
+          "hr_profile": -0.1622,
+          "surface": -0.55,
+          "terrain": -0.25,
+          "weather": -0.0638
+        },
+        "surface": "mixed",
+        "surface_delta": -0.55,
+        "temperature_f": 64.0,
+        "terrain": "path",
+        "terrain_delta": -0.25,
+        "weather_delta": -0.0638,
+        "weighted_feature_scores": {
+          "altitude": 0.0133,
+          "distance": 0.0398,
+          "elevation_gain": 0.0037,
+          "grade": 0.0049,
+          "hr_profile": 0.0026,
+          "surface": 0.0182,
+          "terrain": 0.0063,
+          "weather": 0.0003
+        },
+        "weighted_similarity_score": 0.2983,
+        "wind_speed_mph": 5.0
+      },
+      {
+        "activity_id": "run-2026-0008",
+        "activity_name": "Synthetic Creek Progression",
+        "activity_type": "Run",
+        "average_elevation_ft": 5380.0,
+        "average_heartrate": 141.0,
+        "distance_miles": 4.2875,
+        "elevation_gain_ft": 157.48,
+        "feature_scores": {
+          "altitude": 0.3464,
+          "distance": 0.4527,
+          "elevation_gain": 0.129,
+          "grade": 0.1854,
+          "hr_profile": 0.0039,
+          "surface": 0.55,
+          "terrain": 0.25,
+          "weather": 0.0352
+        },
+        "gain_per_mile": 36.73,
+        "hr_profile_delta": -0.0039,
+        "humidity_percent": 33.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "surface",
+            "distance"
+          ],
+          "strongest_features": [
+            "hr_profile",
+            "weather",
+            "elevation_gain"
+          ],
+          "summary": "path mixed run scored against rolling trail trail profile",
+          "surface_match": false,
+          "terrain_match": false
+        },
+        "max_heartrate": 162.0,
+        "normalized_altitude_delta": -0.3464,
+        "normalized_distance_delta": 0.4527,
+        "normalized_elevation_delta": -0.129,
+        "normalized_grade_delta": -0.1854,
+        "pace_min_per_mile": 8.63,
+        "perceived_effort": 5.0,
+        "similarity_score": 0.3058,
+        "similarity_vector_delta": {
+          "altitude": -0.3464,
+          "distance": 0.4527,
+          "elevation_gain": -0.129,
+          "grade": -0.1854,
+          "hr_profile": -0.0039,
+          "surface": -0.55,
+          "terrain": -0.25,
+          "weather": -0.0352
+        },
+        "surface": "mixed",
+        "surface_delta": -0.55,
+        "temperature_f": 66.0,
+        "terrain": "path",
+        "terrain_delta": -0.25,
+        "weather_delta": -0.0352,
+        "weighted_feature_scores": {
+          "altitude": 0.012,
+          "distance": 0.0492,
+          "elevation_gain": 0.003,
+          "grade": 0.0048,
+          "hr_profile": 0.0,
+          "surface": 0.0182,
+          "terrain": 0.0063,
+          "weather": 0.0001
+        },
+        "weighted_similarity_score": 0.3058,
+        "wind_speed_mph": 5.5
+      },
+      {
+        "activity_id": "run-2026-0005",
+        "activity_name": "Synthetic Hill Repeats",
+        "activity_type": "Run",
+        "average_elevation_ft": 5850.0,
+        "average_heartrate": 162.0,
+        "distance_miles": 4.9834,
+        "elevation_gain_ft": 853.02,
+        "feature_scores": {
+          "altitude": 0.0789,
+          "distance": 0.5544,
+          "elevation_gain": 0.3507,
+          "grade": 0.0869,
+          "hr_profile": 0.4394,
+          "surface": 0.0,
+          "terrain": 0.25,
+          "weather": 0.0716
+        },
+        "gain_per_mile": 171.17,
+        "hr_profile_delta": 0.4394,
+        "humidity_percent": 31.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "distance",
+            "hr_profile"
+          ],
+          "strongest_features": [
+            "surface",
+            "weather",
+            "altitude"
+          ],
+          "summary": "hilly trail run scored against rolling trail trail profile",
+          "surface_match": true,
+          "terrain_match": false
+        },
+        "max_heartrate": 188.0,
+        "normalized_altitude_delta": 0.0789,
+        "normalized_distance_delta": 0.5544,
+        "normalized_elevation_delta": 0.3507,
+        "normalized_grade_delta": -0.0869,
+        "pace_min_per_mile": 9.53,
+        "perceived_effort": 9.0,
+        "similarity_score": 0.3515,
+        "similarity_vector_delta": {
+          "altitude": 0.0789,
+          "distance": 0.5544,
+          "elevation_gain": 0.3507,
+          "grade": -0.0869,
+          "hr_profile": 0.4394,
+          "surface": 0.0,
+          "terrain": 0.25,
+          "weather": -0.0716
+        },
+        "surface": "trail",
+        "surface_delta": 0.0,
+        "temperature_f": 62.0,
+        "terrain": "hilly",
+        "terrain_delta": 0.25,
+        "weather_delta": -0.0716,
+        "weighted_feature_scores": {
+          "altitude": 0.0006,
+          "distance": 0.0738,
+          "elevation_gain": 0.0221,
+          "grade": 0.0011,
+          "hr_profile": 0.0193,
+          "surface": 0.0,
+          "terrain": 0.0062,
+          "weather": 0.0004
+        },
+        "weighted_similarity_score": 0.3515,
+        "wind_speed_mph": 7.0
+      },
+      {
+        "activity_id": "run-2026-0006",
+        "activity_name": "Synthetic Coffee Jog",
+        "activity_type": "Run",
+        "average_elevation_ft": 5320.0,
+        "average_heartrate": 128.0,
+        "distance_miles": 3.1814,
+        "elevation_gain_ft": 82.02,
+        "feature_scores": {
+          "altitude": 0.4007,
+          "distance": 0.2911,
+          "elevation_gain": 0.181,
+          "grade": 0.1934,
+          "hr_profile": 0.2506,
+          "surface": 1.0,
+          "terrain": 0.45,
+          "weather": 0.0179
+        },
+        "gain_per_mile": 25.78,
+        "hr_profile_delta": -0.2506,
+        "humidity_percent": 30.0,
+        "match_explanation": {
+          "largest_gaps": [
+            "surface",
+            "terrain"
+          ],
+          "strongest_features": [
+            "weather",
+            "elevation_gain",
+            "grade"
+          ],
+          "summary": "flat road run scored against rolling trail trail profile",
+          "surface_match": false,
+          "terrain_match": false
+        },
+        "max_heartrate": 149.0,
+        "normalized_altitude_delta": -0.4007,
+        "normalized_distance_delta": 0.2911,
+        "normalized_elevation_delta": -0.181,
+        "normalized_grade_delta": -0.1934,
+        "pace_min_per_mile": 9.43,
+        "perceived_effort": 3.0,
+        "similarity_score": 0.3662,
+        "similarity_vector_delta": {
+          "altitude": -0.4007,
+          "distance": 0.2911,
+          "elevation_gain": -0.181,
+          "grade": -0.1934,
+          "hr_profile": -0.2506,
+          "surface": -1.0,
+          "terrain": -0.45,
+          "weather": 0.0179
+        },
+        "surface": "road",
+        "surface_delta": -1.0,
+        "temperature_f": 70.0,
+        "terrain": "flat",
+        "terrain_delta": -0.45,
+        "weather_delta": 0.0179,
+        "weighted_feature_scores": {
+          "altitude": 0.0161,
+          "distance": 0.0203,
+          "elevation_gain": 0.0059,
+          "grade": 0.0052,
+          "hr_profile": 0.0063,
+          "surface": 0.06,
+          "terrain": 0.0203,
+          "weather": 0.0
+        },
+        "weighted_similarity_score": 0.3662,
+        "wind_speed_mph": 6.0
+      }
+    ],
+    "similarity_explanation": {
+      "features": [
+        "distance",
+        "elevation_gain",
+        "grade",
+        "altitude",
+        "terrain",
+        "surface",
+        "weather",
+        "hr_profile"
+      ],
+      "method": "weighted KNN over trail profile features",
+      "score_direction": "lower is more similar",
+      "top_match_basis": {
+        "largest_gaps": [
+          "distance",
+          "elevation_gain"
+        ],
+        "strongest_features": [
+          "terrain",
+          "surface",
+          "altitude"
+        ],
+        "summary": "rolling trail run scored against rolling trail trail profile",
+        "surface_match": true,
+        "terrain_match": true
+      }
+    },
+    "similarity_model": "weighted_knn_trail_profile_v2",
+    "target_profile": {
+      "average_elevation_ft": 5762.8,
+      "distance_miles": 1.1891,
+      "elevation_gain_ft": 344.49,
+      "gain_per_mile": 289.71,
+      "hr_profile_load": 0.4022,
+      "humidity_percent": 34.0,
+      "surface": "trail",
+      "temperature_f": 68.4,
+      "terrain": "rolling",
+      "weather_load": 0.2154,
+      "wind_speed_mph": 6.2
+    },
+    "target_similarity_vector": {
+      "altitude": 5.2152,
+      "distance": 0.1737,
+      "elevation_gain": 0.2376,
+      "grade": 0.2123,
+      "hr_profile": 0.4022,
+      "surface": 1.0,
+      "terrain": 0.45,
+      "weather": 0.2154
+    },
+    "trail_id": "mesa-overlook-loop",
+    "trail_name": "Mesa Overlook Loop"
+  }
+]

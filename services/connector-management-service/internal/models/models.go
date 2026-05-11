@@ -922,12 +922,26 @@ type IcebergLoadTableResponse struct {
 }
 
 type WebhookDefinition struct {
-	URL          string            `json:"url"`
-	Method       string            `json:"method"`
-	Headers      map[string]string `json:"headers"`
-	InputSchema  json.RawMessage   `json:"input_schema"`
-	OutputSchema json.RawMessage   `json:"output_schema"`
-	AuthRef      *string           `json:"auth_ref"`
+	Name             string                   `json:"name,omitempty"`
+	Description      string                   `json:"description,omitempty"`
+	URL              string                   `json:"url,omitempty"`
+	Method           string                   `json:"method,omitempty"`
+	Path             string                   `json:"path,omitempty"`
+	QueryParams      map[string]string        `json:"query_params,omitempty"`
+	Headers          map[string]string        `json:"headers,omitempty"`
+	Body             json.RawMessage          `json:"body,omitempty"`
+	BodyTemplate     string                   `json:"body_template,omitempty"`
+	InputSchema      json.RawMessage          `json:"input_schema,omitempty"`
+	OutputSchema     json.RawMessage          `json:"output_schema,omitempty"`
+	AuthRef          *string                  `json:"auth_ref,omitempty"`
+	Inputs           []WebhookParameter       `json:"inputs,omitempty"`
+	Calls            []WebhookCall            `json:"calls,omitempty"`
+	Outputs          []WebhookOutputParameter `json:"outputs,omitempty"`
+	TimeoutMS        int                      `json:"timeout_ms,omitempty"`
+	ConcurrencyLimit int                      `json:"concurrency_limit,omitempty"`
+	RateLimit        *WebhookRateLimit        `json:"rate_limit,omitempty"`
+	Limits           WebhookInvocationLimits  `json:"limits,omitempty"`
+	History          WebhookHistorySettings   `json:"history,omitempty"`
 }
 
 type InvokeWebhookRequest struct {
@@ -938,6 +952,111 @@ type InvokeWebhookResponse struct {
 	Status           uint16          `json:"status"`
 	Response         json.RawMessage `json:"response"`
 	OutputParameters json.RawMessage `json:"output_parameters"`
+	History          json.RawMessage `json:"history,omitempty"`
+}
+
+type WebhookHistoryInputPolicy struct {
+	StoreInputs  bool   `json:"store_inputs"`
+	StoreOutputs bool   `json:"store_outputs"`
+	Visibility   string `json:"visibility"`
+}
+
+type WebhookHistoryEntry struct {
+	ID                 uuid.UUID                 `json:"id"`
+	SourceID           uuid.UUID                 `json:"source_id"`
+	UserID             uuid.UUID                 `json:"user_id"`
+	Status             string                    `json:"status"`
+	HTTPStatus         *uint16                   `json:"http_status,omitempty"`
+	InputPolicy        WebhookHistoryInputPolicy `json:"input_policy"`
+	Inputs             json.RawMessage           `json:"inputs,omitempty"`
+	OutputParameters   json.RawMessage           `json:"output_parameters,omitempty"`
+	Error              *string                   `json:"error,omitempty"`
+	CallCount          int                       `json:"call_count"`
+	StartedAt          time.Time                 `json:"started_at"`
+	FinishedAt         time.Time                 `json:"finished_at"`
+	DurationMS         int64                     `json:"duration_ms"`
+	RetentionExpiresAt time.Time                 `json:"retention_expires_at"`
+	CreatedAt          time.Time                 `json:"created_at"`
+}
+
+type CreateWebhookHistoryEntry struct {
+	SourceID           uuid.UUID                 `json:"source_id"`
+	UserID             uuid.UUID                 `json:"user_id"`
+	Status             string                    `json:"status"`
+	HTTPStatus         *uint16                   `json:"http_status,omitempty"`
+	InputPolicy        WebhookHistoryInputPolicy `json:"input_policy"`
+	Inputs             json.RawMessage           `json:"inputs,omitempty"`
+	OutputParameters   json.RawMessage           `json:"output_parameters,omitempty"`
+	Error              *string                   `json:"error,omitempty"`
+	CallCount          int                       `json:"call_count"`
+	StartedAt          time.Time                 `json:"started_at"`
+	FinishedAt         time.Time                 `json:"finished_at"`
+	RetentionExpiresAt time.Time                 `json:"retention_expires_at"`
+}
+
+const DefaultInboundListenerMaxPayloadBytes = 1024 * 1024
+
+type InboundListenerDefinition struct {
+	ID          string                           `json:"id,omitempty"`
+	Name        string                           `json:"name,omitempty"`
+	Description string                           `json:"description,omitempty"`
+	Type        string                           `json:"type,omitempty"`
+	Enabled     bool                             `json:"enabled"`
+	Auth        InboundListenerAuthConfig        `json:"auth,omitempty"`
+	Destination InboundListenerDestinationConfig `json:"destination,omitempty"`
+	Limits      InboundListenerLimits            `json:"limits,omitempty"`
+	Metadata    map[string]json.RawMessage       `json:"metadata,omitempty"`
+}
+
+type InboundListenerAuthConfig struct {
+	Type            string `json:"type,omitempty"`
+	Header          string `json:"header,omitempty"`
+	Secret          string `json:"secret,omitempty"`
+	SecretRef       string `json:"secret_ref,omitempty"`
+	TimestampHeader string `json:"timestamp_header,omitempty"`
+}
+
+type InboundListenerDestinationConfig struct {
+	Mode         string     `json:"mode,omitempty"`
+	DatasetID    *uuid.UUID `json:"dataset_id,omitempty"`
+	ObjectTypeID *uuid.UUID `json:"object_type_id,omitempty"`
+}
+
+type InboundListenerLimits struct {
+	MaxPayloadBytes int `json:"max_payload_bytes,omitempty"`
+}
+
+type InboundListenerEvent struct {
+	ID                uuid.UUID                        `json:"id"`
+	SourceID          uuid.UUID                        `json:"source_id"`
+	ListenerID        string                           `json:"listener_id"`
+	EventID           string                           `json:"event_id,omitempty"`
+	Status            string                           `json:"status"`
+	SignatureVerified bool                             `json:"signature_verified"`
+	Payload           json.RawMessage                  `json:"payload,omitempty"`
+	Headers           json.RawMessage                  `json:"headers,omitempty"`
+	Destination       InboundListenerDestinationConfig `json:"destination,omitempty"`
+	CreatedAt         time.Time                        `json:"created_at"`
+}
+
+type CreateInboundListenerEvent struct {
+	SourceID          uuid.UUID                        `json:"source_id"`
+	ListenerID        string                           `json:"listener_id"`
+	EventID           string                           `json:"event_id,omitempty"`
+	Status            string                           `json:"status"`
+	SignatureVerified bool                             `json:"signature_verified"`
+	Payload           json.RawMessage                  `json:"payload,omitempty"`
+	Headers           json.RawMessage                  `json:"headers,omitempty"`
+	Destination       InboundListenerDestinationConfig `json:"destination,omitempty"`
+}
+
+type ReceiveInboundListenerResponse struct {
+	EventID           uuid.UUID                        `json:"event_id"`
+	SourceID          uuid.UUID                        `json:"source_id"`
+	ListenerID        string                           `json:"listener_id"`
+	Status            string                           `json:"status"`
+	SignatureVerified bool                             `json:"signature_verified"`
+	Destination       InboundListenerDestinationConfig `json:"destination,omitempty"`
 }
 
 type LoginRequest struct {

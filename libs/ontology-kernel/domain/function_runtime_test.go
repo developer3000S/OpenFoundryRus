@@ -1,14 +1,21 @@
 package domain
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 
+	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
+	ontologykernel "github.com/openfoundry/openfoundry-go/libs/ontology-kernel"
 	"github.com/openfoundry/openfoundry-go/libs/ontology-kernel/models"
+	kernelstores "github.com/openfoundry/openfoundry-go/libs/ontology-kernel/stores"
 )
 
 // Mirrors the Rust unit `parses_typescript_runtime_config`.
@@ -138,6 +145,127 @@ func TestEnrichTypeScriptResultWithLogs(t *testing.T) {
 	if stdout, ok := output["stdout"].([]any); !ok || len(stdout) != 1 || stdout[0] != "hello" {
 		t.Fatalf("output.stdout drift: %v", output)
 	}
+}
+
+func TestExecuteInlineTypeScriptFunctionCanInvokeDataConnectionWebhook(t *testing.T) {
+	t.Parallel()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node runtime not installed")
+	}
+	sourceID := uuid.New()
+	type connectorRequest struct {
+		method string
+		path   string
+		auth   string
+		inputs map[string]any
+	}
+	requests := make(chan connectorRequest, 1)
+	connector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Inputs map[string]any `json:"inputs"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode connector request: %v", err)
+		}
+		requests <- connectorRequest{method: r.Method, path: r.URL.Path, auth: r.Header.Get("Authorization"), inputs: body.Inputs}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"status": 200,
+			"response": {"current": {"temperature_2m": 84}},
+			"output_parameters": {"temperature": 84, "wind_speed": 4.8},
+			"history": {"stored": true}
+		}`))
+	}))
+	defer connector.Close()
+
+	state := &ontologykernel.AppState{
+		Stores:                        kernelstores.NewInMemory(),
+		JWTConfig:                     authmw.NewJWTConfig("test-secret"),
+		NodeRuntimeCommand:            node,
+		OntologyServiceURL:            "http://ontology.local",
+		AIServiceURL:                  "http://ai.local",
+		ConnectorManagementServiceURL: connector.URL,
+	}
+	claims := &authmw.Claims{Sub: uuid.New(), Roles: []string{"admin"}}
+	action := &models.ActionType{ID: uuid.New(), ObjectTypeID: uuid.New(), OperationKind: "invoke_function", Name: "weather_fn"}
+	resolved := &ResolvedInlineFunction{
+		Config: InlineFunctionConfig{Kind: InlineFunctionTypeScript, TypeScript: &InlineTypeScriptFunctionConfig{
+			Runtime: "typescript",
+			Source: `
+export default async function handler(context) {
+  const weather = await context.sdk.dataConnection.invokeWebhook({
+    sourceId: context.parameters.sourceId,
+    inputs: {
+      latitude: context.parameters.latitude,
+      longitude: context.parameters.longitude,
+    },
+  });
+  return {
+    output: {
+      temperature: weather.output_parameters.temperature,
+      windSpeed: weather.output_parameters.wind_speed,
+      historyStored: weather.history.stored,
+    },
+  };
+}`,
+		}},
+		Capabilities: models.FunctionCapabilities{
+			AllowOntologyRead: true,
+			AllowNetwork:      false,
+			TimeoutSeconds:    15,
+			MaxSourceBytes:    8192,
+		},
+	}
+	params := map[string]json.RawMessage{
+		"sourceId":  mustRawJSON(sourceID.String()),
+		"latitude":  json.RawMessage(`40.016353`),
+		"longitude": json.RawMessage(`-105.34458`),
+	}
+
+	result, err := ExecuteInlineFunction(context.Background(), state, claims, action, nil, params, resolved, nil)
+	if err != nil {
+		t.Fatalf("ExecuteInlineFunction: %v", err)
+	}
+	var got connectorRequest
+	select {
+	case got = <-requests:
+	default:
+		t.Fatal("connector webhook was not called")
+	}
+	if got.method != http.MethodPost {
+		t.Fatalf("unexpected method: %s", got.method)
+	}
+	if got.path != "/api/v1/webhooks/"+sourceID.String()+"/invoke" {
+		t.Fatalf("unexpected path: %s", got.path)
+	}
+	if !strings.HasPrefix(got.auth, "Bearer ") {
+		t.Fatalf("expected service bearer token, got %q", got.auth)
+	}
+	if got.inputs["latitude"] != float64(40.016353) || got.inputs["longitude"] != float64(-105.34458) {
+		t.Fatalf("webhook inputs drift: %#v", got.inputs)
+	}
+	var payload struct {
+		Output struct {
+			Temperature   float64 `json:"temperature"`
+			WindSpeed     float64 `json:"windSpeed"`
+			HistoryStored bool    `json:"historyStored"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		t.Fatalf("result JSON: %v body=%s", err, result)
+	}
+	if payload.Output.Temperature != 84 || payload.Output.WindSpeed != 4.8 || !payload.Output.HistoryStored {
+		t.Fatalf("unexpected external function output: %+v", payload.Output)
+	}
+}
+
+func mustRawJSON(value any) json.RawMessage {
+	body, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return body
 }
 
 // Mirrors `resolves_exact_versioned_package_reference`.

@@ -1,0 +1,17 @@
+{
+  "action_api_name": "FetchTrailWeather",
+  "humidity_percent": 34,
+  "latitude": 40.0153,
+  "longitude": -105.289,
+  "source": "open-meteo",
+  "temperature_f": 68.4,
+  "trail_id": "boulder-creek-path",
+  "trail_name": "Boulder Creek Path East",
+  "trailhead_geopoint": "40.0153,-105.289",
+  "weather_snapshot_id": "weather-boulder-creek-path-2026-05-11T14-00",
+  "weather_time": "2026-05-11T14:00",
+  "webhook_id": "open_meteo_current_weather",
+  "wind_direction_degrees": 244,
+  "wind_speed_mph": 6.2,
+  "writeback_status": "succeeded"
+}

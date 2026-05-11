@@ -106,7 +106,11 @@ func CreateActionType(state *ontologykernel.AppState) http.HandlerFunc {
 			invalid(w, "action type name is required")
 			return
 		}
-		if err := validateActionDefinition(r, state, body.ObjectTypeID, body.OperationKind, body.InputSchema, body.AuthorizationPolicy); err != nil {
+		config := body.Config
+		if len(config) == 0 {
+			config = json.RawMessage(`null`)
+		}
+		if err := validateActionDefinition(r, state, body.ObjectTypeID, body.OperationKind, body.InputSchema, body.AuthorizationPolicy, config); err != nil {
 			invalid(w, err.Error())
 			return
 		}
@@ -126,10 +130,6 @@ func CreateActionType(state *ontologykernel.AppState) http.HandlerFunc {
 		var formSchema models.ActionFormSchema
 		if body.FormSchema != nil {
 			formSchema = *body.FormSchema
-		}
-		config := body.Config
-		if len(config) == 0 {
-			config = json.RawMessage(`null`)
 		}
 		var authPolicy models.ActionAuthorizationPolicy
 		if body.AuthorizationPolicy != nil {
@@ -236,7 +236,7 @@ func UpdateActionType(state *ontologykernel.AppState) http.HandlerFunc {
 		// Validate the new envelope.
 		schemaPtr := &inputSchema
 		policyPtr := &authPolicy
-		if err := validateActionDefinition(r, state, existing.ObjectTypeID, operationKind, schemaPtr, policyPtr); err != nil {
+		if err := validateActionDefinition(r, state, existing.ObjectTypeID, operationKind, schemaPtr, policyPtr, config); err != nil {
 			invalid(w, err.Error())
 			return
 		}
@@ -364,6 +364,7 @@ func validateActionDefinition(
 	operationKindRaw string,
 	inputSchema *[]models.ActionInputField,
 	authorizationPolicy *models.ActionAuthorizationPolicy,
+	config json.RawMessage,
 ) error {
 	exists, err := domain.ActionRepoObjectTypeExists(r.Context(), state.Stores.Definitions, objectTypeID)
 	if err != nil {
@@ -372,8 +373,14 @@ func validateActionDefinition(
 	if !exists {
 		return errors.New("referenced object type does not exist")
 	}
-	if _, err := parseOperationKind(operationKindRaw); err != nil {
+	operationKind, err := parseOperationKind(operationKindRaw)
+	if err != nil {
 		return err
+	}
+	if operationKind == "invoke_function" {
+		if err := validateInvokeFunctionActionDefinition(r, state, config); err != nil {
+			return err
+		}
 	}
 	if inputSchema != nil {
 		for _, field := range *inputSchema {
@@ -387,6 +394,95 @@ func validateActionDefinition(
 	}
 	_ = authorizationPolicy // shape-validated at JSON decode; plan-time checks enforce target policy.
 	return nil
+}
+
+func validateInvokeFunctionActionDefinition(
+	r *http.Request,
+	state *ontologykernel.AppState,
+	config json.RawMessage,
+) error {
+	opConfig := operationConfigBytes(config)
+	opMap, err := decodeJSONObject(opConfig)
+	if err != nil {
+		return errors.New("invalid invoke_function config: " + err.Error())
+	}
+	hasFunctionRule := configHasAnyMeaningfulKey(opMap, "function_package_id", "function_package_name", "runtime")
+	hasHTTPRule := configHasMeaningfulKey(opMap, "url")
+	if !hasFunctionRule {
+		if !hasHTTPRule {
+			return errors.New("invoke_function action requires a function_package_id, function_package_name, inline runtime/source, or HTTP invocation config")
+		}
+		_, err := validateHTTPInvocationConfig(opConfig)
+		return err
+	}
+	for _, key := range functionRuleOntologyConflictKeys() {
+		if configHasMeaningfulKey(opMap, key) {
+			return errors.New("function rule cannot be combined with other Ontology rules")
+		}
+	}
+	resolved, err := domain.ResolveInlineFunctionConfig(r.Context(), state, opConfig)
+	if err != nil {
+		return err
+	}
+	if resolved == nil {
+		return errors.New("function rule could not be resolved from invoke_function config")
+	}
+	return nil
+}
+
+func decodeJSONObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return map[string]json.RawMessage{}, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, err
+	}
+	if obj == nil {
+		return map[string]json.RawMessage{}, nil
+	}
+	return obj, nil
+}
+
+func configHasAnyMeaningfulKey(obj map[string]json.RawMessage, keys ...string) bool {
+	for _, key := range keys {
+		if configHasMeaningfulKey(obj, key) {
+			return true
+		}
+	}
+	return false
+}
+
+func configHasMeaningfulKey(obj map[string]json.RawMessage, key string) bool {
+	raw, ok := obj[key]
+	if !ok {
+		return false
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed != "" && trimmed != "null" && trimmed != `""`
+}
+
+func functionRuleOntologyConflictKeys() []string {
+	return []string{
+		"property_mappings",
+		"static_patch",
+		"object_id_input_name",
+		"object_id_value",
+		"generate_object_id",
+		"link_type_id",
+		"source_input_name",
+		"target_input_name",
+		"source_role",
+		"properties_input_name",
+		"concrete_object_type_input",
+		"interface_id",
+		"object_patch",
+		"delete_object",
+		"rules",
+		"ontology_rules",
+		"submission_criteria",
+		"criteria",
+	}
 }
 
 // parseOperationKind mirrors `fn parse_operation_kind`. Mirrors the

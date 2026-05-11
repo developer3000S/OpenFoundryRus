@@ -1,0 +1,127 @@
+{
+  "source_id": "open_meteo_current_weather",
+  "source_rid": "ri.openfoundry.demo.data-connection.open-meteo-weather",
+  "name": "Open-Meteo Current Weather",
+  "connector_type": "rest_api",
+  "config": {
+    "domain": "api.open-meteo.com",
+    "base_url": "https://api.open-meteo.com",
+    "auth": {
+      "type": "none"
+    },
+    "runtime": {
+      "worker": "foundry",
+      "timeout_ms": 10000,
+      "retry_count": 0,
+      "allowed_methods": [
+        "GET"
+      ]
+    },
+    "permissions": {
+      "discoverable": true,
+      "syncable": false,
+      "invokable": true,
+      "usable_in_code": true,
+      "allowed_egress_hosts": [
+        "api.open-meteo.com"
+      ]
+    },
+    "webhook": {
+      "id": "open_meteo_current_weather",
+      "api_name": "GETCurrentWeather",
+      "name": "GET Current Weather Webhook",
+      "method": "GET",
+      "path": "/v1/forecast",
+      "inputs": [
+        {
+          "id": "latitude",
+          "name": "latitude",
+          "type": "number",
+          "required": true,
+          "description": "Trailhead latitude in EPSG:4326."
+        },
+        {
+          "id": "longitude",
+          "name": "longitude",
+          "type": "number",
+          "required": true,
+          "description": "Trailhead longitude in EPSG:4326."
+        }
+      ],
+      "calls": [
+        {
+          "id": "current_weather",
+          "method": "GET",
+          "path": "/v1/forecast",
+          "query_params": {
+            "latitude": "{{latitude}}",
+            "longitude": "{{longitude}}",
+            "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
+            "temperature_unit": "fahrenheit",
+            "wind_speed_unit": "mph",
+            "timezone": "auto"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "id": "weather_time",
+          "name": "weather_time",
+          "type": "string",
+          "extractor": {
+            "from_call": "current_weather",
+            "path": "/current/time"
+          }
+        },
+        {
+          "id": "temperature_f",
+          "name": "temperature_f",
+          "type": "number",
+          "extractor": {
+            "from_call": "current_weather",
+            "path": "/current/temperature_2m"
+          }
+        },
+        {
+          "id": "humidity_percent",
+          "name": "humidity_percent",
+          "type": "number",
+          "extractor": {
+            "from_call": "current_weather",
+            "path": "/current/relative_humidity_2m"
+          }
+        },
+        {
+          "id": "wind_speed_mph",
+          "name": "wind_speed_mph",
+          "type": "number",
+          "extractor": {
+            "from_call": "current_weather",
+            "path": "/current/wind_speed_10m"
+          }
+        },
+        {
+          "id": "wind_direction_degrees",
+          "name": "wind_direction_degrees",
+          "type": "number",
+          "extractor": {
+            "from_call": "current_weather",
+            "path": "/current/wind_direction_10m"
+          }
+        }
+      ],
+      "timeout_ms": 10000,
+      "concurrency_limit": 5,
+      "rate_limit": {
+        "max_requests": 60,
+        "per_seconds": 60
+      },
+      "history": {
+        "enabled": true,
+        "retention_days": 30,
+        "store_inputs": false,
+        "store_outputs": true
+      }
+    }
+  }
+}

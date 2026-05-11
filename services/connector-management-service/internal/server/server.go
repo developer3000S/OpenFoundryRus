@@ -87,6 +87,11 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *obs
 		dc.Post("/sources/{source_id}/registrations/{registration_id}/query/arrow", h.QueryRegistrationArrow)
 	})
 
+	// HTTPS inbound listeners are authenticated by their listener signature, so
+	// they intentionally sit outside the JWT-protected /api/v1 route group.
+	r.Post("/api/v1/listeners/{id}/events", h.ReceiveInboundListener)
+	r.Post("/api/v1/data-connection/sources/{source_id}/listeners/{listener_id}/events", h.ReceiveInboundListener)
+
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Use(authmw.Middleware(jwt, authmw.Options{AllowAnonymous: true}))
 
@@ -144,6 +149,10 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *obs
 		api.Post("/connections/{id}/test", h.TestConnection)
 
 		api.Post("/webhooks/{id}/invoke", h.InvokeWebhook)
+		api.Get("/webhooks/{id}/history", h.ListWebhookHistory)
+		api.Get("/data-connection/sources/{id}/webhook-history", h.ListWebhookHistory)
+		api.Get("/listeners/{id}/events", h.ListInboundListenerEvents)
+		api.Get("/data-connection/sources/{id}/listener-events", h.ListInboundListenerEvents)
 
 		if cfg.OpenFoundryDevAuth {
 			api.Post("/auth/login", h.DevAuthLogin)

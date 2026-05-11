@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 function normalizeBaseUrl(value) {
+  if (!value) throw new Error('Base URL is required');
   return value.endsWith('/') ? value : `${value}/`;
 }
 
@@ -68,14 +69,13 @@ async function main() {
 
   async function guardedFetch(resource, init) {
     const resolvedUrl = toUrl(resource, input.ontologyServiceUrl);
-    if (!input.policy?.allowNetwork) {
-      const allowedOrigins = new Set([
-        new URL(input.ontologyServiceUrl).origin,
-        new URL(input.aiServiceUrl).origin,
-      ]);
-      if (!allowedOrigins.has(resolvedUrl.origin)) {
-        throw new Error(`Network access is disabled for ${resolvedUrl.origin}`);
-      }
+    const allowedOrigins = new Set(
+      [input.ontologyServiceUrl, input.aiServiceUrl, input.connectorManagementServiceUrl]
+        .filter(Boolean)
+        .map((baseUrl) => new URL(baseUrl).origin),
+    );
+    if (!input.policy?.allowNetwork && !allowedOrigins.has(resolvedUrl.origin)) {
+      throw new Error(`Network access is disabled for ${resolvedUrl.origin}`);
     }
     return originalFetch(resource, init);
   }
@@ -112,6 +112,22 @@ async function main() {
   const allowOntologyRead = input.policy?.allowOntologyRead !== false;
   const allowOntologyWrite = input.policy?.allowOntologyWrite !== false;
   const allowAi = input.policy?.allowAi !== false;
+
+  async function invokeDataConnectionWebhook({ sourceId, sourceRid, webhookId, inputs = {} } = {}) {
+    const id = sourceId ?? sourceRid ?? webhookId;
+    if (!id || typeof id !== 'string') {
+      throw new Error('dataConnection.invokeWebhook requires sourceId');
+    }
+    if (!input.connectorManagementServiceUrl) {
+      throw new Error('Data Connection webhook invocation is not configured for this function runtime');
+    }
+    return request(
+      input.connectorManagementServiceUrl,
+      'POST',
+      `/api/v1/webhooks/${encodeURIComponent(id)}/invoke`,
+      { inputs },
+    );
+  }
 
   const sdk = {
     ontology: {
@@ -197,6 +213,12 @@ async function main() {
               max_tokens: maxTokens,
             })
         : blockedCapability('ai.complete'),
+    },
+    dataConnection: {
+      invokeWebhook: invokeDataConnectionWebhook,
+      webhooks: {
+        invoke: invokeDataConnectionWebhook,
+      },
     },
   };
 

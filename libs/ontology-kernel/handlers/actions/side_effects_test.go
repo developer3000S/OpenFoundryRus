@@ -393,7 +393,7 @@ func TestInvokeRegisteredWebhookHTTPAndTimeoutErrors(t *testing.T) {
 			}))
 			defer srv.Close()
 			state := &ontologykernel.AppState{ConnectorManagementServiceURL: srv.URL, HTTPClient: srv.Client()}
-			_, err := invokeRegisteredWebhook(context.Background(), state, &webhookCallConfig{WebhookID: webhookID}, json.RawMessage(`{"x":1}`))
+			_, err := invokeRegisteredWebhook(context.Background(), state, nil, &webhookCallConfig{WebhookID: webhookID}, json.RawMessage(`{"x":1}`))
 			if err == nil || !strings.Contains(err.Error(), "webhook returned") {
 				t.Fatalf("expected webhook status error, got %v", err)
 			}
@@ -408,7 +408,7 @@ func TestInvokeRegisteredWebhookHTTPAndTimeoutErrors(t *testing.T) {
 	}))
 	defer srv.Close()
 	state := &ontologykernel.AppState{ConnectorManagementServiceURL: srv.URL, HTTPClient: &http.Client{Timeout: 5 * time.Millisecond}}
-	_, err := invokeRegisteredWebhook(context.Background(), state, &webhookCallConfig{WebhookID: webhookID}, json.RawMessage(`{"x":1}`))
+	_, err := invokeRegisteredWebhook(context.Background(), state, nil, &webhookCallConfig{WebhookID: webhookID}, json.RawMessage(`{"x":1}`))
 	if err == nil || !strings.Contains(err.Error(), "webhook invocation failed") {
 		t.Fatalf("expected webhook timeout error, got %v", err)
 	}
