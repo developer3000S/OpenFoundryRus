@@ -36,14 +36,15 @@ ALTER TABLE media_set_branches
 
 -- A separate UNIQUE constraint on the generated column lets `media_items`
 -- (and `media_set_branches.parent_branch_rid`) reference it via FK.
+-- We use EXCEPTION WHEN duplicate_object instead of an IF NOT EXISTS
+-- pre-check because the migration runner has no tracking table and
+-- re-applies every file on each pod start; the EXCEPTION pattern is
+-- immune to catalog-visibility quirks across multi-statement Exec.
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'media_set_branches_branch_rid_key'
-  ) THEN
-    ALTER TABLE media_set_branches
-      ADD CONSTRAINT media_set_branches_branch_rid_key UNIQUE (branch_rid);
-  END IF;
+  ALTER TABLE media_set_branches
+    ADD CONSTRAINT media_set_branches_branch_rid_key UNIQUE (branch_rid);
+EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- Parent branch RID. Self-referential so deleting an intermediate
@@ -130,15 +131,12 @@ UPDATE media_items
 
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'media_items_transaction_rid_fkey'
-  ) THEN
-    ALTER TABLE media_items
-      ADD CONSTRAINT media_items_transaction_rid_fkey
-          FOREIGN KEY (transaction_rid)
-          REFERENCES media_set_transactions(rid)
-          ON DELETE SET NULL;
-  END IF;
+  ALTER TABLE media_items
+    ADD CONSTRAINT media_items_transaction_rid_fkey
+        FOREIGN KEY (transaction_rid)
+        REFERENCES media_set_transactions(rid)
+        ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- New `branch_rid` column references the generated branch identifier.
@@ -158,15 +156,12 @@ UPDATE media_items AS i
 
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'media_items_branch_rid_fkey'
-  ) THEN
-    ALTER TABLE media_items
-      ADD CONSTRAINT media_items_branch_rid_fkey
-          FOREIGN KEY (branch_rid)
-          REFERENCES media_set_branches(branch_rid)
-          ON DELETE CASCADE;
-  END IF;
+  ALTER TABLE media_items
+    ADD CONSTRAINT media_items_branch_rid_fkey
+        FOREIGN KEY (branch_rid)
+        REFERENCES media_set_branches(branch_rid)
+        ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- The denormalised `(media_set_rid, branch)` columns stay around so
