@@ -99,6 +99,80 @@ func TestProxyRoutesGeospatialToExploratoryAnalysis(t *testing.T) {
 	assert.Equal(t, "/api/v1/geospatial/overview", envelope.UpstreamPath)
 }
 
+func TestProxyRouteSmokeCoversBuilderGeoAppsActionsAndDataConnection(t *testing.T) {
+	t.Parallel()
+	namedUpstream := func(name string) *httptest.Server {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("X-Upstream", name)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"upstream":      name,
+				"upstream_path": r.URL.Path,
+			})
+		}))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+
+	pipeline := namedUpstream("pipeline-build")
+	geospatial := namedUpstream("geospatial")
+	apps := namedUpstream("application-composition")
+	actions := namedUpstream("ontology-actions")
+	dataConnection := namedUpstream("connector-management")
+
+	cfg := &config.Config{}
+	cfg.Service.Name = "edge-gateway-service"
+	cfg.JWT.Secret = "test-secret-32bytes-test-secret-3"
+	cfg.Upstream = config.UpstreamURLs{
+		PipelineBuild:          pipeline.URL,
+		GeospatialIntelligence: geospatial.URL,
+		ApplicationComposition: apps.URL,
+		OntologyActions:        actions.URL,
+		ConnectorManagement:    dataConnection.URL,
+	}
+	jwt := authmw.NewJWTConfig(cfg.JWT.Secret)
+	gw := httptest.NewServer(proxy.NewHandler(cfg, jwt))
+	defer gw.Close()
+
+	cases := []struct {
+		name     string
+		method   string
+		path     string
+		upstream string
+	}{
+		{"pipeline builder catalog", http.MethodGet, "/api/v1/pipelines/transforms/catalog", "pipeline-build"},
+		{"geospatial overview", http.MethodGet, "/api/v1/geospatial/overview", "geospatial"},
+		{"app builder widget catalog", http.MethodGet, "/api/v1/widgets/catalog", "application-composition"},
+		{"ontology actions", http.MethodGet, "/api/v1/ontology/actions", "ontology-actions"},
+		{"data connection webhook invoke", http.MethodPost, "/api/v1/webhooks/00000000-0000-0000-0000-000000000001/invoke", "connector-management"},
+		{"data connection inbound listener", http.MethodPost, "/api/v1/listeners/listener-a/events", "connector-management"},
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(tc.method, gw.URL+tc.path, strings.NewReader("{}"))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.Equal(t, tc.upstream, resp.Header.Get("X-Upstream"))
+
+			var envelope struct {
+				Upstream     string `json:"upstream"`
+				UpstreamPath string `json:"upstream_path"`
+			}
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+			assert.Equal(t, tc.upstream, envelope.Upstream)
+			assert.Equal(t, tc.path, envelope.UpstreamPath)
+		})
+	}
+}
+
 func TestProxyFilesystemAlias(t *testing.T) {
 	t.Parallel()
 	upstream, _ := fakeUpstream(t)

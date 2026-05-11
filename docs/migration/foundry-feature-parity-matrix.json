@@ -1144,6 +1144,70 @@
       "notes": "DEMO.9 is implemented with weighted_knn_trail_profile_v2, a deterministic weighted vector score over distance, elevation gain, grade, altitude, terrain, surface, weather load, and HR profile. Estimates expose feature_weights, target_profile, target_similarity_vector, feature_scores, weighted_feature_scores, similarity_vector_delta, and match_explanation so Workshop can explain why runs were selected."
     },
     {
+      "foundry_feature": "Quality gates: route smoke tests for gateway and service routers",
+      "openfoundry_surface": [
+        "services/edge-gateway-service/internal/proxy/router_table.go",
+        "services/edge-gateway-service/internal/proxy/proxy_test.go",
+        "services/pipeline-build-service/internal/server/route_smoke_test.go",
+        "services/ontology-exploratory-analysis-service/internal/server/server_test.go",
+        "services/application-composition-service/internal/server/route_smoke_test.go",
+        "services/ontology-actions-service/internal/server/route_smoke_test.go",
+        "services/connector-management-service/internal/server/route_smoke_test.go"
+      ],
+      "status": "done",
+      "owner": "edge-gateway-service, pipeline-build-service, ontology-exploratory-analysis-service, application-composition-service, ontology-actions-service, connector-management-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/api/"
+      ],
+      "tests": [
+        "go test ./services/edge-gateway-service/internal/proxy",
+        "go test ./services/pipeline-build-service/internal/server",
+        "go test ./services/ontology-exploratory-analysis-service/internal/server",
+        "go test ./services/application-composition-service/internal/server",
+        "go test ./services/ontology-actions-service/internal/server",
+        "go test ./services/connector-management-service/internal/server"
+      ],
+      "notes": "QA.1 is implemented with gateway upstream smoke tests plus service-level chi.Walk route contracts for Pipeline Builder, Geospatial, Workshop/App Builder, Ontology Actions, and Data Connection. The gateway now routes /api/v1/webhooks/* and /api/v1/listeners/* to connector-management so action/webhook and inbound listener calls are not orphaned."
+    },
+    {
+      "foundry_feature": "Quality gates: fixture-driven Trail Running pipeline execution",
+      "openfoundry_surface": [
+        "tools/demo/trail-running/qa_pipeline_execution_test.go",
+        "tools/demo/trail-running/fixtures/strava_activities.json",
+        "tools/demo/trail-running/fixtures/gpx",
+        "tools/demo/trail-running/fixtures/coffee_shops.csv",
+        "tools/demo/trail-running/fixtures/coffee_shops.json",
+        "tools/demo/trail-running/fixtures/weather_open_meteo_boulder.json",
+        "tools/demo/trail-running/expected"
+      ],
+      "status": "done",
+      "owner": "tools/demo/trail-running",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/building-pipelines/create-batch-pipeline-pb/"
+      ],
+      "tests": [
+        "go test ./tools/demo/trail-running"
+      ],
+      "notes": "QA.2 is implemented with a single fixture-driven acceptance test that executes Strava JSON ingestion, GPX trail ingestion, effort estimation, coffee recommendations from JSON and CSV inputs, weather webhook/action writeback, and seed.py bundle generation against deterministic golden outputs."
+    },
+    {
+      "foundry_feature": "Quality gates: Workshop runtime Playwright critical path",
+      "openfoundry_surface": [
+        "apps/web/e2e/workshop-trail-running-demo.spec.ts",
+        "tools/demo/trail-running/workshop/run_fast.workshop_app.json",
+        "tools/demo/trail-running/expected"
+      ],
+      "status": "done",
+      "owner": "apps/web, tools/demo/trail-running",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/getting-started/"
+      ],
+      "tests": [
+        "pnpm --dir apps/web test:e2e -- workshop-trail-running-demo.spec.ts"
+      ],
+      "notes": "QA.3 is implemented with a fixture-backed published Workshop runtime test that covers Object Table selection, Filter List recompute, Button Group weather action validate/execute, Chart XY canvas rendering, MapLibre trail/coffee layers, Trail Detail widgets, public runtime load, attached screenshots, and Playwright trace collection."
+    },
+    {
       "foundry_feature": "Ontology Actions: action type CRUD, schema, rules, validation, and submission criteria",
       "openfoundry_surface": [
         "services/ontology-actions-service/internal/server/server.go",

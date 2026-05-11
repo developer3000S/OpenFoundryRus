@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
 const now = '2026-05-11T00:00:00Z';
 const demoRoot = path.resolve(process.cwd(), '../../tools/demo/trail-running');
@@ -29,6 +29,8 @@ const recommendations = readJson<DemoRow[]>('expected/trail_coffee_recommendatio
 const links = readJson<DemoRow[]>('expected/trail_coffee_links.golden.json');
 const weatherSnapshot = readJson<DemoRow>('expected/trail_weather_snapshot.golden.json');
 
+test.use({ trace: 'on' });
+
 const objectRows: Record<string, DemoObject[]> = {
   Trail: toObjects('Trail', trails, 'trail_id'),
   TrailEffortEstimate: toObjects('TrailEffortEstimate', estimates, 'estimate_id'),
@@ -45,21 +47,58 @@ const appResponse = {
   published_at: now,
 };
 
-test('Trail Running Workshop demo publishes list, map, detail, and weather pages', async ({ page }) => {
-  await mockTrailRunningRuntime(page);
+type TrailRunningRuntimeMocks = {
+  weatherValidateRequests: unknown[];
+  weatherExecuteRequests: unknown[];
+};
+
+test('Trail Running Workshop demo publishes list, filters, actions, charts, map, and detail pages', async ({ page }, testInfo) => {
+  const mocks: TrailRunningRuntimeMocks = {
+    weatherValidateRequests: [],
+    weatherExecuteRequests: [],
+  };
+  await mockTrailRunningRuntime(page, mocks);
 
   await page.goto('/apps/runtime/run-fast');
 
+  const trailTable = page.getByRole('table').first();
   await expect(page.getByRole('button', { name: 'Trail Overview' })).toHaveClass(/is-active/);
   await expect(page.getByRole('heading', { name: 'Trail List' })).toBeVisible();
-  await expect(page.getByRole('table').first()).toContainText('Boulder Creek Path East');
-  await expect(page.getByRole('table').first()).toContainText('Green Mountain Ascent');
+  await expect(trailTable).toContainText('Boulder Creek Path East');
+  await expect(trailTable).toContainText('Green Mountain Ascent');
+
+  await page.getByLabel('Trail Name values').fill('Green Mountain Ascent');
+  await expect(trailTable).toContainText('Green Mountain Ascent');
+  await expect(trailTable).not.toContainText('Boulder Creek Path East');
+  await page.getByLabel('Trail Name values').fill('');
+  await expect(trailTable).toContainText('Boulder Creek Path East');
+
+  await page.getByLabel('Select Green Mountain Ascent').check();
+  await expect(page.getByLabel('Select Green Mountain Ascent')).toBeChecked();
   await expect(page.getByRole('heading', { name: 'Trail Distances' })).toBeVisible();
   await expect(page.locator('canvas').first()).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Weather Conditions' })).toBeVisible();
   await expect(page.getByText('68.4 Fahrenheit')).toBeVisible();
   await expect(page.getByText('6.2 mph')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Get Weather' })).toBeVisible();
+  await page.getByRole('button', { name: 'Get Weather' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByPlaceholder('Trail ID')).toHaveValue('boulder-creek-path');
+  await expect(page.getByPlaceholder('Trail Name')).toHaveValue('Boulder Creek Path East');
+  await expect(page.getByPlaceholder('Latitude')).toHaveValue('40.0153');
+  await expect(page.getByPlaceholder('Longitude')).toHaveValue('-105.289');
+  await expect(page.getByPlaceholder('Trailhead GeoPoint')).toHaveValue('40.0153,-105.289');
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await expect(page.getByRole('status')).toContainText('Object saved successfully.');
+  await expect.poll(() => mocks.weatherValidateRequests.length).toBe(1);
+  await expect.poll(() => mocks.weatherExecuteRequests.length).toBe(1);
+  const executeBody = mocks.weatherExecuteRequests[0] as { parameters?: Record<string, unknown> };
+  expect(executeBody.parameters?.trail_id).toBe('boulder-creek-path');
+  expect(executeBody.parameters?.trail_name).toBe('Boulder Creek Path East');
+  expect(Number(executeBody.parameters?.latitude)).toBeCloseTo(40.0153, 4);
+  expect(Number(executeBody.parameters?.longitude)).toBeCloseTo(-105.289, 4);
+  expect(executeBody.parameters?.trailhead_geopoint).toBe('40.0153,-105.289');
+  await attachScreenshot(testInfo, page, 'trail-running-overview');
+  await page.getByLabel('Dismiss').click();
 
   await page.getByRole('button', { name: 'Trail Map' }).click();
   await expect(page.getByRole('button', { name: 'Trail Map' })).toHaveClass(/is-active/);
@@ -69,6 +108,7 @@ test('Trail Running Workshop demo publishes list, map, detail, and weather pages
   await expect(page.getByTestId('workshop-map-layer-toggle-coffee-shops')).toContainText('Coffee Shops');
   await expect(page.getByRole('heading', { name: 'Nearest Coffee Shops' })).toBeVisible();
   await expect(page.getByRole('table').first()).toContainText('Pine Ridge Coffee');
+  await attachScreenshot(testInfo, page, 'trail-running-map');
 
   await page.getByRole('button', { name: 'Trail Detail' }).click();
   await expect(page.getByRole('button', { name: 'Trail Detail' })).toHaveClass(/is-active/);
@@ -79,9 +119,17 @@ test('Trail Running Workshop demo publishes list, map, detail, and weather pages
   await expect(page.getByText('165 bpm')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Coffee Recommendations' })).toBeVisible();
   await expect(page.getByRole('table').first()).toContainText('Trailhead Espresso');
+  await attachScreenshot(testInfo, page, 'trail-running-detail');
 });
 
-async function mockTrailRunningRuntime(page: Page) {
+async function attachScreenshot(testInfo: TestInfo, page: Page, name: string) {
+  await testInfo.attach(name, {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: 'image/png',
+  });
+}
+
+async function mockTrailRunningRuntime(page: Page, mocks?: TrailRunningRuntimeMocks) {
   await page.addInitScript(() => {
     window.localStorage.setItem('of_access_token', 'e2e-token');
   });
@@ -158,8 +206,41 @@ async function mockTrailRunningRuntime(page: Page) {
         ],
         form_schema: { sections: [], parameter_overrides: [] },
         config: { webhook_id: 'open_meteo_current_weather' },
+        confirmation_required: false,
         created_at: now,
         updated_at: now,
+      },
+    });
+  });
+  await page.route('**/api/v1/ontology/actions/FetchTrailWeather/validate', async (route) => {
+    const body = postDataJSON(route.request());
+    mocks?.weatherValidateRequests.push(body);
+    await route.fulfill({
+      json: {
+        valid: true,
+        errors: [],
+        preview: { kind: 'create_or_modify_object', target_object_id: objectRows.WeatherSnapshot[0]?.id ?? null },
+      },
+    });
+  });
+  await page.route('**/api/v1/ontology/actions/FetchTrailWeather/execute', async (route) => {
+    const body = postDataJSON(route.request());
+    mocks?.weatherExecuteRequests.push(body);
+    await route.fulfill({
+      json: {
+        action: {
+          id: 'FetchTrailWeather',
+          name: 'FetchTrailWeather',
+          display_name: 'Fetch Trail Weather',
+          object_type_id: 'WeatherSnapshot',
+          operation_kind: 'create_or_modify_object',
+        },
+        target_object_id: objectRows.WeatherSnapshot[0]?.id ?? null,
+        deleted: false,
+        preview: { kind: 'create_or_modify_object', target_object_id: objectRows.WeatherSnapshot[0]?.id ?? null },
+        object: objectRows.WeatherSnapshot[0] ?? null,
+        link: null,
+        result: { webhook_id: 'open_meteo_current_weather', status: 'succeeded' },
       },
     });
   });

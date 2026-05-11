@@ -128,11 +128,18 @@ UPDATE media_items
    SET transaction_rid = NULL
  WHERE transaction_rid = '';
 
-ALTER TABLE media_items
-    ADD CONSTRAINT media_items_transaction_rid_fkey
-        FOREIGN KEY (transaction_rid)
-        REFERENCES media_set_transactions(rid)
-        ON DELETE SET NULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'media_items_transaction_rid_fkey'
+  ) THEN
+    ALTER TABLE media_items
+      ADD CONSTRAINT media_items_transaction_rid_fkey
+          FOREIGN KEY (transaction_rid)
+          REFERENCES media_set_transactions(rid)
+          ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- New `branch_rid` column references the generated branch identifier.
 -- Backfilled from `(media_set_rid, branch)` for every existing row;
@@ -149,11 +156,18 @@ UPDATE media_items AS i
    AND i.branch = b.branch_name
    AND i.branch_rid IS NULL;
 
-ALTER TABLE media_items
-    ADD CONSTRAINT media_items_branch_rid_fkey
-        FOREIGN KEY (branch_rid)
-        REFERENCES media_set_branches(branch_rid)
-        ON DELETE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'media_items_branch_rid_fkey'
+  ) THEN
+    ALTER TABLE media_items
+      ADD CONSTRAINT media_items_branch_rid_fkey
+          FOREIGN KEY (branch_rid)
+          REFERENCES media_set_branches(branch_rid)
+          ON DELETE CASCADE;
+  END IF;
+END $$;
 
 -- The denormalised `(media_set_rid, branch)` columns stay around so
 -- the partial-unique path-dedup index keeps working unchanged. The FK

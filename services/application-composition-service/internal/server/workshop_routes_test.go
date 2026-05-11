@@ -33,7 +33,7 @@ func TestWorkshopWidgetCatalogAndTemplateRoutes(t *testing.T) {
 	catalogReq.Header.Set("Authorization", "Bearer "+testWorkshopToken(t, jwt, subject))
 	router.ServeHTTP(catalogRR, catalogReq)
 	require.Equal(t, http.StatusOK, catalogRR.Code)
-	require.Equal(t, "2026-05-11.ws.15", catalogRR.Header().Get("X-OpenFoundry-Widget-Catalog-Version"))
+	require.Equal(t, "2026-05-11.ws.22", catalogRR.Header().Get("X-OpenFoundry-Widget-Catalog-Version"))
 	var catalog []map[string]any
 	require.NoError(t, json.NewDecoder(catalogRR.Body).Decode(&catalog))
 	require.NotEmpty(t, catalog)

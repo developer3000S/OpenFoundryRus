@@ -39,7 +39,7 @@
                 "id": "trail-name-filter",
                 "property_name": "trail_name",
                 "display_name": "Trail Name",
-                "component": "text",
+                "component": "multi_select",
                 "values": []
               }
             ]

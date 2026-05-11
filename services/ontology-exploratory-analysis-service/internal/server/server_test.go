@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/assert"
@@ -167,6 +168,43 @@ func TestGeospatialHandlersMountedWhenWired(t *testing.T) {
 	require.Len(t, clusters.Clusters, 1)
 
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRouteSmokeMountsNormalBinaryGeospatialRoutes(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Service.Name = "ontology-exploratory-analysis-service"
+	cfg.Service.Version = "test"
+	srv := New(cfg, nil, &geospatial.AppState{})
+
+	assertServerRoutesMounted(t, srv.Handler, []serverRouteSmokeCase{
+		{http.MethodGet, "/api/v1/geospatial/overview"},
+		{http.MethodGet, "/api/v1/geospatial/layers"},
+		{http.MethodPost, "/api/v1/geospatial/query"},
+		{http.MethodPost, "/api/v1/geospatial/clusters"},
+		{http.MethodGet, "/api/v1/geospatial/tiles/{id}/features"},
+	})
+}
+
+type serverRouteSmokeCase struct {
+	method string
+	path   string
+}
+
+func assertServerRoutesMounted(t *testing.T, handler http.Handler, expected []serverRouteSmokeCase) {
+	t.Helper()
+	routes, ok := handler.(chi.Routes)
+	require.True(t, ok, "handler should expose chi routes")
+
+	seen := map[serverRouteSmokeCase]bool{}
+	require.NoError(t, chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		seen[serverRouteSmokeCase{method: method, path: route}] = true
+		return nil
+	}))
+
+	for _, want := range expected {
+		require.True(t, seen[want], "%s %s is not mounted", want.method, want.path)
+	}
 }
 
 func addLayerListExpectation(t *testing.T, mock pgxmock.PgxPoolIface, layerID uuid.UUID) {

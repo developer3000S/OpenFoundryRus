@@ -70,7 +70,9 @@ func SelectUpstream(path string, u config.UpstreamURLs) string {
 		strings.HasPrefix(path, "/api/v1/data-connection/egress-policies"):
 		return u.NetworkBoundary
 
-	case strings.HasPrefix(path, "/api/v1/data-connection"):
+	case strings.HasPrefix(path, "/api/v1/data-connection"),
+		strings.HasPrefix(path, "/api/v1/webhooks"),
+		strings.HasPrefix(path, "/api/v1/listeners"):
 		return u.ConnectorManagement
 
 	case strings.HasPrefix(path, "/api/v1/checkpoints-purpose"):
