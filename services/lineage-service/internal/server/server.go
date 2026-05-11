@@ -76,11 +76,16 @@ func buildRouter(cfg *config.Config, m *observability.Metrics, opts *Options, pr
 		r.Route("/api/v1/lineage", func(api chi.Router) {
 			api.Use(authmw.Middleware(opts.JWT))
 
+			// Frontend (apps/web/src/lib/api/pipelines.ts) requests the full
+			// graph via `GET /api/v1/lineage`; keep `/full` as the explicit
+			// alias used by other tooling.
+			api.Get("/", opts.Handlers.GetFullLineage)
+			api.Get("/full", opts.Handlers.GetFullLineage)
+
 			api.Get("/datasets/{id}", opts.Handlers.GetDatasetLineage)
 			api.Get("/datasets/{id}/columns", opts.Handlers.GetDatasetColumnLineage)
 			api.Get("/datasets/{id}/impact", opts.Handlers.GetDatasetLineageImpact)
 			api.Post("/datasets/{id}/builds", opts.Handlers.TriggerDatasetLineageBuilds)
-			api.Get("/full", opts.Handlers.GetFullLineage)
 
 			api.Post("/workflows/{id}/sync", opts.Handlers.SyncWorkflowLineage)
 			api.Delete("/workflows/{id}", opts.Handlers.DeleteWorkflowLineage)
