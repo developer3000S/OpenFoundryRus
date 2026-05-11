@@ -136,3 +136,4 @@ requirements, and DCO policy. Security reports follow
 ## License
 
 OpenFoundry is licensed under **AGPL-3.0-only** (see [`LICENSE`](LICENSE)).
+
