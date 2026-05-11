@@ -4,7 +4,7 @@ import type { AppPage, AppWidget, WidgetBinding, WidgetCatalogItem, WidgetEvent 
 import { Glyph, type GlyphName } from '@/lib/components/ui/Glyph';
 import { JsonEditor } from '@/lib/components/JsonEditor';
 import { Tabs } from '@/lib/components/Tabs';
-import { WidgetCatalog, getDefaultWidgetCatalog } from '@/lib/components/apps/WidgetCatalog';
+import { WidgetCatalog, getWidgetCatalogItems } from '@/lib/components/apps/WidgetCatalog';
 import { LayoutTemplatePicker } from '@/lib/components/apps/LayoutTemplatePicker';
 
 interface AppPagesEditorProps {
@@ -922,7 +922,7 @@ export function WidgetInspector({ widget, catalog, onPatch, onDuplicate, onDelet
 
 export function AppPagesEditor({ pagesJson, widgetCatalog, onChange }: AppPagesEditorProps) {
   const { pages, error } = useMemo(() => parsePages(pagesJson), [pagesJson]);
-  const catalog = useMemo(() => getDefaultWidgetCatalog(widgetCatalog), [widgetCatalog]);
+  const catalog = useMemo(() => getWidgetCatalogItems(widgetCatalog), [widgetCatalog]);
   const [selectedPageId, setSelectedPageId] = useState('');
   const [selectedWidgetId, setSelectedWidgetId] = useState('');
 

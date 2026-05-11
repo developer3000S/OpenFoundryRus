@@ -170,7 +170,7 @@ func (f *fakeBuildQueryRepo) GetJob(context.Context, string) (*models.Job, error
 
 type fakeIcebergTxClient struct{ committed []string }
 
-func (f *fakeIcebergTxClient) Commit(_ context.Context, tx executor.OutputTransaction) error {
+func (f *fakeIcebergTxClient) Commit(_ context.Context, tx executor.OutputTransaction, _ executor.NodeResult) error {
 	f.committed = append(f.committed, tx.DatasetRID)
 	return nil
 }

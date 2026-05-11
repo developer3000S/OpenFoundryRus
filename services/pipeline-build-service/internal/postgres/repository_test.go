@@ -83,21 +83,41 @@ func TestRepositoryPipelineRunsAbortAndLogs(t *testing.T) {
 	jobID := uuid.New()
 	now := time.Now().UTC()
 
-	pipelineRows := pgxmock.NewRows([]string{"id", "name", "description", "owner_id", "dag", "status", "schedule_config", "retry_policy", "next_run_at", "created_at", "updated_at"}).
-		AddRow(pipelineID, "p", "", uuid.New(), []byte(`[]`), "active", []byte(`{}`), []byte(`{"max_attempts":1}`), nil, now, now)
+	pipelineRows := pgxmock.NewRows([]string{
+		"id", "name", "description", "owner_id", "dag", "status",
+		"pipeline_type", "lifecycle",
+		"schedule_config", "retry_policy", "next_run_at",
+		"external_config", "incremental_config", "streaming_config", "distributed_config", "compute_profile_id", "project_id",
+		"draft_dag", "published_dag", "branch_name",
+		"draft_updated_at", "published_at", "active_version_id",
+		"proposal_state", "proposal_title", "proposal_description",
+		"created_at", "updated_at",
+	}).AddRow(
+		pipelineID, "p", "", uuid.New(), []byte(`[]`), "active",
+		"BATCH", "DRAFT",
+		[]byte(`{}`), []byte(`{"max_attempts":1}`), nil,
+		nil, nil, nil, nil, nil, nil,
+		[]byte(`[]`), []byte(`null`), "main",
+		&now, nil, nil,
+		"none", nil, nil,
+		now, now,
+	)
 	mock.ExpectQuery("FROM pipelines WHERE id").WithArgs(pipelineID).WillReturnRows(pipelineRows)
 	p, err := repo.LoadPipeline(ctx, pipelineID)
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
 	runRows := pgxmock.NewRows([]string{"id", "pipeline_id", "status", "trigger_type", "started_by", "attempt_number", "started_from_node_id", "retry_of_run_id", "execution_context", "node_results", "error_message", "started_at", "finished_at"}).
-		AddRow(runID, pipelineID, "running", "manual", nil, int32(1), nil, nil, []byte(`{}`), nil, nil, now, nil)
+		AddRow(runID, pipelineID, "queued", "manual", nil, int32(1), nil, nil, []byte(`{}`), nil, nil, now, nil)
 	mock.ExpectQuery("INSERT INTO pipeline_runs").WithArgs(pgxmock.AnyArg(), pipelineID, pgxmock.AnyArg(), "manual", int32(1), pgxmock.AnyArg(), pgxmock.AnyArg(), json.RawMessage(`{}`)).WillReturnRows(runRows)
 	run, err := repo.OpenPipelineRun(ctx, p, models.TriggerPipelineRequest{Context: json.RawMessage(`{}`)}, nil, json.RawMessage(`{}`))
 	require.NoError(t, err)
 	require.Equal(t, runID, run.ID)
-	mock.ExpectExec("UPDATE pipeline_runs SET status").WithArgs(runID, "completed", json.RawMessage(`{"n":"COMPLETED"}`), pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
-	require.NoError(t, repo.FinishPipelineRun(ctx, runID, "completed", json.RawMessage(`{"n":"COMPLETED"}`), nil))
+	require.Equal(t, "queued", run.Status)
+	mock.ExpectExec("UPDATE pipeline_runs SET status='running'").WithArgs(runID).WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	require.NoError(t, repo.MarkPipelineRunRunning(ctx, runID))
+	mock.ExpectExec("UPDATE pipeline_runs SET status").WithArgs(runID, "succeeded", json.RawMessage(`[]`), pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	require.NoError(t, repo.FinishPipelineRun(ctx, runID, "succeeded", json.RawMessage(`[]`), nil))
 
 	mock.ExpectExec("UPDATE builds SET state='BUILD_ABORTING'").WithArgs(runID, "user abort").WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
 	require.NoError(t, repo.MarkBuildAborting(ctx, runID, "user abort"))

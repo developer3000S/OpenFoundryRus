@@ -28,24 +28,26 @@ smoke/
 
 ## Ejecutar un scenario individual
 
-Existen targets en el `justfile` (ver
-[`justfile:154-172`](../justfile)):
+El runner actual es el CLI Go en `tools/of-cli`. Desde la raíz del repo:
 
 ```bash
-just smoke-critical-paths           # p2
-just smoke-p3-semantic-governance   # p3
-just smoke-p4-developer-platform    # p4
-just smoke-p5-ai-ml                 # p5
-just smoke-p6-analytics-enterprise  # p6
+go run ./tools/of-cli -- smoke run \
+  --scenario smoke/scenarios/p2-runtime-critical-path.json \
+  --output   smoke/results/p2-runtime-critical-path.json
 ```
 
-Equivalen a:
+Para acelerar ejecuciones repetidas, compila el binario una vez:
 
 ```bash
-cargo run -p of-cli -- smoke run \
+mkdir -p bin
+go build -trimpath -o bin/of ./tools/of-cli
+./bin/of smoke run \
   --scenario smoke/scenarios/<file>.json \
   --output   smoke/results/<file>.json
 ```
+
+El `justfile` de la raíz es solo un shim sobre `make`; no contiene recipes
+`just smoke-*` actuales. Si una página las menciona, trátala como stale.
 
 ## Suite de chaos
 
@@ -80,13 +82,14 @@ kind create cluster --name openfoundry-chaos
 #      - NATS Helm chart en ns `nats`
 #    Ver READMEs en cada subcarpeta de infra/k8s/.
 
-# 3. Lanza el gateway / servicios del CP en otra terminal (o port-forwards
+# 3. Lanza el edge gateway / servicios del CP en otra terminal (o port-forwards
 #    contra el cluster) de forma que `http://127.0.0.1:8080` sirva el
-#    gateway esperado por los scenarios (ver smoke/scenarios/*.json).
+#    `edge-gateway-service` esperado por los scenarios (ver smoke/scenarios/*.json).
 
 # 4. Compila el CLI una vez.
-cargo build -p of-cli --release
-export OF_CLI="$PWD/target/release/of-cli"
+mkdir -p bin
+go build -trimpath -o bin/of ./tools/of-cli
+export OF_CLI="$PWD/bin/of"
 
 # 5. Corre la suite completa.
 ./smoke/chaos/run.sh
@@ -103,7 +106,7 @@ k3d cluster create openfoundry-chaos --agents 3
 
 | Variable                  | Default                | Descripción                                                    |
 |---------------------------|------------------------|----------------------------------------------------------------|
-| `OF_CLI`                  | `cargo run -p of-cli --` | Cómo invocar el runner. Pon una ruta a binario para acelerar.  |
+| `OF_CLI`                  | `go run ./tools/of-cli --` | Cómo invocar el runner. Pon una ruta a binario para acelerar.  |
 | `CHAOS_RESULTS_DIR`       | `smoke/results/chaos`  | Dónde escribir los JSON de salida de cada combinación.         |
 | `CHAOS_WAIT_TIMEOUT`      | `600s`                 | Timeout máximo de `kubectl wait` tras matar un pod.            |
 | `CHAOS_DRY_RUN`           | `0`                    | `1` ⇒ no toca el cluster (para validar la lógica del script).  |
@@ -124,7 +127,8 @@ Cualquier `kill-*.sh` se puede ejecutar de forma aislada:
 ./smoke/chaos/kill-one-kafka-broker.sh
 ```
 
-…y luego `just smoke-critical-paths` para validar manualmente.
+…y luego ejecuta un scenario con `go run ./tools/of-cli -- smoke run
+--scenario <file> --output <file>` para validar manualmente.
 
 ## Validación de los scripts
 

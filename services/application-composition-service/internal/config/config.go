@@ -1,10 +1,9 @@
 // Package config resolves application-composition-service env config.
 //
 // Post-S8: this binary owns the composition_views + composition_bindings
-// surface (legacy app-builder + nexus, retired). The widget-registry
-// catalog endpoint is deferred — the original Rust source `#[path]`s
-// into app-builder-service which has been retired upstream (commit
-// 7fc037c4); the widget catalog ports as its own slice.
+// surface (legacy app-builder + nexus, retired). Workshop editor support
+// includes the app catalog, app templates, page CRUD, preview, publish, public
+// runtime loading, and Slate package round-trips.
 package config
 
 import (

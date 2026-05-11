@@ -4,11 +4,11 @@ This page describes the fastest reliable paths for working in the OpenFoundry mo
 
 ## Required Tooling
 
-- Rust `1.85` or newer
+- Go version compatible with the root `go.mod`
 - Node.js `20+`
 - pnpm `9+`
 - Docker and Docker Compose
-- `just` for the common contributor command surface
+- `make`; `just` is optional and only delegates to the Makefile
 
 Optional but useful for specialized flows:
 
@@ -18,51 +18,46 @@ Optional but useful for specialized flows:
 
 ## Common Workflows
 
-### Full Local Stack
+### Bootstrap
 
-Use this when you need infra, backend services, and the web app together:
-
-```bash
-just dev-stack
-```
-
-There is also a faster path when dependencies are already running and binaries are already built:
+Install pinned Go-side tools into `./bin` and install frontend dependencies:
 
 ```bash
-just dev-stack-fast
+make tools
+pnpm install
 ```
 
 ### Infrastructure Only
 
-Use this when you only need backing services such as Postgres, Redis, NATS, MinIO, or Vespa Lite (production-equivalent search engine; Meilisearch is now opt-in via `--profile demo`, see [ADR-0007](../architecture/adr/ADR-0007-search-engine-choice.md)):
+Use Docker Compose directly when you only need backing services. The active Compose files live under `infra/compose/`:
 
 ```bash
-just infra-up
-just infra-down
+docker compose -f infra/compose/docker-compose.yml up -d
+docker compose -f infra/compose/docker-compose.yml down
 ```
 
 ### Backend Iteration
 
-Build the whole Rust workspace:
+Build the whole Go module:
 
 ```bash
-just build
+make build
 ```
 
-Build or run a specific service:
+Build all service binaries into `./bin`:
 
 ```bash
-just build-svc gateway
-just run-gateway
-just run auth-service
+make build-services
 ```
 
 Run tests:
 
 ```bash
-just test
-just test-svc gateway
+make test
+go test ./services/<service>/...
 ```
+
+Use `make test-integration` for integration tests; it expects Docker and any service-specific dependencies required by the tested package.
 
 ### Frontend Iteration
 
@@ -78,26 +73,21 @@ pnpm build
 If you prefer to work directly in the app package:
 
 ```bash
-pnpm --dir apps/web dev
-pnpm --dir apps/web check
+pnpm --filter @open-foundry/web dev
+pnpm --filter @open-foundry/web check
 ```
 
 ### Docs Iteration
 
-The docs site is intentionally isolated under `docs/`:
-
-```bash
-just docs-install
-just docs-dev
-```
-
-If you prefer to work directly inside the docs package:
+Docs live under `docs/`. If a docs package is present, work from that directory and use its local scripts:
 
 ```bash
 cd docs
 npm ci
 npm run docs:dev
 ```
+
+There is no current `just docs-build` recipe in the root `justfile`; check the docs package scripts before copying older commands.
 
 ## Operational Assumptions
 
@@ -112,14 +102,19 @@ Several services also assume supporting infrastructure:
   for hybrid BM25 + vector + filter + ranking search
   (see [ADR-0007](../architecture/adr/ADR-0007-search-engine-choice.md))
 
-## Helpful Commands From `justfile`
+## Helpful Commands From `Makefile`
 
 | Goal | Command |
 | --- | --- |
-| Lint and format Rust | `just lint` |
-| Validate proto contracts | `just proto-lint` |
-| Validate OpenAPI drift | `just openapi-check` |
-| Validate TypeScript SDK drift | `just sdk-typescript-check` |
-| Export Terraform schema | `just terraform-schema` |
-| Run smoke suite | `just smoke` |
-| Run benchmark suite | `just bench-critical-paths` |
+| Install pinned Go tools | `make tools` |
+| Build all Go packages | `make build` |
+| Build all service binaries | `make build-services` |
+| Run Go tests | `make test` |
+| Run integration tests | `make test-integration` |
+| Run Go lint | `make lint` |
+| Format Go code | `make fmt` |
+| Generate proto and sqlc output | `make gen` |
+| Validate capabilities snapshot | `make capabilities-check` |
+| Run local Go CI gate | `make ci` |
+
+`just` remains available for users who have that muscle memory, but it is a shim. If a command is not visible in `make help` or `just --list`, do not assume it exists.

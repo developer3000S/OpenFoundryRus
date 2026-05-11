@@ -307,6 +307,8 @@ func SelectUpstream(path string, u config.UpstreamURLs) string {
 	case strings.HasPrefix(path, "/api/v1/apps/public/"),
 		path == "/api/v1/apps/templates",
 		path == "/api/v1/apps/from-template",
+		(strings.HasPrefix(path, "/api/v1/apps/") && strings.Contains(path, "/pages")),
+		(strings.HasPrefix(path, "/api/v1/apps/") && strings.HasSuffix(path, "/preview")),
 		(strings.HasPrefix(path, "/api/v1/apps/") && strings.HasSuffix(path, "/slate-package")),
 		(strings.HasPrefix(path, "/api/v1/apps/") && strings.HasSuffix(path, "/versions")),
 		(strings.HasPrefix(path, "/api/v1/apps/") && strings.HasSuffix(path, "/publish")):

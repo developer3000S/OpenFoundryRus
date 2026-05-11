@@ -157,6 +157,10 @@ func TestSelectUpstream(t *testing.T) {
 		// apps
 		{"/api/v1/widgets/x", "app-comp"},
 		{"/api/v1/apps/templates", "app-comp"},
+		{"/api/v1/apps/from-template", "app-comp"},
+		{"/api/v1/apps/abc/preview", "app-comp"},
+		{"/api/v1/apps/abc/pages/page-1", "app-comp"},
+		{"/api/v1/apps/abc/slate-package", "app-comp"},
 		{"/api/v1/apps/abc/publish", "app-comp"},
 		{"/api/v1/apps", "app-builder"},
 		// no rule

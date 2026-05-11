@@ -1,7 +1,9 @@
 # `tools/kafka-lint`
 
-Static contract lint for the Strimzi Kafka cluster manifest used by the
-data plane (`infra/k8s/platform/manifests/strimzi/kafka-cluster.yaml`).
+Static contract lint for the rendered Strimzi Kafka cluster manifest used by
+the data plane. The live source is the Helm chart under
+`infra/helm/infra/kafka-cluster/`; the linter renders that chart before
+checking the contract.
 
 ## Why
 
@@ -33,10 +35,13 @@ pip install pyyaml
 python3 tools/kafka-lint/check_kraft.py
 ```
 
-Or via `just`:
+With no path argument, the script runs `helm template kafka-cluster
+infra/helm/infra/kafka-cluster` internally. You can also pass an already
+rendered manifest path:
 
 ```
-just kafka-kraft-lint
+helm template kafka-cluster infra/helm/infra/kafka-cluster > /tmp/kafka-cluster.yaml
+python3 tools/kafka-lint/check_kraft.py /tmp/kafka-cluster.yaml
 ```
 
 The script exits 0 on success and 1 on any contract violation, printing each
@@ -44,5 +49,5 @@ violated invariant.
 
 ## CI
 
-Runs on every push and pull request that touches `infra/k8s/platform/manifests/strimzi/**` or
+Runs on every push and pull request that touches `infra/helm/infra/kafka-cluster/**` or
 this tool — see `.github/workflows/kafka-lint.yml`.

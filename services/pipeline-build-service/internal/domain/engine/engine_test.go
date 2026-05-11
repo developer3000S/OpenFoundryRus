@@ -1,8 +1,6 @@
-// Tests for Phase A engine — DAG sort, cycle detection, execution
-// stages, skip-unchanged + retry semantics, distributed worker
-// annotation. The transform runtimes are stubbed (every kind returns
-// `transform_runtime_not_wired:<kind>`), so a successful end-to-end
-// test path uses the `passthrough` kind for failure assertions.
+// Tests for the legacy engine package — DAG sort, cycle detection, execution
+// stages, skip-unchanged + retry semantics, distributed worker annotation, and
+// the lightweight passthrough runtime path used by compatibility callers.
 package engine
 
 import (
@@ -163,20 +161,23 @@ func TestNodeFingerprintIncludesDependencyFingerprints(t *testing.T) {
 	}
 }
 
-// ── End-to-end ExecutePipeline with stub runtimes ──────────────────
+// ── End-to-end ExecutePipeline runtime dispatch ────────────────────
 
-func TestExecutePipelineFailsOnTransformRuntimeStub(t *testing.T) {
+func TestExecutePipelinePassthroughCompletes(t *testing.T) {
 	t.Parallel()
 	env := &ExecutionEnvironment{ActorID: uuid.New()}
 	results, err := ExecutePipeline(context.Background(), env, []PipelineNode{n("a")}, nil)
 	if err != nil {
 		t.Fatalf("orchestrator err: %v", err)
 	}
-	if len(results) != 1 || results[0].Status != "failed" {
-		t.Fatalf("expected single failed result, got %+v", results)
+	if len(results) != 1 || results[0].Status != "completed" {
+		t.Fatalf("expected single completed result, got %+v", results)
 	}
-	if results[0].Error == nil || !strings.Contains(*results[0].Error, "transform_runtime_not_wired:passthrough") {
-		t.Errorf("error must signal port gap, got %+v", results[0].Error)
+	if results[0].Error != nil {
+		t.Errorf("passthrough should not fail, got %+v", results[0].Error)
+	}
+	if !strings.Contains(string(results[0].Output), "lightweight_table") {
+		t.Errorf("output must identify lightweight runtime, got %s", results[0].Output)
 	}
 }
 
@@ -208,8 +209,10 @@ func TestExecutePipelineHonoursSkipUnchanged(t *testing.T) {
 func TestExecutePipelineFailureCutsRunShort(t *testing.T) {
 	t.Parallel()
 	env := &ExecutionEnvironment{}
+	a := n("a")
+	a.TransformType = "llm"
 	results, err := ExecutePipeline(context.Background(), env,
-		[]PipelineNode{n("a"), n("b", "a"), n("c", "b")}, nil)
+		[]PipelineNode{a, n("b", "a"), n("c", "b")}, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

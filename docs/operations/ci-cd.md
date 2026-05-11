@@ -6,13 +6,13 @@ OpenFoundry uses several focused GitHub Actions workflows instead of one monolit
 
 | Workflow | Trigger Focus | Main Output |
 | --- | --- | --- |
-| `ci.yml` | Rust crates, proto, smoke, tooling | Workspace correctness and runtime smoke confidence |
+| `openfoundry-go.yml` | Go services, shared libs, proto, tools, Makefile | Go correctness, generated-code drift checks, capabilities drift checks, tests |
 | `ci-frontend.yml` | `apps/web` and root Node config | Linted, typed, tested, buildable frontend |
 | `proto-check.yml` | `proto/`, generated artifacts, SDKs | Contract drift detection |
 | `helm-check.yml` | Helm chart files | Valid rendered Kubernetes manifests |
 | `terraform-check.yml` | Terraform files | Formatted and validated infra assets |
 | `sdk-smoke.yml` | SDK folders | Compilable generated SDKs |
-| `security-audit.yml` | schedule and `Cargo.lock` | Dependency vulnerability awareness |
+| `security-audit.yml` | schedule, `go.mod`, `go.sum` | Dependency vulnerability awareness through `govulncheck` |
 | `docker-publish.yml` | `main` and tags | Published container images |
 | `release.yml` | `v*` tags | GitHub releases with changelog |
 | `deploy-docs.yml` | `docs/**` and manual dispatch | Published VitePress site |
@@ -51,5 +51,5 @@ To make the pipeline effective, the repository should have:
 ## Contributor Guidance
 
 - If you change `proto/`, expect SDK and OpenAPI workflows to matter.
-- If you change infra packaging, check the Helm or Terraform pipelines, not only Rust tests.
-- If you change docs navigation or VitePress config, verify `deploy-docs.yml` assumptions still hold and run `just docs-build`.
+- If you change infra packaging, check the Helm or Terraform pipelines, not only Go tests.
+- If you change docs navigation or VitePress config, verify `deploy-docs.yml` assumptions still hold and run `cd docs && npm ci && npm run docs:build`.

@@ -5,7 +5,7 @@ import { CreatePipelineModal } from '@/lib/components/pipeline/CreatePipelineMod
 import { RunHistory } from '@/lib/components/pipeline/RunHistory';
 import { ConfirmDialog } from '@/lib/components/ConfirmDialog';
 import { Glyph } from '@/lib/components/ui/Glyph';
-import { deletePipeline, listPipelines, runDuePipelines, type Pipeline } from '@/lib/api/pipelines';
+import { deletePipeline, listPipelines, pipelineNodesFromDAG, runDuePipelines, type Pipeline } from '@/lib/api/pipelines';
 
 type StatusTab = 'all' | 'draft' | 'active' | 'paused' | 'archived';
 type ScheduleFacet = 'all' | 'scheduled' | 'manual';
@@ -19,7 +19,7 @@ const STATUS_TABS: Array<{ id: StatusTab; label: string }> = [
   { id: 'archived', label: 'Archived' },
 ];
 
-const PIPELINE_TYPES = ['BATCH', 'FASTER', 'INCREMENTAL', 'STREAMING', 'EXTERNAL'] as const;
+const PIPELINE_TYPES = ['BATCH', 'FASTER', 'DISTRIBUTED', 'INCREMENTAL', 'STREAMING', 'EXTERNAL'] as const;
 type PipelineTypeFacet = (typeof PIPELINE_TYPES)[number];
 
 const SORT_OPTIONS: Array<{ id: SortKey; label: string }> = [
@@ -905,7 +905,7 @@ export function PipelinesPage() {
                     <td>{fmtSchedule(pipeline)}</td>
                     <td className="of-text-muted">{pipeline.lifecycle ?? '—'}</td>
                     <td className="of-text-muted">{fmtDate(pipeline.updated_at)}</td>
-                    <td>{pipeline.dag.length}</td>
+                    <td>{pipelineNodesFromDAG(pipeline.dag).length}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'inline-flex', gap: 6 }}>
                         <button

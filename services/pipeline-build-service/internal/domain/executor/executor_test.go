@@ -188,7 +188,7 @@ type recordingCommitter struct {
 	failDataset string
 }
 
-func (r *recordingCommitter) Commit(_ context.Context, tx OutputTransaction) error {
+func (r *recordingCommitter) Commit(_ context.Context, tx OutputTransaction, _ NodeResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.committed = append(r.committed, tx)

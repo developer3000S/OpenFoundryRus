@@ -17,7 +17,7 @@ func TestOutputClientCommitOK(t *testing.T) {
 	table := &fakeTable{}
 	client := NewOutputClient(store, &fakeCatalog{table: table})
 
-	if err := client.Commit(context.Background(), outTxn("txn-1")); err != nil {
+	if err := client.Commit(context.Background(), outTxn("txn-1"), executor.NodeResult{}); err != nil {
 		t.Fatalf("Commit() error = %v", err)
 	}
 	if len(table.appends) != 1 || table.appends[0].TransactionRID != "txn-1" {
@@ -30,14 +30,14 @@ func TestOutputClientCommitOK(t *testing.T) {
 
 func TestOutputClientTableMissing(t *testing.T) {
 	client := NewOutputClient(newFakeStore(staged("txn-missing", []map[string]any{{"id": "row-1", "count": 1}})), &fakeCatalog{err: ErrTableNotFound})
-	if err := client.Commit(context.Background(), outTxn("txn-missing")); !errors.Is(err, ErrTableNotFound) {
+	if err := client.Commit(context.Background(), outTxn("txn-missing"), executor.NodeResult{}); !errors.Is(err, ErrTableNotFound) {
 		t.Fatalf("Commit() error = %v", err)
 	}
 }
 
 func TestOutputClientSchemaMismatch(t *testing.T) {
 	client := NewOutputClient(newFakeStore(staged("txn-schema", []map[string]any{{"id": 123, "count": 1}})), &fakeCatalog{table: &fakeTable{}})
-	if err := client.Commit(context.Background(), outTxn("txn-schema")); !errors.Is(err, ErrSchemaMismatch) {
+	if err := client.Commit(context.Background(), outTxn("txn-schema"), executor.NodeResult{}); !errors.Is(err, ErrSchemaMismatch) {
 		t.Fatalf("Commit() error = %v", err)
 	}
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import type { PipelineSchemaGuidanceDiagnostic, PipelineUnionSchemaGuidance } from '@/lib/api/pipelines';
 import { Glyph } from '@/lib/components/ui/Glyph';
 import { UNION_TYPES, type UnionDraft, type UnionType } from './unionDraft';
 
@@ -8,11 +9,12 @@ interface UnionEditorProps {
   draft: UnionDraft | null;
   unionedSchema?: string[];
   preview?: Array<Record<string, unknown>>;
+  guidance?: PipelineUnionSchemaGuidance | null;
   onClose: () => void;
   onApply: (next: UnionDraft) => void;
 }
 
-export function UnionEditor({ open, draft, unionedSchema = [], preview = [], onClose, onApply }: UnionEditorProps) {
+export function UnionEditor({ open, draft, unionedSchema = [], preview = [], guidance = null, onClose, onApply }: UnionEditorProps) {
   const [working, setWorking] = useState<UnionDraft | null>(null);
   const [created, setCreated] = useState(false);
 
@@ -23,6 +25,9 @@ export function UnionEditor({ open, draft, unionedSchema = [], preview = [], onC
   }, [open, draft]);
 
   if (!open || !working) return null;
+
+  const schemaFromGuidance = guidance?.output_schema?.map((field) => field.name) ?? [];
+  const previewSchema = unionedSchema.length > 0 ? unionedSchema : schemaFromGuidance;
 
   function patch<K extends keyof UnionDraft>(key: K, value: UnionDraft[K]) {
     setWorking((current) => (current ? { ...current, [key]: value } : current));
@@ -219,6 +224,16 @@ export function UnionEditor({ open, draft, unionedSchema = [], preview = [], onC
               {UNION_TYPES.find((entry) => entry.id === working.union_type)?.description}
             </p>
           </section>
+
+          <section style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 14 }}>
+            <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600 }}>Schema guidance</p>
+            <GuidanceDiagnostics diagnostics={guidance?.diagnostics ?? []} />
+            {guidance?.input_schemas ? (
+              <p className="of-text-muted" style={{ margin: '8px 0 0', fontSize: 12 }}>
+                {guidance.input_schemas.map((entry) => `${entry.node_id}: ${entry.fields.length}`).join(' · ')} columns
+              </p>
+            ) : null}
+          </section>
         </aside>
 
         <main style={{ overflow: 'auto', padding: 24 }}>
@@ -250,10 +265,36 @@ export function UnionEditor({ open, draft, unionedSchema = [], preview = [], onC
               </button>
             </div>
           ) : (
-            <UnionPreview schema={unionedSchema} rows={preview} />
+            <UnionPreview schema={previewSchema} rows={preview} />
           )}
         </main>
       </div>
+    </div>
+  );
+}
+
+function GuidanceDiagnostics({ diagnostics }: { diagnostics: PipelineSchemaGuidanceDiagnostic[] }) {
+  if (diagnostics.length === 0) {
+    return <p className="of-text-muted" style={{ margin: 0, fontSize: 12 }}>Schemas are compatible for the selected union mode.</p>;
+  }
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      {diagnostics.map((diagnostic, index) => (
+        <div
+          key={`${diagnostic.code}:${index}`}
+          style={{
+            padding: '6px 8px',
+            borderRadius: 4,
+            fontSize: 12,
+            color: diagnostic.severity === 'error' ? '#7f1d1d' : '#713f12',
+            background: diagnostic.severity === 'error' ? '#fee2e2' : '#fef3c7',
+            border: `1px solid ${diagnostic.severity === 'error' ? '#fecaca' : '#fde68a'}`,
+          }}
+        >
+          <strong style={{ marginRight: 6 }}>{diagnostic.code}</strong>
+          {diagnostic.message}
+        </div>
+      ))}
     </div>
   );
 }

@@ -107,12 +107,13 @@ def execute_pipeline_transform(
         "output_dataset_id": output_dataset_id or None,
     }
     stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
 
     try:
-        with contextlib.redirect_stdout(stdout_buf):
+        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
             exec(compile(source, "<pipeline-transform>", "exec"), globals_dict)
     except Exception:  # noqa: BLE001
-        return _pipeline_failure(traceback.format_exc(), stdout=stdout_buf.getvalue())
+        return _pipeline_failure(traceback.format_exc(), stdout=stdout_buf.getvalue(), stderr=stderr_buf.getvalue())
 
     rows_affected_raw = globals_dict.get("rows_affected")
     rows_affected_set = rows_affected_raw is not None
@@ -138,8 +139,10 @@ def execute_pipeline_transform(
         result_rows_json = json.dumps(normalized_rows, default=_json_default)
 
     stdout = stdout_buf.getvalue()
+    stderr = stderr_buf.getvalue()
     output_payload = {
         "stdout": stdout,
+        "stderr": stderr,
         "result": result_str,
         "sample_rows": normalized_rows[:10] if normalized_rows else None,
     }
@@ -220,7 +223,9 @@ def _failure(message: str, *, stdout: str = "", stderr: str = "") -> dict[str, A
     return {"result_json": "", "stdout": stdout, "stderr": stderr, "error": message}
 
 
-def _pipeline_failure(message: str, *, stdout: str = "") -> dict[str, Any]:
+def _pipeline_failure(message: str, *, stdout: str = "", stderr: str = "") -> dict[str, Any]:
+    if stderr:
+        message = f"{message}\nstderr:\n{stderr}"
     return {
         "rows_affected": 0,
         "rows_affected_set": False,

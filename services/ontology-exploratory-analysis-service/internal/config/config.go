@@ -1,9 +1,9 @@
 // Package config resolves ontology-exploratory-analysis-service env config.
 //
-// The Rust binary is substrate-only ("migrated handlers not mounted"
-// per src/main.rs). The Go port preserves that surface verbatim plus
-// the migrations for the four service-consolidation merges that this
-// crate is the *target* of (per docs/architecture/service-consolidation-map.md):
+// The Go binary mounts the absorbed geospatial API and keeps the remaining
+// service-consolidation domains behind explicit handler wiring. It also ships
+// the migrations for the four service-consolidation merges that this crate is
+// the *target* of (per docs/architecture/service-consolidation-map.md):
 // ontology-timeseries-analytics, time-series-data, geospatial-intelligence,
 // scenario-simulation → ontology-exploratory-analysis.
 package config
@@ -21,10 +21,10 @@ type Config struct {
 		Host string
 		Port uint16
 	}
-	DatabaseURL                string
-	JWTSecret                  string
-	OntologyQueryServiceURL    string
-	OntologyActionsServiceURL  string
+	DatabaseURL               string
+	JWTSecret                 string
+	OntologyQueryServiceURL   string
+	OntologyActionsServiceURL string
 }
 
 func FromEnv() (*Config, error) {

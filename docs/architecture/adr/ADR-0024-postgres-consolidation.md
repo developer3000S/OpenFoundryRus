@@ -9,7 +9,7 @@
     in
     [docs/architecture/audit-and-reference-no-spof.md](../audit-and-reference-no-spof.md).
 - **Related ADRs:**
-  - [ADR-0010](./ADR-0010-cnpg-postgres-policy.md) — CNPG operating
+  - [ADR-0010](./ADR-0010-cnpg-postgres-operator.md) — CNPG operating
     posture (HA, backups, monitoring). This ADR keeps that posture and
     only changes the cardinality and naming of clusters.
   - [ADR-0020](./ADR-0020-cassandra-as-operational-store.md) — moves
@@ -227,7 +227,7 @@ For every cluster:
 
 ## CNPG configuration baseline (applies to all four clusters)
 
-Inherits [ADR-0010](./ADR-0010-cnpg-postgres-policy.md) and adds:
+Inherits [ADR-0010](./ADR-0010-cnpg-postgres-operator.md) and adds:
 
 - **3 instances** per cluster (1 primary, 2 sync standbys when
   capacity allows; otherwise 1 sync, 1 async).

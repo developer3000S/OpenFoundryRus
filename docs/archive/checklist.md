@@ -92,7 +92,7 @@ Palantir Foundry es una plataforma de operaciones de datos de nivel empresarial 
 | 1.6.7 | Linter / anti-patterns detector | Análisis del enrollment para detectar anti-patrones y optimizar recursos[4] | [x] |
 
 > **D1.1.1 Datasets parity (5/5) ✅** — full Foundry datasets surface, see
-> [ADR-0034](docs/architecture/adr/ADR-0034-datasets-foundry-parity.md). Closes
+> [ADR-0034](../architecture/adr/ADR-0034-datasets-foundry-parity.md). Closes
 > P1 schema-per-view, P2 file-format readers + preview, P3 backing
 > filesystem + Files tab, P4 retention preview + applicable policies,
 > P5 Compare + Open in…, and P6 dataset-quality-service binary,
@@ -101,7 +101,7 @@ Palantir Foundry es una plataforma de operaciones de datos de nivel empresarial 
 > the full E2E journey.
 
 > **D1.1.3 Media sets parity (5/5) ✅** — full Foundry media-sets surface, see
-> [ADR-0039](docs/architecture/adr/ADR-0039-media-sets-architecture.md). Closes
+> [ADR-0039](../architecture/adr/ADR-0039-media-sets-architecture.md). Closes
 > H3 Cedar + markings + audit envelope on every upload/download/delete +
 > cost-meter + 70% coverage gate, H4 Foundry-style branches
 > (`parent_branch_rid`, `head_transaction_rid`, write-modes
@@ -118,7 +118,7 @@ Palantir Foundry es una plataforma de operaciones de datos de nivel empresarial 
 > empty-media-set checkpoint round-trip.
 
 > **D1.1.5 Builds parity (5/5) ✅** — full Foundry builds lifecycle, see
-> [ADR-0036](docs/architecture/adr/ADR-0036-builds-foundry-parity.md). Closes
+> [ADR-0036](../architecture/adr/ADR-0036-builds-foundry-parity.md). Closes
 > P1 BuildState/JobState lifecycle + resolver (cycle detection + build
 > locks + queueing on input contention), P2 parallel JoinSet executor
 > with multi-output atomicity + abort_policy cascade + staleness /

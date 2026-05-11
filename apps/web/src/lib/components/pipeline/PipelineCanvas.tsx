@@ -20,7 +20,7 @@ interface PipelineCanvasProps {
   onTransform?: (node: PipelineNode) => void;
   onJoinStart?: (left: PipelineNode, right: PipelineNode) => void;
   onUnionStart?: (inputs: PipelineNode[]) => void;
-  onAddOutput?: (source: PipelineNode, kind: 'dataset' | 'object_type' | 'time_series' | 'virtual_table') => void;
+  onAddOutput?: (source: PipelineNode, kind: 'dataset' | 'object_type' | 'link_type' | 'time_series' | 'virtual_table') => void;
   nodeReports?: Record<string, NodeValidationReport>;
 }
 
@@ -502,7 +502,24 @@ export function PipelineCanvas({
                           onAddOutput?.(selectedNode, 'dataset');
                         }}
                       />
-                      <AddOutputMenuItem disabled glyph={<NewObjectTypeGlyph />} label="New object type" />
+                      <AddOutputMenuItem
+                        enabled
+                        glyph={<NewObjectTypeGlyph />}
+                        label="New object type"
+                        onClick={() => {
+                          setAddOutputMenuOpen(false);
+                          onAddOutput?.(selectedNode, 'object_type');
+                        }}
+                      />
+                      <AddOutputMenuItem
+                        enabled
+                        glyph={<Glyph name="link" size={14} />}
+                        label="New link type"
+                        onClick={() => {
+                          setAddOutputMenuOpen(false);
+                          onAddOutput?.(selectedNode, 'link_type');
+                        }}
+                      />
                       <AddOutputMenuItem disabled glyph={<NewTimeSeriesGlyph />} label="New time series sync" />
                       <AddOutputMenuItem disabled glyph={<NewVirtualTableGlyph />} label="New virtual table" />
                     </div>

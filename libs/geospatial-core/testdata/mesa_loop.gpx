@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="OpenFoundry GEO.4 fixture" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Mesa Loop</name>
+  </metadata>
+  <trk>
+    <name>Mesa Loop Trail</name>
+    <trkseg>
+      <trkpt lat="40.000000" lon="-105.300000"><ele>1700</ele></trkpt>
+      <trkpt lat="40.001000" lon="-105.299000"><ele>1710</ele></trkpt>
+      <trkpt lat="40.002000" lon="-105.297000"><ele>1705</ele></trkpt>
+      <trkpt lat="40.003000" lon="-105.295000"><ele>1730</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

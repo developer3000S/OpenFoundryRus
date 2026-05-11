@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Rook-Ceph topology contract lint.
 
-Validates the Ceph manifests under ``infra/k8s/platform/manifests/rook/`` against the quorum,
-high-availability and rack/AZ-awareness invariants the lakehouse and Kafka
-tiered storage depend on. Fails (exit code 1) on any drift. The intent is
-the same as ``tools/kafka-lint/check_kraft.py``: encode the contract once
-so accidental regressions in PR review are impossible.
+Validates the rendered Rook-Ceph manifest from
+``infra/helm/infra/ceph-cluster`` against the quorum, high-availability and
+rack/AZ-awareness invariants the lakehouse and Kafka tiered storage depend on.
+Fails (exit code 1) on any drift. The intent is the same as
+``tools/kafka-lint/check_kraft.py``: encode the contract once so accidental
+regressions in PR review are impossible.
 
 The contract checked here mirrors the P0 requirements documented in the
-ROADMAP and in ``infra/k8s/platform/manifests/rook/README.md``:
+ROADMAP and in ``infra/helm/infra/ceph-cluster/README.md``:
 
     1. Mon quorum: ``mon.count`` is odd and ``>= 3``;
        ``allowMultiplePerNode`` is ``false``.
@@ -21,25 +22,26 @@ ROADMAP and in ``infra/k8s/platform/manifests/rook/README.md``:
     4. Disruption management: ``managePodBudgets: true`` so that a node
        drain cannot evict more mon/OSD pods than the quorum / CRUSH map
        tolerates.
-    5. Pool failure domain: every ``CephBlockPool`` and ``CephObjectStore``
-       declares ``failureDomain`` ∈ {``zone``, ``rack``, ``region``,
-       ``datacenter``, ``room``}. ``host`` is rejected (silently degrades
-       to "tolerate one node" rather than "tolerate one zone/rack") with a
-       narrow allowlist for documented legacy resources kept for
-       backwards-compatibility.
+    5. Pool failure domain: every ``CephBlockPool``, direct-pool
+       ``CephObjectStore`` and ``CephObjectZone`` declares
+       ``failureDomain`` ∈ {``zone``, ``rack``, ``region``, ``datacenter``,
+       ``room``}. ``host`` is rejected (silently degrades to "tolerate one
+       node" rather than "tolerate one zone/rack") with a narrow allowlist for
+       documented legacy resources kept for backwards-compatibility.
 
 Usage::
 
     python3 tools/ceph-lint/check_topology.py
-    python3 tools/ceph-lint/check_topology.py path/to/cluster.yaml \\
-        path/to/objectstore.yaml
+    python3 tools/ceph-lint/check_topology.py path/to/rendered-ceph.yaml
 
-Requires PyYAML. The CI workflow installs it; locally run
-``pip install pyyaml``.
+With no argument the script runs ``helm template`` against the current chart.
+Requires Helm and PyYAML. The CI workflow installs both; locally run
+``pip install pyyaml`` if PyYAML is missing.
 """
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -54,10 +56,7 @@ except ImportError:  # pragma: no cover - exercised only when PyYAML missing
     sys.exit(2)
 
 
-DEFAULT_MANIFESTS = (
-    Path("infra/k8s/platform/manifests/rook/cluster.yaml"),
-    Path("infra/k8s/platform/manifests/rook/objectstore.yaml"),
-)
+DEFAULT_CHART = Path("infra/helm/infra/ceph-cluster")
 
 # Topology keys that count as "AZ-aware or stronger". A pure host-level key
 # (``kubernetes.io/hostname``) does not satisfy the spread contract on its
@@ -80,7 +79,7 @@ ACCEPTABLE_FAILURE_DOMAINS = frozenset(
 # Pools knowingly accepted at ``failureDomain: host`` because they pre-date
 # the contract and migrating them in-place forces a destructive bucket
 # re-creation. Every entry MUST be documented in
-# ``infra/k8s/platform/manifests/rook/README.md`` (see the "CRUSH layout and pool assignment"
+# ``infra/helm/infra/ceph-cluster/README.md`` (see the "CRUSH layout and pool assignment"
 # table) so the deuda técnica stays visible.
 LEGACY_HOST_FAILURE_DOMAIN_ALLOWLIST: frozenset[tuple[str, str, str]] = (
     frozenset(
@@ -98,12 +97,36 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
-def load_documents(path: Path) -> list[dict[str, Any]]:
-    text = path.read_text()
+def parse_documents(text: str, source: str) -> list[dict[str, Any]]:
     docs = [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
     if not docs:
-        raise ValueError(f"{path}: no YAML documents found")
+        raise ValueError(f"{source}: no YAML documents found")
     return docs
+
+
+def load_documents(path: Path) -> list[dict[str, Any]]:
+    return parse_documents(path.read_text(), str(path))
+
+
+def render_default_documents() -> list[dict[str, Any]]:
+    chart = repo_root() / DEFAULT_CHART
+    if not chart.is_dir():
+        raise ValueError(f"default chart not found at {chart}")
+
+    result = subprocess.run(
+        ["helm", "template", "ceph-cluster", str(chart)],
+        check=False,
+        cwd=repo_root(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise ValueError(
+            "helm template failed for "
+            f"{chart}: {result.stderr.strip() or result.stdout.strip()}"
+        )
+    return parse_documents(result.stdout, f"helm template {chart}")
 
 
 def find_by_kind(
@@ -251,6 +274,11 @@ def check_object_stores(
     for store in stores:
         name = _name(store)
         spec = store.get("spec") or {}
+        if spec.get("zone"):
+            # Multisite secondary object stores reference a CephObjectZone.
+            # The actual pool topology lives on that zone and is checked
+            # separately below.
+            continue
         for pool_label in ("metadataPool", "dataPool"):
             pool = spec.get(pool_label)
             if pool is None:
@@ -260,6 +288,24 @@ def check_object_stores(
                 continue
             _check_failure_domain(
                 "CephObjectStore", name, pool_label, pool, errors
+            )
+
+
+def check_object_zones(
+    zones: list[dict[str, Any]], errors: list[str]
+) -> None:
+    for zone in zones:
+        name = _name(zone)
+        spec = zone.get("spec") or {}
+        for pool_label in ("metadataPool", "dataPool"):
+            pool = spec.get(pool_label)
+            if pool is None:
+                errors.append(
+                    f"CephObjectZone/{name}: spec.{pool_label} is missing."
+                )
+                continue
+            _check_failure_domain(
+                "CephObjectZone", name, pool_label, pool, errors
             )
 
 
@@ -292,6 +338,11 @@ def lint(paths: list[Path]) -> list[str]:
     if errors:
         return errors
 
+    return lint_documents(all_docs)
+
+
+def lint_documents(all_docs: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
     clusters = find_by_kind(all_docs, "CephCluster")
     if not clusters:
         return ["no `kind: CephCluster` resource found in the manifests"]
@@ -310,6 +361,7 @@ def lint(paths: list[Path]) -> list[str]:
 
     check_block_pools(find_by_kind(all_docs, "CephBlockPool"), errors)
     check_object_stores(find_by_kind(all_docs, "CephObjectStore"), errors)
+    check_object_zones(find_by_kind(all_docs, "CephObjectZone"), errors)
     check_filesystems(find_by_kind(all_docs, "CephFilesystem"), errors)
 
     return errors
@@ -318,32 +370,31 @@ def lint(paths: list[Path]) -> list[str]:
 def main(argv: list[str]) -> int:
     if len(argv) >= 2:
         paths = [Path(p).resolve() for p in argv[1:]]
+        source = ", ".join(str(p) for p in paths)
+        missing = [p for p in paths if not p.is_file()]
+        if missing:
+            for p in missing:
+                print(f"error: manifest not found at {p}", file=sys.stderr)
+            return 2
+        errors = lint(paths)
     else:
-        root = repo_root()
-        paths = [(root / p).resolve() for p in DEFAULT_MANIFESTS]
+        source = f"helm template {repo_root() / DEFAULT_CHART}"
+        try:
+            errors = lint_documents(render_default_documents())
+        except (OSError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
-    missing = [p for p in paths if not p.is_file()]
-    if missing:
-        for p in missing:
-            print(f"error: manifest not found at {p}", file=sys.stderr)
-        return 2
-
-    errors = lint(paths)
     if errors:
         print(
-            "Rook-Ceph topology contract lint FAILED for "
-            + ", ".join(str(p) for p in paths)
-            + ":",
+            f"Rook-Ceph topology contract lint FAILED for {source}:",
             file=sys.stderr,
         )
         for err in errors:
             print(f"  - {err}", file=sys.stderr)
         return 1
 
-    print(
-        "Rook-Ceph topology contract lint OK: "
-        + ", ".join(str(p) for p in paths)
-    )
+    print(f"Rook-Ceph topology contract lint OK: {source}")
     return 0
 
 

@@ -1,4 +1,4 @@
-import type { PipelineNodeResult, PipelineRun } from '@/lib/api/pipelines';
+import { pipelineNodeResultsFromRun, type PipelineNodeResult, type PipelineRun } from '@/lib/api/pipelines';
 
 interface RunLogsProps {
   run: PipelineRun;
@@ -6,10 +6,16 @@ interface RunLogsProps {
 }
 
 const PILL: Record<string, { background: string; color: string }> = {
+  queued: { background: '#334155', color: '#cbd5e1' },
   running: { background: '#1d4ed8', color: '#dbeafe' },
+  succeeded: { background: '#166534', color: '#d1fae5' },
   completed: { background: '#166534', color: '#d1fae5' },
   failed: { background: '#991b1b', color: '#fee2e2' },
+  cancelled: { background: '#92400e', color: '#fde68a' },
   aborted: { background: '#92400e', color: '#fde68a' },
+  committed: { background: '#166534', color: '#d1fae5' },
+  pending: { background: '#334155', color: '#cbd5e1' },
+  open: { background: '#334155', color: '#cbd5e1' },
   skipped: { background: '#92400e', color: '#fde68a' },
 };
 
@@ -18,7 +24,7 @@ function pill(s: string) {
 }
 
 export function RunLogs({ run, onClose }: RunLogsProps) {
-  const nodes: PipelineNodeResult[] = run.node_results ?? [];
+  const nodes: PipelineNodeResult[] = pipelineNodeResultsFromRun(run);
   const durationMs = run.finished_at ? new Date(run.finished_at).getTime() - new Date(run.started_at).getTime() : null;
 
   return (
@@ -75,6 +81,45 @@ export function RunLogs({ run, onClose }: RunLogsProps) {
                   </pre>
                 </details>
               )}
+              {nr.schema_delta && (
+                <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '3px 8px', margin: 0, fontSize: 11 }}>
+                  <dt style={{ color: '#64748b' }}>Schema</dt>
+                  <dd style={{ margin: 0, color: '#cbd5e1' }}>
+                    +{nr.schema_delta.added_columns?.join(', ') || 'none'} / -{nr.schema_delta.removed_columns?.join(', ') || 'none'}
+                  </dd>
+                </dl>
+              )}
+              {nr.output_resources && nr.output_resources.length > 0 && (
+                <details>
+                  <summary style={{ cursor: 'pointer', fontSize: 11, color: '#60a5fa' }}>Output resources</summary>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0', display: 'grid', gap: 4, fontSize: 11 }}>
+                    {nr.output_resources.map((resource) => (
+                      <li key={`${resource.kind}:${resource.rid}:${resource.transaction_rid ?? ''}`} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', color: '#cbd5e1' }}>
+                        <strong>{resource.kind}</strong>
+                        <code style={{ color: '#94a3b8' }}>{resource.rid}</code>
+                        <span style={{ ...pill(resource.status), padding: '1px 6px', borderRadius: 999 }}>{resource.status}</span>
+                        {resource.branch && <span style={{ color: '#94a3b8' }}>branch {resource.branch}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {nr.events && nr.events.length > 0 && (
+                <details>
+                  <summary style={{ cursor: 'pointer', fontSize: 11, color: '#60a5fa' }}>Events</summary>
+                  <ol style={{ margin: '4px 0 0', paddingLeft: 16, display: 'grid', gap: 3, fontSize: 11, color: '#cbd5e1' }}>
+                    {nr.events.map((event, index) => (
+                      <li key={`${nr.node_id}-${event.at}-${index}`}>
+                        <span style={{ color: '#94a3b8' }}>{new Date(event.at).toLocaleTimeString()}</span>{' '}
+                        {event.event_type}
+                        {event.from || event.to ? ` ${event.from || '-'} -> ${event.to || '-'}` : ''}
+                        {event.reason ? `: ${event.reason}` : ''}
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              )}
+              {nr.log_rid && <code style={{ fontSize: 11, color: '#64748b' }}>{nr.log_rid}</code>}
             </li>
           ))}
         </ul>

@@ -223,6 +223,7 @@ type fakeStore struct {
 	permissions         map[uuid.UUID][]models.DatasetPermissionEdge
 	lineageLinks        map[uuid.UUID][]models.DatasetLineageLink
 	fileIndex           map[uuid.UUID][]models.DatasetFileIndexEntry
+	stagedFiles         map[uuid.UUID][]models.StageTransactionFile
 	views               map[uuid.UUID][]models.DatasetView
 	schemas             map[uuid.UUID]models.SchemaResponse
 	quality             map[uuid.UUID]*models.DatasetQualityResponse
@@ -240,7 +241,7 @@ func newFakeStore(owner uuid.UUID) *fakeStore {
 		StoragePath: "s3://bucket/sales", OwnerID: owner, CurrentVersion: 1,
 		Tags: []string{}, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	return &fakeStore{datasets: []models.Dataset{ds}, versions: map[uuid.UUID][]models.DatasetVersion{}, branches: map[uuid.UUID][]models.DatasetBranch{}, files: map[uuid.UUID][]models.DatasetFile{}, transactions: map[uuid.UUID]string{}, runtimeTransactions: map[uuid.UUID]models.RuntimeTransaction{}, markings: map[uuid.UUID][]models.EffectiveMarking{}, permissions: map[uuid.UUID][]models.DatasetPermissionEdge{}, lineageLinks: map[uuid.UUID][]models.DatasetLineageLink{}, fileIndex: map[uuid.UUID][]models.DatasetFileIndexEntry{}, views: map[uuid.UUID][]models.DatasetView{}, schemas: map[uuid.UUID]models.SchemaResponse{}, quality: map[uuid.UUID]*models.DatasetQualityResponse{}, health: map[string]*models.DatasetHealth{}, lint: map[uuid.UUID]*models.DatasetLintSummary{}, fallbacks: map[uuid.UUID][]string{}}
+	return &fakeStore{datasets: []models.Dataset{ds}, versions: map[uuid.UUID][]models.DatasetVersion{}, branches: map[uuid.UUID][]models.DatasetBranch{}, files: map[uuid.UUID][]models.DatasetFile{}, transactions: map[uuid.UUID]string{}, runtimeTransactions: map[uuid.UUID]models.RuntimeTransaction{}, markings: map[uuid.UUID][]models.EffectiveMarking{}, permissions: map[uuid.UUID][]models.DatasetPermissionEdge{}, lineageLinks: map[uuid.UUID][]models.DatasetLineageLink{}, fileIndex: map[uuid.UUID][]models.DatasetFileIndexEntry{}, stagedFiles: map[uuid.UUID][]models.StageTransactionFile{}, views: map[uuid.UUID][]models.DatasetView{}, schemas: map[uuid.UUID]models.SchemaResponse{}, quality: map[uuid.UUID]*models.DatasetQualityResponse{}, health: map[string]*models.DatasetHealth{}, lint: map[uuid.UUID]*models.DatasetLintSummary{}, fallbacks: map[uuid.UUID][]string{}}
 }
 
 func (f *fakeStore) ListDatasets(_ context.Context, ownerID *uuid.UUID, _ int) ([]models.Dataset, error) {
@@ -314,6 +315,9 @@ func (f *fakeStore) GetInternalDatasetMetadata(ctx context.Context, datasetID uu
 }
 func (f *fakeStore) CreateDataset(_ context.Context, body *models.CreateDatasetRequest, ownerID uuid.UUID) (*models.Dataset, error) {
 	id := uuid.New()
+	if body.ID != nil && *body.ID != uuid.Nil {
+		id = *body.ID
+	}
 	format := "parquet"
 	if body.Format != nil && *body.Format != "" {
 		format = *body.Format
@@ -736,6 +740,39 @@ func (f *fakeStore) StartTransaction(_ context.Context, datasetID uuid.UUID, bra
 	return &tx, nil
 }
 
+func (f *fakeStore) StageTransactionFiles(_ context.Context, datasetID uuid.UUID, txnID uuid.UUID, files []models.StageTransactionFile) error {
+	tx, ok := f.runtimeTransactions[txnID]
+	if !ok || tx.DatasetID != datasetID {
+		return repo.ErrNotFound
+	}
+	if tx.Status != models.TransactionStatusOpen {
+		return repo.ErrInvalidTransition
+	}
+	f.stagedFiles[txnID] = append([]models.StageTransactionFile(nil), files...)
+	return nil
+}
+
+func (f *fakeStore) MergeTransactionMetadata(_ context.Context, datasetID uuid.UUID, txnID uuid.UUID, metadata models.JSONValue) error {
+	tx, ok := f.runtimeTransactions[txnID]
+	if !ok || tx.DatasetID != datasetID {
+		return repo.ErrNotFound
+	}
+	if tx.Status != models.TransactionStatusOpen {
+		return repo.ErrInvalidTransition
+	}
+	merged := map[string]any{}
+	_ = json.Unmarshal(tx.Metadata, &merged)
+	patch := map[string]any{}
+	_ = json.Unmarshal(metadata, &patch)
+	for key, value := range patch {
+		merged[key] = value
+	}
+	raw, _ := json.Marshal(merged)
+	tx.Metadata = raw
+	f.runtimeTransactions[txnID] = tx
+	return nil
+}
+
 func (f *fakeStore) GetRuntimeTransaction(_ context.Context, datasetID uuid.UUID, txnID uuid.UUID) (*models.RuntimeTransaction, error) {
 	tx, ok := f.runtimeTransactions[txnID]
 	if !ok {
@@ -882,7 +919,7 @@ func (f *fakeStore) GetCurrentSchema(ctx context.Context, datasetID uuid.UUID, b
 	}
 	return nil, nil
 }
-func (f *fakeStore) PreviewData(_ context.Context, _ uuid.UUID, _ *uuid.UUID, q models.PreviewQuery) (*models.PreviewDataResponse, error) {
+func (f *fakeStore) PreviewData(_ context.Context, datasetID uuid.UUID, _ *uuid.UUID, q models.PreviewQuery) (*models.PreviewDataResponse, error) {
 	limit := 100
 	if q.Limit != nil {
 		limit = *q.Limit
@@ -890,6 +927,22 @@ func (f *fakeStore) PreviewData(_ context.Context, _ uuid.UUID, _ *uuid.UUID, q 
 	offset := 0
 	if q.Offset != nil {
 		offset = *q.Offset
+	}
+	for _, file := range f.fileIndex[datasetID] {
+		var meta struct {
+			PreviewColumns []string             `json:"preview_columns"`
+			PreviewRows    [][]models.JSONValue `json:"preview_rows"`
+		}
+		if err := json.Unmarshal(file.Metadata, &meta); err == nil && len(meta.PreviewRows) > 0 {
+			end := offset + limit
+			if end > len(meta.PreviewRows) {
+				end = len(meta.PreviewRows)
+			}
+			if offset > end {
+				offset = end
+			}
+			return &models.PreviewDataResponse{Columns: meta.PreviewColumns, Rows: meta.PreviewRows[offset:end], Format: "json", Limit: limit, Offset: offset}, nil
+		}
 	}
 	return &models.PreviewDataResponse{Columns: []string{"id"}, Rows: [][]models.JSONValue{}, Format: "json", Limit: limit, Offset: offset}, nil
 }
@@ -1570,6 +1623,74 @@ func TestPreviewCurrentSchemaAndValidateHandlers(t *testing.T) {
 	var validation models.ValidateResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &validation))
 	require.False(t, validation.Conforms)
+}
+
+func TestCommitDatasetOutputCreatesTransactionSchemaFilesLineageAndPreview(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	targetID := uuid.New()
+	sourceRID := "ri.foundry.main.dataset." + uuid.NewString()
+	rid := "ri.foundry.main.dataset." + targetID.String()
+	body := `{
+		"create_if_missing": true,
+		"dataset_name": "Trail output",
+		"branch": "main",
+		"transaction_type": "SNAPSHOT",
+		"summary": "Pipeline output commit",
+		"schema": {
+			"file_format": "PARQUET",
+			"fields": [
+				{"name": "trail_id", "type": "STRING", "nullable": false},
+				{"name": "distance_miles", "type": "DOUBLE", "nullable": false}
+			]
+		},
+		"files": [{
+			"logical_path": "part-00000.ndjson",
+			"storage_path": "pipeline-build/run/output/part-00000.ndjson",
+			"size_bytes": 128,
+			"content_type": "application/x-ndjson",
+			"metadata": {"sha256": "abc"}
+		}],
+		"preview_columns": ["trail_id", "distance_miles"],
+		"preview_rows": [["mesa", 4.8], ["green", 6.1]],
+		"lineage_links": [{
+			"direction": "upstream",
+			"target_rid": "` + sourceRID + `",
+			"target_kind": "dataset",
+			"relation_kind": "derived_from",
+			"metadata": {"node_id": "output"}
+		}]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/datasets/"+rid+"/outputs:commit", strings.NewReader(body))
+	req = req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner, Permissions: []string{"dataset.write"}}))
+	req = withRouteParam(req, "rid", rid)
+	rec := httptest.NewRecorder()
+	h.CommitDatasetOutput(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	var out models.CommitDatasetOutputResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&out))
+	require.Equal(t, targetID, out.DatasetID)
+	require.Equal(t, models.TransactionStatusCommitted, out.Transaction.Status)
+	require.Len(t, store.stagedFiles[out.Transaction.ID], 1)
+	require.Len(t, out.Files, 1)
+	require.Equal(t, "part-00000.ndjson", out.Files[0].Path)
+	require.Len(t, out.LineageLinks, 1)
+	require.Equal(t, sourceRID, out.LineageLinks[0].TargetRID)
+	require.Equal(t, []string{"trail_id", "distance_miles"}, out.Preview.Columns)
+	require.Len(t, out.Preview.Rows, 2)
+
+	previewReq := httptest.NewRequest(http.MethodGet, "/v1/datasets/"+rid+"/preview?limit=1", nil)
+	previewReq = previewReq.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner, Permissions: []string{"dataset.write"}}))
+	previewReq = withRouteParam(previewReq, "rid", rid)
+	previewRec := httptest.NewRecorder()
+	h.PreviewDataset(previewRec, previewReq)
+	require.Equal(t, http.StatusOK, previewRec.Code, previewRec.Body.String())
+	var preview models.PreviewDataResponse
+	require.NoError(t, json.NewDecoder(previewRec.Body).Decode(&preview))
+	require.Equal(t, []string{"trail_id", "distance_miles"}, preview.Columns)
+	require.Len(t, preview.Rows, 1)
 }
 
 func TestLocalPresignProxyRoundTripAndSafety(t *testing.T) {

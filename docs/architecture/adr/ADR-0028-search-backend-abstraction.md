@@ -7,9 +7,9 @@
   - The "Vespa subchart is optional" note in the current
     [compose.yaml](../../../compose.yaml) and Helm composition.
 - **Related ADRs:**
-  - [ADR-0007](./ADR-0007-search-engine.md) — original adoption of
+  - [ADR-0007](./ADR-0007-search-engine-choice.md) — original adoption of
     Vespa as the search engine of the platform.
-  - [ADR-0009](./ADR-0009-datafusion-as-engine-of-record.md) — DataFusion
+  - [ADR-0009](./ADR-0009-internal-query-fabric-datafusion-flightsql.md) — DataFusion
     is the analytical engine of record; this ADR concerns serving
     search and ANN, not analytical scans.
   - [ADR-0020](./ADR-0020-cassandra-as-operational-store.md) — search
@@ -40,7 +40,7 @@ config-server topology is heavyweight for that environment.
 We need to pick:
 
 1. **The production engine** (already implicitly Vespa — see
-   [ADR-0007](./ADR-0007-search-engine.md)).
+   [ADR-0007](./ADR-0007-search-engine-choice.md)).
 2. **A dev / CI engine** that supports the same query shapes well
    enough to keep developers honest.
 3. **An abstraction** so service code does not pin to either

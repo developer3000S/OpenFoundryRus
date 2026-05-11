@@ -84,6 +84,8 @@ type Store interface {
 	ValidateSchema(ctx context.Context, datasetID uuid.UUID, schema models.DatasetSchema) (*models.ValidateResponse, error)
 	StorageDetails(ctx context.Context, datasetID uuid.UUID, fsID string, driver string, baseDir string, ttlSeconds uint64) (*models.StorageDetailsOut, error)
 	StartTransaction(ctx context.Context, datasetID uuid.UUID, branchID uuid.UUID, branchName string, txType models.TransactionType, summary string, providence models.JSONValue, startedBy uuid.UUID) (*models.RuntimeTransaction, error)
+	StageTransactionFiles(ctx context.Context, datasetID uuid.UUID, transactionID uuid.UUID, files []models.StageTransactionFile) error
+	MergeTransactionMetadata(ctx context.Context, datasetID uuid.UUID, transactionID uuid.UUID, metadata models.JSONValue) error
 	GetRuntimeTransaction(ctx context.Context, datasetID uuid.UUID, txnID uuid.UUID) (*models.RuntimeTransaction, error)
 	ListRuntimeTransactions(ctx context.Context, datasetID uuid.UUID, branch *string, before *time.Time, limit int) ([]models.RuntimeTransaction, error)
 	CommitTransaction(ctx context.Context, datasetID uuid.UUID, txnID uuid.UUID) error

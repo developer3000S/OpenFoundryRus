@@ -481,7 +481,7 @@ runtime / executor / interop / training-runner ports.
   agents/chat each pin their empty-name / bad-JSON 400 messages.
 - jsonOrEmptyObject + jsonOrFallback canonicalise null/empty JSONB
   to "{}" matching the Rust serde defaults.
-- knowledge: resolveEmbeddingProvider parses "provider:<uuid>"
+- knowledge: resolveEmbeddingProvider parses `provider:{uuid}`
   prefixes, returns 404 on unknown IDs, and falls through to nil for
   non-prefix references — handler then picks rag.IndexDocument /
   rag.EmbedText (offline) vs llm.EmbedText (provider runtime).
@@ -523,7 +523,7 @@ runtime / executor / interop / training-runner ports.
   normalized_score (clamped + inverse), overall_benchmark_score
   (0.45·quality + 0.25·safety + 0.15·latency + 0.15·cost).
 - copilot: dataset-id present + include_sql → 30-day SELECT against
-  dataset_<simple-uuid>; "sql"/"query" keyword → 7-day fallback;
+  `dataset_{simple_uuid}`; "sql"/"query" keyword → 7-day fallback;
   pipeline_plan toggle emits fixed 3-row plan; ontology_type_id +
   "ontology"/"object" keyword combine into hint list.
 
@@ -699,7 +699,7 @@ ObjectOrNull paths, dedupeArtifacts first-URI-wins).
   model_state object.
 - **execute.go (ExecuteTraining)**: 3 branches:
   1. external_training detected → synthesise single
-     "imported-<run_id>" trial + reproducibility schema metadata.
+     `imported-{run_id}` trial + reproducibility schema metadata.
   2. no inline records → synthetic_trials with deterministic 0.5 +
      0.05·i objectives.
   3. inline records → TrainTrial per candidate set, sort by
@@ -708,7 +708,7 @@ ObjectOrNull paths, dedupeArtifacts first-URI-wins).
   merges external_training into config via interop, runs
   ExecuteTraining, optionally registers ml_model_versions row via
   the auto_register_model_version path (inserting "autotune-vN"
-  label and "ml://models/<id>/versions/<n>" fallback URI),
+  label and `ml://models/{id}/versions/{n}` fallback URI),
   refreshes ml_models.{latest_version_number, current_stage='candidate'},
   inserts ml_training_jobs row. The 501 stub is gone.
 

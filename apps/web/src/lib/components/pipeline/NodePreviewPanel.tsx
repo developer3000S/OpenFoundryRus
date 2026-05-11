@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 
-import { previewPipelineNode, type PipelineNode, type PipelinePreviewOutput } from '@/lib/api/pipelines';
+import { previewPipelineNode, type PipelineDAG, type PipelineNode, type PipelinePreviewOutput } from '@/lib/api/pipelines';
 import { VirtualizedPreviewTable } from '@/lib/components/dataset/VirtualizedPreviewTable';
 
 interface NodePreviewPanelProps {
   pipelineId: string;
   node: PipelineNode | null;
+  draftDag?: PipelineDAG | null;
+  draftKey?: string;
+  sampleSize?: number;
 }
 
-export function NodePreviewPanel({ pipelineId, node }: NodePreviewPanelProps) {
+export function NodePreviewPanel({ pipelineId, node, draftDag = null, draftKey = '', sampleSize = 50 }: NodePreviewPanelProps) {
   const [preview, setPreview] = useState<PipelinePreviewOutput | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,12 +24,12 @@ export function NodePreviewPanel({ pipelineId, node }: NodePreviewPanelProps) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    previewPipelineNode(pipelineId, node.id)
+    previewPipelineNode(pipelineId, node.id, { sample_size: sampleSize, dag: draftDag ?? undefined })
       .then((p) => { if (!cancelled) setPreview(p); })
       .catch((cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : 'Failed to load preview'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [pipelineId, node?.id]);
+  }, [pipelineId, node?.id, draftKey, sampleSize]);
 
   let freshnessLabel = '';
   if (preview) {
@@ -45,7 +48,7 @@ export function NodePreviewPanel({ pipelineId, node }: NodePreviewPanelProps) {
     setLoading(true);
     setError(null);
     try {
-      setPreview(await previewPipelineNode(pipelineId, node.id));
+      setPreview(await previewPipelineNode(pipelineId, node.id, { sample_size: sampleSize, dag: draftDag ?? undefined }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to load preview');
     } finally {
@@ -69,8 +72,10 @@ export function NodePreviewPanel({ pipelineId, node }: NodePreviewPanelProps) {
           {loading ? 'Refreshing…' : 'Refresh'}
         </button>
       </header>
-      {error ? (
-        <div className="of-status-danger" style={{ padding: '8px 12px', borderRadius: 'var(--radius-md)', fontSize: 12 }}>{error}</div>
+      {error || preview?.error ? (
+        <div className="of-status-danger" style={{ padding: '8px 12px', borderRadius: 'var(--radius-md)', fontSize: 12 }}>
+          {error ?? `${preview?.error?.kind}: ${preview?.error?.message}`}
+        </div>
       ) : !node ? (
         <div className="of-text-muted" style={{ border: '1px dashed var(--border-default)', borderRadius: 'var(--radius-md)', padding: 14, fontSize: 12, textAlign: 'center' }}>
           Select a node on the canvas to preview the data after that step.

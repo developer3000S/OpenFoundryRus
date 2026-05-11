@@ -6,3 +6,6 @@ This section is the quick lookup area for contributors who already know the plat
 
 - [Repository Layout](/reference/repository-layout)
 - [API, SDK, and MCP](/reference/api-sdk-mcp)
+- [Foundry Compatibility Glossary](/reference/foundry-compatibility-glossary)
+- [Foundry Public-Docs Parity Policy](/reference/foundry-public-docs-parity-policy)
+- [Geospatial CRS Policy](/reference/geospatial-crs-policy)

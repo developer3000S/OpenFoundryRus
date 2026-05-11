@@ -4,56 +4,34 @@ on:
   push:
     branches: [main]
     paths:
-      - "infra/k8s/helm/**"
-      - "infra/k8s/platform/**"
+      - "infra/helm/**"
       - ".github/workflows/helm-check.yml"
-      - "justfile"
+      - "Makefile"
   pull_request:
     branches: [main]
     paths:
-      - "infra/k8s/helm/**"
-      - "infra/k8s/platform/**"
+      - "infra/helm/**"
       - ".github/workflows/helm-check.yml"
-      - "justfile"
+      - "Makefile"
 
 jobs:
-  helm-bundle:
-    name: Helm Split Bundle Check
+  local-charts:
+    name: Helm local chart check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: azure/setup-helm@v4
         with:
           version: v3.16.4
-      - uses: helmfile/helmfile-action@v2
-        with:
-          helmfile-version: v0.171.0
-      - name: Refresh chart dependencies
+      - name: Lint shared library chart
+        run: helm lint infra/helm/_shared
+      - name: Lint and render app/infra charts
         run: |
-          for release in of-platform of-data-engine of-ontology of-ml-aip of-apps-ops; do
-            helm dependency update "infra/k8s/helm/${release}"
+          set -euo pipefail
+          for chart in infra/helm/apps/* infra/helm/infra/*; do
+            [ -f "${chart}/Chart.yaml" ] || continue
+            name="$(basename "${chart}")"
+            echo ">>> ${chart}"
+            helm lint "${chart}"
+            helm template "${name}" "${chart}" > "/tmp/${name}.yaml"
           done
-      - name: Lint dev / staging / prod
-        working-directory: infra/k8s/helm
-        run: |
-          helmfile -e dev     lint
-          helmfile -e staging lint
-          helmfile -e prod    lint
-      - name: Render dev bundle
-        working-directory: infra/k8s/helm
-        run: helmfile -e dev     template > /tmp/openfoundry-dev.yaml
-      - name: Render staging bundle
-        working-directory: infra/k8s/helm
-        run: helmfile -e staging template > /tmp/openfoundry-staging.yaml
-      - name: Render prod bundle
-        working-directory: infra/k8s/helm
-        run: helmfile -e prod    template > /tmp/openfoundry-prod.yaml
-      - name: Lint platform dev / staging / prod
-        working-directory: infra/k8s/platform
-        run: |
-          helmfile -e dev     lint
-          helmfile -e staging lint
-          helmfile -e prod    lint
-      - name: Render platform prod bundle
-        working-directory: infra/k8s/platform
-        run: helmfile -e prod template --args "--api-versions monitoring.coreos.com/v1/PodMonitor" > /tmp/openfoundry-platform-prod.yaml

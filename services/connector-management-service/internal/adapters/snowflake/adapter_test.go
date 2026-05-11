@@ -184,7 +184,9 @@ func TestObtainTokenSignsKeypairJWT(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "KEYPAIR_JWT", tok.kind)
 
-	parsed, err := jwt.Parse(tok.token, func(*jwt.Token) (any, error) { return &priv.PublicKey, nil })
+	parsed, err := jwt.NewParser(jwt.WithTimeFunc(func() time.Time { return fixedNow })).Parse(tok.token, func(*jwt.Token) (any, error) {
+		return &priv.PublicKey, nil
+	})
 	require.NoError(t, err)
 	require.True(t, parsed.Valid)
 	claims := parsed.Claims.(jwt.MapClaims)

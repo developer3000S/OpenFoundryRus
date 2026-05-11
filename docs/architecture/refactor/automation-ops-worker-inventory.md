@@ -198,7 +198,7 @@ table to extend (in contrast to FASE 5, where the
 `workflow_run_projections` schema at least existed).
 
 The legacy archive
-[`docs/architecture/legacy-migrations/automation-operations-service/`](../legacy-migrations/automation-operations-service/)
+[`docs/architecture/legacy-migrations/automation-operations-service/`](../legacy-migrations/automation-operations-service/README.md)
 documents what *used to* live in Postgres before the Temporal
 cutover (S2.7 of the Cassandra-parity plan): a generic
 `automation_queues(id, payload jsonb, created_at, updated_at)` plus

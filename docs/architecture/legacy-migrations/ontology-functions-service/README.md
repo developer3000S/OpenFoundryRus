@@ -5,7 +5,7 @@ Currently has **no sqlx migrations** — all storage today comes via
 `ontology-service`'s legacy schema (tables
 `ontology_function_packages`, `function_package_versions`,
 `function_package_run_metrics`, archived under
-[`legacy-migrations/ontology-definition-service/`](../ontology-definition-service/)).
+[`legacy-migrations/ontology-definition-service/`](../ontology-definition-service/README.md)).
 
 ## S1.7 split
 

@@ -23,15 +23,15 @@ type Handlers struct {
 // --- request / response wire types --------------------------------------
 
 type writeObjectRequest struct {
-	TypeID          string           `json:"type_id"`
-	Version         uint64           `json:"version"`
-	Payload         json.RawMessage  `json:"payload"`
-	ExpectedVersion *uint64          `json:"expected_version,omitempty"`
-	Owner           *string          `json:"owner,omitempty"`
-	Markings        []string         `json:"markings"`
-	OrganizationID  *string          `json:"organization_id,omitempty"`
-	CreatedAtMs     *int64           `json:"created_at_ms,omitempty"`
-	UpdatedAtMs     *int64           `json:"updated_at_ms,omitempty"`
+	TypeID          string          `json:"type_id"`
+	Version         uint64          `json:"version"`
+	Payload         json.RawMessage `json:"payload"`
+	ExpectedVersion *uint64         `json:"expected_version,omitempty"`
+	Owner           *string         `json:"owner,omitempty"`
+	Markings        []string        `json:"markings"`
+	OrganizationID  *string         `json:"organization_id,omitempty"`
+	CreatedAtMs     *int64          `json:"created_at_ms,omitempty"`
+	UpdatedAtMs     *int64          `json:"updated_at_ms,omitempty"`
 }
 
 type writeObjectResponse struct {
@@ -50,6 +50,13 @@ type objectListResponse struct {
 type linkListResponse struct {
 	Items     []storage.Link `json:"items"`
 	NextToken *string        `json:"next_token"`
+}
+
+type writeLinkRequest struct {
+	From        string          `json:"from"`
+	To          string          `json:"to"`
+	Payload     json.RawMessage `json:"payload,omitempty"`
+	CreatedAtMs *int64          `json:"created_at_ms,omitempty"`
 }
 
 type statusResponse struct {
@@ -254,6 +261,42 @@ func (h *Handlers) ListByMarking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, objectListResponse{Items: res.Items, NextToken: res.NextToken})
+}
+
+func (h *Handlers) PutLink(w http.ResponseWriter, r *http.Request) {
+	tenant := storage.TenantId(chi.URLParam(r, "tenant"))
+	lt := storage.LinkTypeId(chi.URLParam(r, "link_type"))
+	var body writeLinkRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(body.From) == "" || strings.TrimSpace(body.To) == "" {
+		http.Error(w, "from and to required", http.StatusBadRequest)
+		return
+	}
+	nowMs := time.Now().UnixMilli()
+	if body.CreatedAtMs != nil {
+		nowMs = *body.CreatedAtMs
+	}
+	var payload *json.RawMessage
+	if len(body.Payload) > 0 {
+		cp := append(json.RawMessage(nil), body.Payload...)
+		payload = &cp
+	}
+	link := storage.Link{
+		Tenant:      tenant,
+		LinkType:    lt,
+		From:        storage.ObjectId(body.From),
+		To:          storage.ObjectId(body.To),
+		Payload:     payload,
+		CreatedAtMs: nowMs,
+	}
+	if err := h.Links.Put(r.Context(), link); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, link)
 }
 
 func (h *Handlers) ListOutgoingLinks(w http.ResponseWriter, r *http.Request) {

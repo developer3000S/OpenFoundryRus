@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { listProjects, type OntologyProject } from '@/lib/api/ontology';
 import {
   createPipeline,
+  type DistributedConfig,
   type ExternalConfig,
   type IncrementalConfig,
   type PipelineNode,
@@ -49,7 +50,8 @@ const PRIMARY_CARDS: PrimaryCard[] = [
 
 const ADVANCED_OPTIONS: AdvancedOption[] = [
   { id: 'BATCH', family: 'BATCH', label: 'Standard', helper: 'Build your pipelines using advanced expressions. Backed by Spark.', badge: 'Default' },
-  { id: 'FASTER', family: 'BATCH', label: 'Faster', helper: 'Speed up your pipelines and save compute. Backed by DataFusion.', badge: 'New' },
+  { id: 'FASTER', family: 'BATCH', label: 'Lightweight / Faster', helper: 'Fast interactive builds and previews on OpenFoundry local table execution.', badge: 'New' },
+  { id: 'DISTRIBUTED', family: 'BATCH', label: 'Spark / Flink distributed', helper: 'Run the same graph through a distributed compute adapter.', badge: 'Cluster' },
   { id: 'EXTERNAL', family: 'BATCH', label: 'External', helper: 'Build your pipelines using external compute platforms.', badge: 'Beta' },
   { id: 'INCREMENTAL', family: 'BATCH', label: 'Incremental', helper: 'Only process changed rows.' },
   { id: 'STREAMING', family: 'STREAMING', label: 'Streaming', helper: 'Continuous topology over a stream.' },
@@ -96,6 +98,30 @@ function defaultNodes(pipelineType: PipelineType, virtualTableRid: string | null
       },
     ];
   }
+  if (pipelineType === 'FASTER') {
+    const sourceId = makeId('source');
+    const filterId = makeId('filter');
+    return [
+      {
+        id: sourceId,
+        label: 'Lightweight sample rows',
+        transform_type: 'dataset_input',
+        config: { rows: [{ value: 1, status: 'ready' }] },
+        depends_on: [],
+        input_dataset_ids: [],
+        output_dataset_id: null,
+      },
+      {
+        id: filterId,
+        label: 'Local table filter',
+        transform_type: 'filter',
+        config: { predicate: 'value > 0' },
+        depends_on: [sourceId],
+        input_dataset_ids: [],
+        output_dataset_id: null,
+      },
+    ];
+  }
   return [
     {
       id: makeId(),
@@ -131,6 +157,14 @@ function defaultExternal(virtualTableRid: string | null): ExternalConfig {
     source_system: virtualTableRid ? 'virtual_table' : 'external',
     source_id: virtualTableRid,
     compute_profile_id: null,
+  };
+}
+
+function defaultDistributed(): DistributedConfig {
+  return {
+    engine: 'spark',
+    compute_profile_id: null,
+    runner_image: null,
   };
 }
 
@@ -249,6 +283,7 @@ export function PipelineNewPage() {
       if (pipelineType === 'INCREMENTAL') body.incremental = defaultIncremental(virtualTableRid);
       if (pipelineType === 'STREAMING') body.streaming = defaultStreaming();
       if (pipelineType === 'EXTERNAL') body.external = defaultExternal(virtualTableRid);
+      if (pipelineType === 'DISTRIBUTED') body.distributed = defaultDistributed();
 
       const created = await createPipeline(body);
       setSubmitState('success');

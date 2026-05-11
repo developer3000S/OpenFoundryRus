@@ -194,7 +194,7 @@ func DefaultUpstreams() UpstreamURLs {
 		EntityResolution:          "http://localhost:50058",
 		Streaming:                 "http://localhost:50121",
 		Report:                    "http://localhost:50064",
-		GeospatialIntelligence:    "http://localhost:50068",
+		GeospatialIntelligence:    "http://localhost:50131",
 		CodeRepo:                  "http://localhost:50065",
 		GlobalBranch:              "http://localhost:50110",
 		MarketplaceCatalog:        "http://localhost:50066",

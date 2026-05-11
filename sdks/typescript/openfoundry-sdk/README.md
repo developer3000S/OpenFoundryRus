@@ -1,6 +1,6 @@
 # OpenFoundry TypeScript SDK
 
-Generated from `apps/web/static/generated/openapi/openfoundry.json`.
+Generated from `apps/web/public/generated/openapi/openfoundry.json`.
 
 Version: `0.1.0`
 
@@ -16,8 +16,8 @@ const client = new OpenFoundryClient({
   retry: { maxAttempts: 2 },
 });
 
-const me = await client.auth.authGetMe();
-const datasets = await client.dataset.listDatasets({ search: 'sales' });
+const me = await client.auth.getme();
+const datasets = await client.dataset.listdatasets({ search: 'sales' });
 ```
 
 ## MCP bridging
@@ -37,7 +37,7 @@ import { OpenFoundryProvider, useOpenFoundry, useOpenFoundryQuery } from '@open-
 
 function DatasetCount() {
   const client = useOpenFoundry();
-  const datasets = useOpenFoundryQuery(() => client.dataset.listDatasets(), [client]);
+  const datasets = useOpenFoundryQuery(() => client.dataset.listdatasets(), [client]);
   return <div>{datasets.data?.datasets?.length ?? 0}</div>;
 }
 

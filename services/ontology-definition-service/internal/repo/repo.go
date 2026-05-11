@@ -51,7 +51,9 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 type Repo struct{ Pool *pgxpool.Pool }
 
 const objectTypeSelect = `SELECT id, name, display_name, description,
-	primary_key_property, icon, color, owner_id, created_at, updated_at
+	primary_key_property, icon, color, owner_id, created_at, updated_at,
+	plural_display_name, editable, backing_dataset_id, backing_dataset_rid,
+	pipeline_rid, managed_by
 	FROM ontology_schema.object_types`
 
 func (r *Repo) ListObjectTypes(ctx context.Context) ([]models.ObjectType, error) {
@@ -82,15 +84,27 @@ func (r *Repo) GetObjectType(ctx context.Context, id uuid.UUID) (*models.ObjectT
 
 func (r *Repo) CreateObjectType(ctx context.Context, body *models.CreateObjectTypeRequest, ownerID uuid.UUID) (*models.ObjectType, error) {
 	id := uuid.New()
+	if body.ID != nil && *body.ID != uuid.Nil {
+		id = *body.ID
+	}
+	editable := false
+	if body.Editable != nil {
+		editable = *body.Editable
+	}
 	row := r.Pool.QueryRow(ctx,
 		`INSERT INTO ontology_schema.object_types
 		    (id, name, display_name, description, primary_key_property,
-		     icon, color, owner_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		     icon, color, owner_id, plural_display_name, editable,
+		     backing_dataset_id, backing_dataset_rid, pipeline_rid, managed_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		 RETURNING id, name, display_name, description, primary_key_property,
-		           icon, color, owner_id, created_at, updated_at`,
+		           icon, color, owner_id, created_at, updated_at,
+		           plural_display_name, editable, backing_dataset_id,
+		           backing_dataset_rid, pipeline_rid, managed_by`,
 		id, strings.TrimSpace(body.Name), body.DisplayName, body.Description,
 		body.PrimaryKeyProperty, body.Icon, body.Color, ownerID,
+		body.PluralDisplayName, editable, body.BackingDatasetID,
+		body.BackingDatasetRID, body.PipelineRID, body.ManagedBy,
 	)
 	return scanObjectType(row)
 }
@@ -120,14 +134,43 @@ func (r *Repo) UpdateObjectType(ctx context.Context, id uuid.UUID, body *models.
 	if body.Color != nil {
 		color = body.Color
 	}
+	plural := current.PluralDisplayName
+	if body.PluralDisplayName != nil {
+		plural = body.PluralDisplayName
+	}
+	editable := current.Editable
+	if body.Editable != nil {
+		editable = *body.Editable
+	}
+	backingDatasetID := current.BackingDatasetID
+	if body.BackingDatasetID != nil {
+		backingDatasetID = body.BackingDatasetID
+	}
+	backingDatasetRID := current.BackingDatasetRID
+	if body.BackingDatasetRID != nil {
+		backingDatasetRID = body.BackingDatasetRID
+	}
+	pipelineRID := current.PipelineRID
+	if body.PipelineRID != nil {
+		pipelineRID = body.PipelineRID
+	}
+	managedBy := current.ManagedBy
+	if body.ManagedBy != nil {
+		managedBy = body.ManagedBy
+	}
 	row := r.Pool.QueryRow(ctx,
 		`UPDATE ontology_schema.object_types SET
 		    display_name = $2, description = $3, primary_key_property = $4,
-		    icon = $5, color = $6, updated_at = $7
+		    icon = $5, color = $6, updated_at = $7,
+		    plural_display_name = $8, editable = $9, backing_dataset_id = $10,
+		    backing_dataset_rid = $11, pipeline_rid = $12, managed_by = $13
 		  WHERE id = $1
 		  RETURNING id, name, display_name, description, primary_key_property,
-		            icon, color, owner_id, created_at, updated_at`,
+		            icon, color, owner_id, created_at, updated_at,
+		            plural_display_name, editable, backing_dataset_id,
+		            backing_dataset_rid, pipeline_rid, managed_by`,
 		id, dn, desc, pk, icon, color, time.Now().UTC(),
+		plural, editable, backingDatasetID, backingDatasetRID, pipelineRID, managedBy,
 	)
 	return scanObjectType(row)
 }
@@ -146,7 +189,9 @@ func scanObjectType(r rowLikeT) (*models.ObjectType, error) {
 	v := &models.ObjectType{}
 	if err := r.Scan(&v.ID, &v.Name, &v.DisplayName, &v.Description,
 		&v.PrimaryKeyProperty, &v.Icon, &v.Color, &v.OwnerID,
-		&v.CreatedAt, &v.UpdatedAt); err != nil {
+		&v.CreatedAt, &v.UpdatedAt, &v.PluralDisplayName, &v.Editable,
+		&v.BackingDatasetID, &v.BackingDatasetRID, &v.PipelineRID,
+		&v.ManagedBy); err != nil {
 		return nil, err
 	}
 	return v, nil
@@ -239,8 +284,20 @@ func (r *Repo) ListLinkTypes(ctx context.Context, objectTypeID *uuid.UUID) ([]mo
 	return out, rows.Err()
 }
 
+func (r *Repo) GetLinkType(ctx context.Context, id uuid.UUID) (*models.LinkType, error) {
+	row := r.Pool.QueryRow(ctx, `SELECT `+linkTypeColumns+` FROM ontology_schema.link_types WHERE id = $1`, id)
+	lt, err := scanLinkType(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return lt, err
+}
+
 func (r *Repo) CreateLinkType(ctx context.Context, body *models.CreateLinkTypeRequest, ownerID uuid.UUID) (*models.LinkType, error) {
 	id := uuid.New()
+	if body.ID != nil && *body.ID != uuid.Nil {
+		id = *body.ID
+	}
 	dn := body.DisplayName
 	if dn == "" {
 		dn = body.Name
@@ -257,6 +314,35 @@ func (r *Repo) CreateLinkType(ctx context.Context, body *models.CreateLinkTypeRe
 		 RETURNING `+linkTypeColumns,
 		id, body.Name, dn, body.Description, body.SourceTypeID, body.TargetTypeID,
 		card, ownerID, time.Now().UTC())
+	return scanLinkType(row)
+}
+
+func (r *Repo) UpdateLinkType(ctx context.Context, id uuid.UUID, body *models.UpdateLinkTypeRequest) (*models.LinkType, error) {
+	current, err := r.GetLinkType(ctx, id)
+	if err != nil || current == nil {
+		return current, err
+	}
+	displayName := current.DisplayName
+	if body.DisplayName != nil {
+		displayName = *body.DisplayName
+	}
+	description := current.Description
+	if body.Description != nil {
+		description = *body.Description
+	}
+	cardinality := current.Cardinality
+	if body.Cardinality != nil && *body.Cardinality != "" {
+		cardinality = *body.Cardinality
+	}
+	row := r.Pool.QueryRow(ctx,
+		`UPDATE ontology_schema.link_types SET
+		   display_name = $2,
+		   description = $3,
+		   cardinality = $4,
+		   updated_at = $5
+		 WHERE id = $1
+		 RETURNING `+linkTypeColumns,
+		id, displayName, description, cardinality, time.Now().UTC())
 	return scanLinkType(row)
 }
 

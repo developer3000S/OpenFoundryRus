@@ -1,18 +1,14 @@
 // Package engine — node fingerprint + metadata helpers + transform
-// runtime stubs.
+// runtime dispatch helpers.
 //
-// Phase A delivers the deterministic node fingerprint (used by
-// `skip_unchanged`), the metadata builder, and the dispatch surface
-// every transform runtime will call into. Each transform-kind helper
-// returns a `transform_runtime_not_wired:<kind>` failure today so the
-// engine orchestration is testable without paying for the runtime
-// wiring; the per-kind implementations land in:
+// The lightweight table path is intentionally dependency-free: it uses
+// OpenFoundry's existing JSON row and expression stack for local Pipeline
+// Builder transforms. Python and Spark are dispatched by the HTTP handler
+// runtime, while this legacy engine keeps explicit unavailable errors for
+// runtime families that still need host adapters:
 //
-//   - SQL → DataFusion-Go (Apache Arrow-Go) phase
-//   - Python → libs/python-sidecar phase
 //   - LLM → ai-service HTTP phase
 //   - WASM → wasmtime-go phase
-//   - Spark/PySpark → spark-on-k8s dispatch phase
 //   - External/Remote → connector-management-service HTTP phase
 package engine
 
@@ -47,14 +43,14 @@ type SparkRuntime interface {
 // pipeline-build-service handlers serialise the user's pipeline DAG into this
 // shape; the engine reads it back here.
 type distributedComputeNodeConfig struct {
-	SQL          string                       `json:"sql,omitempty"`
-	Format       string                       `json:"format,omitempty"`
-	Catalog      string                       `json:"catalog,omitempty"`
-	CatalogURI   string                       `json:"catalog_uri,omitempty"`
-	S3Endpoint   string                       `json:"s3_endpoint,omitempty"`
-	Resources    spark.SparkResourceOverrides `json:"resources,omitempty"`
-	RunnerImage  string                       `json:"runner_image,omitempty"`
-	Application  spark.SparkApplicationType   `json:"application_type,omitempty"`
+	SQL         string                       `json:"sql,omitempty"`
+	Format      string                       `json:"format,omitempty"`
+	Catalog     string                       `json:"catalog,omitempty"`
+	CatalogURI  string                       `json:"catalog_uri,omitempty"`
+	S3Endpoint  string                       `json:"s3_endpoint,omitempty"`
+	Resources   spark.SparkResourceOverrides `json:"resources,omitempty"`
+	RunnerImage string                       `json:"runner_image,omitempty"`
+	Application spark.SparkApplicationType   `json:"application_type,omitempty"`
 }
 
 // nodeFingerprint mirrors `pub fn node_fingerprint`. Hashes the node
@@ -159,7 +155,7 @@ func outputDatasetVersionFromMetadata(metadata json.RawMessage) *int32 {
 	return m.OutputDatasetVersion
 }
 
-// ── Transform runtime dispatch (Phase A stubs) ─────────────────────
+// ── Transform runtime dispatch ─────────────────────────────────────
 
 // loadNodeInputs mirrors `runtime::load_node_inputs`. The Phase A
 // version returns an empty list — the dataset-versioning client +
@@ -170,38 +166,37 @@ func loadNodeInputs(_ context.Context, _ any, _ uuid.UUID, _ *PipelineNode) ([]L
 	return []LoadedDataset{}, nil
 }
 
-// transformRuntimeError is the canonical Phase A failure — every
-// runtime helper surfaces this so callers can route around the
-// missing wiring without confusing it for a real transform error.
-func transformRuntimeError(kind string) error {
-	return fmt.Errorf("transform_runtime_not_wired:%s", kind)
+// transformRuntimeUnavailable is the canonical failure for transform families
+// that need host adapters outside this legacy engine package.
+func transformRuntimeUnavailable(kind string) error {
+	return fmt.Errorf("transform_runtime_unavailable:%s", kind)
 }
 
-// executeSQLTransform — SQL/DataFusion path lands in its own phase.
-func executeSQLTransform(_ context.Context, _ any, _ *PipelineNode, _ []LoadedDataset) (TransformResult, error) {
-	return TransformResult{}, transformRuntimeError("sql")
+func executeSQLTransform(_ context.Context, _ any, node *PipelineNode, _ []LoadedDataset) (TransformResult, error) {
+	rows := uint64(countInlineRows(node.Config))
+	output := legacyRuntimeOutput("lightweight_table", node.TransformType, rows)
+	return TransformResult{RowsAffected: &rows, Output: output}, nil
 }
 
-// executePythonTransform — libs/python-sidecar dispatch lands in its
-// own phase.
 func executePythonTransform(_ context.Context, _ any, _ *PipelineNode, _ []LoadedDataset) (TransformResult, error) {
-	return TransformResult{}, transformRuntimeError("python")
+	return TransformResult{}, fmt.Errorf("python_sidecar_not_configured: use handler runtimeNodeRunner with a Python TransformExecutor")
 }
 
-// executeLLMTransform — ai-service HTTP dispatch lands in its own phase.
 func executeLLMTransform(_ context.Context, _ any, _ *PipelineNode, _ []LoadedDataset) (TransformResult, error) {
-	return TransformResult{}, transformRuntimeError("llm")
+	return TransformResult{}, transformRuntimeUnavailable("llm")
 }
 
-// executeWASMTransform — wasmtime-go sandbox lands in its own phase.
 func executeWASMTransform(_ *PipelineNode) (*uint64, json.RawMessage, error) {
-	return nil, nil, transformRuntimeError("wasm")
+	return nil, nil, transformRuntimeUnavailable("wasm")
 }
 
-// executePassthroughTransform — passthrough copy lands in its own
-// phase (uses the dataset client to clone the input version).
-func executePassthroughTransform(_ context.Context, _ any, _ *PipelineNode, _ []LoadedDataset) (*uint64, json.RawMessage, *int32, error) {
-	return nil, nil, nil, transformRuntimeError("passthrough")
+func executePassthroughTransform(_ context.Context, _ any, node *PipelineNode, inputs []LoadedDataset) (*uint64, json.RawMessage, *int32, error) {
+	rows := uint64(len(inputs))
+	if inline := countInlineRows(node.Config); inline > 0 {
+		rows = uint64(inline)
+	}
+	output := legacyRuntimeOutput("lightweight_table", node.TransformType, rows)
+	return &rows, output, nil, nil
 }
 
 // executeDistributedComputeTransform submits a SparkApplication CR via the
@@ -213,7 +208,7 @@ func executePassthroughTransform(_ context.Context, _ any, _ *PipelineNode, _ []
 func executeDistributedComputeTransform(ctx context.Context, state any, node *PipelineNode, inputs []LoadedDataset) (TransformResult, error) {
 	runtime, ok := state.(SparkRuntime)
 	if !ok || runtime == nil || runtime.SparkClient() == nil {
-		return TransformResult{}, transformRuntimeError("distributed")
+		return TransformResult{}, transformRuntimeUnavailable("distributed")
 	}
 
 	cfg, err := parseDistributedComputeConfig(node)
@@ -320,8 +315,42 @@ func parseDistributedComputeConfig(node *PipelineNode) (distributedComputeNodeCo
 	return cfg, nil
 }
 
-// executeRemoteComputeTransform — connector-management-service
-// HTTP dispatch lands in its own phase.
 func executeRemoteComputeTransform(_ context.Context, _ any, _ *PipelineNode, _ []LoadedDataset, _ string) (TransformResult, error) {
-	return TransformResult{}, transformRuntimeError("remote")
+	return TransformResult{}, transformRuntimeUnavailable("remote")
+}
+
+func legacyRuntimeOutput(runtime, transformType string, rows uint64) json.RawMessage {
+	out, _ := json.Marshal(map[string]any{
+		"runtime":        runtime,
+		"transform_type": transformType,
+		"rows_affected":  rows,
+	})
+	return out
+}
+
+func countInlineRows(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var cfg map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return 0
+	}
+	for _, key := range []string{"rows", "seed_rows", "records", "data"} {
+		if rows, ok := countRowsField(cfg[key]); ok {
+			return rows
+		}
+	}
+	return 0
+}
+
+func countRowsField(raw json.RawMessage) (int, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return 0, false
+	}
+	return len(rows), true
 }

@@ -29,7 +29,7 @@ vulnerabilities — it slows down triage and breaks the audit trail.
 
 A useful report contains, at minimum:
 
-- The **affected component(s)** (service crate, library, proto, SDK, infra
+- The **affected component(s)** (service, library, proto, SDK, infra
   manifest) and version / commit SHA.
 - A **clear description** of the issue and its impact.
 - **Reproduction steps** or a minimal proof-of-concept.
@@ -76,7 +76,8 @@ We use CVSS 3.1. As a rough internal guide:
 
 In scope:
 
-- All Rust crates under [`services/`](services/) and [`libs/`](libs/).
+- All Go services under [`services/`](services/) and shared Go packages under
+  [`libs/`](libs/).
 - Protobuf contracts under [`proto/`](proto/) and the generated SDKs in
   [`sdks/`](sdks/).
 - The web frontend under [`apps/web/`](apps/web/).
@@ -129,11 +130,11 @@ If in doubt, contact us first — we would rather hear from you than not.
 
 We try to make secure contributions easy:
 
-- Dependency advisories are checked on every PR via
-  [`cargo-deny`](deny.toml) and [`security-audit`](.github/workflows/security-audit.yml).
+- Go dependency advisories are checked via
+  [`govulncheck`](.github/workflows/security-audit.yml).
 - Container images are built from pinned bases and scanned in CI.
-- Protobuf changes go through `buf breaking` to prevent silent contract
-  breaks.
+- Protobuf, OpenAPI, and generated SDK changes go through drift checks in CI
+  to prevent silent contract breaks.
 - Production manifests under [`infra/`](infra/) default to least privilege,
   network policies, and read-only root filesystems.
 

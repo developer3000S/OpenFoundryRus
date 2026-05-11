@@ -1,0 +1,68 @@
+{
+  "diagnostics": [
+    {
+      "severity": "error",
+      "code": "incompatible_union_column_types",
+      "message": "union column \"distance_miles\" has incompatible types DOUBLE and STRING",
+      "column": "distance_miles",
+      "input_index": 2,
+      "input_node_id": "efforts",
+      "expected": "DOUBLE",
+      "actual": "STRING"
+    },
+    {
+      "severity": "error",
+      "code": "missing_union_column",
+      "message": "union input 2 is missing column \"trail_id\"",
+      "column": "trail_id",
+      "input_index": 2,
+      "input_node_id": "efforts",
+      "expected": "INTEGER"
+    },
+    {
+      "severity": "error",
+      "code": "missing_union_column",
+      "message": "union input 2 is missing column \"trail_name\"",
+      "column": "trail_name",
+      "input_index": 2,
+      "input_node_id": "efforts",
+      "expected": "STRING"
+    },
+    {
+      "severity": "warning",
+      "code": "extra_union_column",
+      "message": "union input 2 has extra column \"effort_score\"",
+      "column": "effort_score",
+      "input_index": 2,
+      "input_node_id": "efforts",
+      "actual": "INTEGER"
+    }
+  ],
+  "input_node_ids": [
+    "trails",
+    "efforts"
+  ],
+  "output_schema": [
+    {
+      "name": "distance_miles",
+      "field_type": "DOUBLE",
+      "nullable": false
+    },
+    {
+      "name": "trail_code",
+      "field_type": "STRING",
+      "nullable": false
+    },
+    {
+      "name": "trail_id",
+      "field_type": "INTEGER",
+      "nullable": false
+    },
+    {
+      "name": "trail_name",
+      "field_type": "STRING",
+      "nullable": false
+    }
+  ],
+  "union_type": "by_name"
+}

@@ -1,7 +1,7 @@
 # `ontology-actions-service` (Go)
 
 Sole runtime owner of the consolidated ontology bounded contexts per
-[ADR-0030](../../../docs/architecture/adr/ADR-0030-service-consolidation-30-targets.md):
+[ADR-0030](../../docs/architecture/adr/ADR-0030-service-consolidation-30-targets.md):
 
 - **actions** — `/api/v1/ontology/actions/*` and inline-edit
 - **funnel** — `/api/v1/ontology/funnel/*` and `/storage/insights`
@@ -9,6 +9,15 @@ Sole runtime owner of the consolidated ontology bounded contexts per
   "Functions on objects → Media" runtime ([`internal/mediafunctions`](internal/mediafunctions/media.go))
 - **rules** — `/api/v1/ontology/rules/*`, `/types/{id}/rules`,
   `/objects/{id}/rule-runs`
+
+## Compatibility naming
+
+Ontology action/function public payloads should follow the frozen terminology in
+[`docs/reference/foundry-compatibility-glossary.md`](../../docs/reference/foundry-compatibility-glossary.md):
+use `action_type` for reusable action definitions, `action_execution` for
+submitted runs, `function_package` for versioned function definitions,
+`function_invocation` for one execution, and `object_set` for reusable or
+evaluated ontology object selections.
 
 ## Port status
 

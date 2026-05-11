@@ -39,7 +39,7 @@ func (f *fakeTransformClient) Execute(ctx context.Context, source string, config
 
 func TestExecutePythonTransformOK(t *testing.T) {
 	client := &fakeTransformClient{result: &pythonsidecar.PipelineTransformResult{
-		OutputJSON:     []byte(`{"stdout":"hello\n","result":"done","sample_rows":[{"a":1}]}`),
+		OutputJSON:     []byte(`{"stdout":"hello\n","stderr":"warn\n","result":"done","sample_rows":[{"a":1}]}`),
 		ResultRowsJSON: []byte(`[{"a":1}]`),
 		Stdout:         "hello\n",
 	}}
@@ -56,7 +56,7 @@ func TestExecutePythonTransformOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecutePythonTransform: %v", err)
 	}
-	if got.Stdout != "hello\n" || got.Stderr != "" {
+	if got.Stdout != "hello\n" || got.Stderr != "warn\n" {
 		t.Fatalf("log mapping drift: stdout=%q stderr=%q", got.Stdout, got.Stderr)
 	}
 	if got.RowsAffected == nil || *got.RowsAffected != 1 {

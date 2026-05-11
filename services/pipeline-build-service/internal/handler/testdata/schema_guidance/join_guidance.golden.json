@@ -1,0 +1,34 @@
+{
+  "candidate_keys": [
+    {
+      "left_column": "trail_code",
+      "right_column": "trail_code",
+      "left_type": "STRING",
+      "right_type": "STRING",
+      "compatible": true,
+      "score": 125,
+      "reason": "same column name"
+    },
+    {
+      "left_column": "trail_id",
+      "right_column": "trail_id",
+      "left_type": "INTEGER",
+      "right_type": "STRING",
+      "compatible": false,
+      "score": 100,
+      "reason": "same column name"
+    }
+  ],
+  "match_diagnostics": [
+    {
+      "severity": "error",
+      "code": "incompatible_join_key_types",
+      "message": "join key \"trail_id\" (INTEGER) is not compatible with \"trail_id\" (STRING)",
+      "column": "trail_id",
+      "left_column": "trail_id",
+      "right_column": "trail_id",
+      "left_type": "INTEGER",
+      "right_type": "STRING"
+    }
+  ]
+}

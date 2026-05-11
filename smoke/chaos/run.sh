@@ -5,8 +5,8 @@
 # Para cada script de chaos en este directorio:
 #   1. Lo ejecuta (mata 1 pod, espera health verde).
 #   2. A continuación corre los scenarios críticos p2..p6 con el runner
-#      existente `cargo run -p of-cli -- smoke run --scenario <s> --output <o>`
-#      (ver `justfile:154-172` y `infra/scripts/smoke.sh`).
+#      Go `tools/of-cli`:
+#      `go run ./tools/of-cli -- smoke run --scenario <s> --output <o>`.
 #
 # Falla si CUALQUIER scenario falla bajo CUALQUIER chaos: ese es el
 # contrato no-SPOF del data plane.
@@ -19,7 +19,7 @@ SCENARIOS_DIR="$ROOT_DIR/smoke/scenarios"
 RESULTS_DIR="${CHAOS_RESULTS_DIR:-$ROOT_DIR/smoke/results/chaos}"
 
 # Permite override; por defecto usa el binario compilable in-repo.
-: "${OF_CLI:=cargo run -p of-cli --}"
+: "${OF_CLI:=go run ./tools/of-cli --}"
 
 CHAOS_SCRIPTS=(
   "kill-one-mon.sh"

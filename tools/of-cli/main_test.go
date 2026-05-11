@@ -21,6 +21,16 @@ func TestParseDocsGenerateOpenAPIFlags(t *testing.T) {
 	}
 }
 
+func TestParseAllowsGoRunSeparator(t *testing.T) {
+	cfg, err := parseArgs([]string{"--", "docs", "validate-openapi", "--proto-dir", "../proto", "--expected", "openapi.json"}, bytes.NewBuffer(nil))
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if cfg.kind != cmdValidateOpenAPI || cfg.protoDir != "../proto" || cfg.expected != "openapi.json" {
+		t.Fatalf("unexpected config: %+v", cfg)
+	}
+}
+
 func TestParseScenarioAndMockProviderFlags(t *testing.T) {
 	smokeCfg, err := parseArgs([]string{"smoke", "run", "--scenario", "smoke.json", "--output", "report.json"}, bytes.NewBuffer(nil))
 	if err != nil {
@@ -55,7 +65,7 @@ func TestGenerateOpenAPIFromProto(t *testing.T) {
 		t.Fatal(err)
 	}
 	proto := `syntax = "proto3";
-package openfoundry.test.v1;
+package open_foundry.test;
 message GetWidgetRequest { string id = 1; }
 message WidgetResponse { string id = 1; }
 service WidgetService { rpc GetWidget(GetWidgetRequest) returns (WidgetResponse); }
@@ -75,7 +85,7 @@ service WidgetService { rpc GetWidget(GetWidgetRequest) returns (WidgetResponse)
 	if err := json.Unmarshal(data, &spec); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := spec.Paths["/openfoundry/test/v1/widget-service/get-widget"]["get"]; !ok {
+	if _, ok := spec.Paths["/api/v1/test/get-widget"]["get"]; !ok {
 		t.Fatalf("generated spec missing expected GET path: %+v", spec.Paths)
 	}
 }

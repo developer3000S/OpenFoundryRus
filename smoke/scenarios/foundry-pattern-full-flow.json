@@ -1,5 +1,5 @@
 {
-  "_comment_": "FASE 11 / Tarea 11.1 — end-to-end smoke that exercises the four Foundry-pattern surfaces (Automate, Saga, Approval, Pipeline) on a live cluster. Designed to be runnable via `cargo run -p of-cli -- smoke run --scenario smoke/scenarios/foundry-pattern-full-flow.json --output smoke/results/foundry-pattern-full-flow.json` against a `helmfile -e dev apply` deployment. Audit-log assertions assume Debezium has connected and the EventRouter SMT is wired (FASE 2 / Tarea 2.4).",
+  "_comment_": "FASE 11 / Tarea 11.1 — end-to-end smoke that exercises the four Foundry-pattern surfaces (Automate, Saga, Approval, Pipeline) on a live cluster. Designed to be runnable via `go run ./tools/of-cli -- smoke run --scenario smoke/scenarios/foundry-pattern-full-flow.json --output smoke/results/foundry-pattern-full-flow.json` against a live deployment. Audit-log assertions assume Debezium has connected and the EventRouter SMT is wired (FASE 2 / Tarea 2.4).",
   "base_url": "http://127.0.0.1:8080",
   "default_headers": {
     "content-type": "application/json"

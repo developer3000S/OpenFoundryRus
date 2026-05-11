@@ -19,9 +19,15 @@ type Config struct {
 	JWTSecret   string
 	DataDir     string
 
-	DatasetServiceURL  string
-	WorkflowServiceURL string
-	AIServiceURL       string
+	DatasetServiceURL               string
+	DatasetServiceBearer            string
+	OntologyDefinitionServiceURL    string
+	OntologyDefinitionServiceBearer string
+	ObjectDatabaseServiceURL        string
+	ObjectDatabaseServiceBearer     string
+	WorkflowServiceURL              string
+	AIServiceURL                    string
+	AIServiceBearer                 string
 
 	StorageBackend   string
 	StorageBucket    string
@@ -60,8 +66,14 @@ func FromEnv() (*Config, error) {
 	c.JWTSecret = os.Getenv("JWT_SECRET")
 	c.DataDir = defaultStr(os.Getenv("DATA_DIR"), "/var/lib/openfoundry/pipeline-build")
 	c.DatasetServiceURL = defaultStr(os.Getenv("DATASET_SERVICE_URL"), "http://localhost:50079")
+	c.DatasetServiceBearer = os.Getenv("DATASET_SERVICE_BEARER")
+	c.OntologyDefinitionServiceURL = defaultStr(os.Getenv("ONTOLOGY_DEFINITION_SERVICE_URL"), "http://localhost:50103")
+	c.OntologyDefinitionServiceBearer = os.Getenv("ONTOLOGY_DEFINITION_SERVICE_BEARER")
+	c.ObjectDatabaseServiceURL = defaultStr(os.Getenv("OBJECT_DATABASE_SERVICE_URL"), "http://localhost:50104")
+	c.ObjectDatabaseServiceBearer = os.Getenv("OBJECT_DATABASE_SERVICE_BEARER")
 	c.WorkflowServiceURL = defaultStr(os.Getenv("WORKFLOW_SERVICE_URL"), "http://localhost:50080")
 	c.AIServiceURL = defaultStr(os.Getenv("AI_SERVICE_URL"), "http://localhost:50127")
+	c.AIServiceBearer = os.Getenv("AI_SERVICE_BEARER")
 	c.StorageBackend = defaultStr(os.Getenv("STORAGE_BACKEND"), "local")
 	c.StorageBucket = os.Getenv("STORAGE_BUCKET")
 	c.S3Endpoint = os.Getenv("S3_ENDPOINT")

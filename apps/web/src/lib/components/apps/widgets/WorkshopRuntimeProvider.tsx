@@ -26,6 +26,8 @@ import {
   type RuntimeApi,
   type WorkshopVariable,
 } from '@/routes/apps/WorkshopEditorPage';
+import type { WorkshopMapFeatureCollection } from './workshopMap';
+import { createWorkshopVariableEngine, type WorkshopRuntimeFilterMetadata } from './workshopVariables';
 
 import { WorkshopDataContext, type WorkshopDataContextValue } from './workshop-context';
 
@@ -69,7 +71,12 @@ export function WorkshopRuntimeProvider({
   }, []);
 
   const [activeObjects, setActiveObjects] = useState<Record<string, ObjectInstance | null>>({});
+  const [selectedObjectSets, setSelectedObjectSets] = useState<Record<string, ObjectInstance[]>>({});
+  const [shapeOutputs, setShapeOutputs] = useState<Record<string, WorkshopMapFeatureCollection | null>>({});
   const [filterValues, setFilterValues] = useState<Record<string, FilterRuntimeValue>>({});
+  const [filterMetadata, setFilterMetadata] = useState<Record<string, WorkshopRuntimeFilterMetadata>>({});
+  const [primitiveValues, setPrimitiveValues] = useState<Record<string, unknown>>({});
+  const [runtimeParameters, setRuntimeParametersState] = useState<Record<string, string>>({});
   const [refreshKey, setRefreshKey] = useState(0);
   const [actionModal, setActionModal] = useState<{ button: ButtonGroupButton } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -77,24 +84,65 @@ export function WorkshopRuntimeProvider({
   const setActiveObject = useCallback((variableId: string, object: ObjectInstance | null) => {
     setActiveObjects((current) => ({ ...current, [variableId]: object }));
   }, []);
-  const setFilterValue = useCallback((filterId: string, value: FilterRuntimeValue) => {
+  const setSelectedObjectSet = useCallback((variableId: string, objects: ObjectInstance[]) => {
+    setSelectedObjectSets((current) => {
+      const existing = current[variableId] ?? [];
+      if (sameObjectSelection(existing, objects)) return current;
+      return { ...current, [variableId]: objects };
+    });
+  }, []);
+  const setShapeOutput = useCallback((variableId: string, shape: WorkshopMapFeatureCollection | null) => {
+    setShapeOutputs((current) => {
+      if (sameShapeOutput(current[variableId] ?? null, shape)) return current;
+      return { ...current, [variableId]: shape };
+    });
+  }, []);
+  const setFilterValue = useCallback((filterId: string, value: FilterRuntimeValue, metadata?: WorkshopRuntimeFilterMetadata) => {
     setFilterValues((current) => ({ ...current, [filterId]: value }));
+    if (metadata) {
+      setFilterMetadata((current) => ({ ...current, [filterId]: { ...(current[filterId] ?? {}), ...metadata } }));
+    }
+  }, []);
+  const setPrimitiveValue = useCallback((variableId: string, value: unknown) => {
+    setPrimitiveValues((current) => (Object.is(current[variableId], value) ? current : { ...current, [variableId]: value }));
+  }, []);
+  const setRuntimeParameters = useCallback((parameters: Record<string, string>) => {
+    setRuntimeParametersState((current) => (sameStringRecord(current, parameters) ? current : { ...parameters }));
   }, []);
   const onButtonClick = useCallback((button: ButtonGroupButton) => {
     if (button.on_click_kind === 'action' && button.action_type_id) {
       setActionModal({ button });
     }
   }, []);
+  const variableEngine = useMemo(() => createWorkshopVariableEngine(variables, {
+    activeObjects,
+    selectedObjectSets,
+    shapeOutputs,
+    filterValues,
+    filterMetadata,
+    primitiveValues,
+    runtimeParameters,
+  }), [activeObjects, filterMetadata, filterValues, primitiveValues, runtimeParameters, selectedObjectSets, shapeOutputs, variables]);
 
   const runtime = useMemo<RuntimeApi>(() => ({
     preview: true,
     activeObjects,
+    selectedObjectSets,
+    shapeOutputs,
     filterValues,
+    filterMetadata,
+    primitiveValues,
+    runtimeParameters,
+    variableEngine,
     refreshKey,
     setActiveObject,
+    setSelectedObjectSet,
+    setShapeOutput,
     setFilterValue,
+    setPrimitiveValue,
+    setRuntimeParameters,
     onButtonClick,
-  }), [activeObjects, filterValues, refreshKey, setActiveObject, setFilterValue, onButtonClick]);
+  }), [activeObjects, filterMetadata, filterValues, primitiveValues, refreshKey, runtimeParameters, selectedObjectSets, setActiveObject, setFilterValue, setPrimitiveValue, setRuntimeParameters, setSelectedObjectSet, setShapeOutput, shapeOutputs, variableEngine, onButtonClick]);
 
   const data = useMemo<WorkshopDataContextValue>(
     () => ({ variables, objectTypes }),
@@ -110,6 +158,7 @@ export function WorkshopRuntimeProvider({
             button={actionModal.button}
             variables={variables}
             activeObjects={activeObjects}
+            selectedObjectSets={selectedObjectSets}
             objectTypes={objectTypes}
             onClose={() => setActionModal(null)}
             onSuccess={() => {
@@ -154,4 +203,22 @@ export function WorkshopRuntimeProvider({
       </WorkshopDataContext.Provider>
     </WorkshopRuntimeContext.Provider>
   );
+}
+
+function sameObjectSelection(left: ObjectInstance[], right: ObjectInstance[]) {
+  if (left.length !== right.length) return false;
+  return left.every((entry, index) => entry.id === right[index]?.id);
+}
+
+function sameShapeOutput(left: WorkshopMapFeatureCollection | null, right: WorkshopMapFeatureCollection | null) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sameStringRecord(left: Record<string, string>, right: Record<string, string>) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
 }

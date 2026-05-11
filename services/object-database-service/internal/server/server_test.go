@@ -165,4 +165,22 @@ func TestListByOwnerAndMarkingAndLinks(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp2.Body).Decode(&byMark))
 	items2, _ := byMark["items"].([]any)
 	assert.Len(t, items2, 1)
+
+	linkBody := `{"from":"obj-1","to":"obj-2","payload":{"kind":"primary"},"created_at_ms":3}`
+	linkReq, _ := http.NewRequest(http.MethodPost,
+		srv.URL+"/api/v1/object-database/links/tenant-a/related_to", strings.NewReader(linkBody))
+	linkResp, err := http.DefaultClient.Do(linkReq)
+	require.NoError(t, err)
+	defer linkResp.Body.Close()
+	assert.Equal(t, http.StatusCreated, linkResp.StatusCode)
+
+	outgoing, err := http.Get(srv.URL + "/api/v1/object-database/links/tenant-a/related_to/outgoing/obj-1?size=10")
+	require.NoError(t, err)
+	defer outgoing.Body.Close()
+	assert.Equal(t, http.StatusOK, outgoing.StatusCode)
+	var links map[string]any
+	require.NoError(t, json.NewDecoder(outgoing.Body).Decode(&links))
+	linkItems, _ := links["items"].([]any)
+	assert.Len(t, linkItems, 1)
+	assert.Equal(t, "obj-2", linkItems[0].(map[string]any)["to"])
 }

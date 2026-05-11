@@ -50,6 +50,13 @@ export interface DropColumnsBlock {
   columns: string[];
 }
 
+export interface SelectColumnsBlock {
+  id: string;
+  kind: 'select';
+  applied: boolean;
+  columns: string[];
+}
+
 export interface RenameColumnsBlock {
   id: string;
   kind: 'rename';
@@ -64,12 +71,26 @@ export interface NormalizeColumnsBlock {
   remove_special_characters: boolean;
 }
 
+export interface HaversineDistanceBlock {
+  id: string;
+  kind: 'haversine_distance';
+  applied: boolean;
+  start_lat_column: string;
+  start_lon_column: string;
+  end_lat_column: string;
+  end_lon_column: string;
+  unit: 'miles' | 'km' | 'meters';
+  target_column: string;
+}
+
 export type TransformBlock =
   | CastBlock
   | FilterBlock
+  | SelectColumnsBlock
   | DropColumnsBlock
   | RenameColumnsBlock
-  | NormalizeColumnsBlock;
+  | NormalizeColumnsBlock
+  | HaversineDistanceBlock;
 
 export interface TransformStack {
   source_dataset_id: string;
@@ -122,6 +143,10 @@ export function newDropColumnsBlock(): DropColumnsBlock {
   return { id: newBlockId('drop'), kind: 'drop', applied: false, columns: [] };
 }
 
+export function newSelectColumnsBlock(): SelectColumnsBlock {
+  return { id: newBlockId('select'), kind: 'select', applied: false, columns: [] };
+}
+
 export function newRenameColumnsBlock(): RenameColumnsBlock {
   return {
     id: newBlockId('rename'),
@@ -140,18 +165,36 @@ export function newNormalizeColumnsBlock(): NormalizeColumnsBlock {
   };
 }
 
+export function newHaversineDistanceBlock(): HaversineDistanceBlock {
+  return {
+    id: newBlockId('haversine_distance'),
+    kind: 'haversine_distance',
+    applied: false,
+    start_lat_column: '',
+    start_lon_column: '',
+    end_lat_column: '',
+    end_lon_column: '',
+    unit: 'miles',
+    target_column: 'distance_miles',
+  };
+}
+
 export function blockTitle(block: TransformBlock): string {
   switch (block.kind) {
     case 'cast':
       return 'Cast to Timestamp';
     case 'filter':
       return 'Filter';
+    case 'select':
+      return 'Select columns';
     case 'drop':
       return 'Drop columns';
     case 'rename':
       return 'Rename columns';
     case 'normalize':
       return 'Normalize column names';
+    case 'haversine_distance':
+      return 'Haversine distance';
   }
 }
 
@@ -161,12 +204,16 @@ export function blockSectionLabel(kind: TransformBlock['kind']): string {
       return 'Cast to Timestamp';
     case 'filter':
       return 'Filter';
+    case 'select':
+      return 'Select columns';
     case 'drop':
       return 'Drop columns';
     case 'rename':
       return 'Rename columns';
     case 'normalize':
       return 'Normalize column names';
+    case 'haversine_distance':
+      return 'Haversine distance';
   }
 }
 
@@ -256,6 +303,14 @@ export function composeTransformStackSql(stack: TransformStack): string {
         previous = cte;
         return;
       }
+      case 'select': {
+        if (block.columns.length === 0) break;
+        const projection = block.columns.map(quoteIdent).join(', ');
+        sql = `SELECT ${projection} FROM ${previous}`;
+        ctes.push(`${cte} AS (${sql})`);
+        previous = cte;
+        return;
+      }
       case 'drop': {
         if (block.columns.length === 0) break;
         const exceptList = block.columns.map(quoteIdent).join(', ');
@@ -280,6 +335,13 @@ export function composeTransformStackSql(stack: TransformStack): string {
         // Normalize is metadata-only at this layer — runtime renames columns
         // when materialising. Carry it as a comment for the audit trail.
         sql = `SELECT * FROM ${previous} /* normalize_column_names${block.remove_special_characters ? '_strict' : ''} */`;
+        ctes.push(`${cte} AS (${sql})`);
+        previous = cte;
+        return;
+      }
+      case 'haversine_distance': {
+        if (!block.start_lat_column || !block.start_lon_column || !block.end_lat_column || !block.end_lon_column || !block.target_column) break;
+        sql = `SELECT *, haversine_distance(${quoteIdent(block.start_lat_column)}, ${quoteIdent(block.start_lon_column)}, ${quoteIdent(block.end_lat_column)}, ${quoteIdent(block.end_lon_column)}, '${block.unit}') AS ${quoteIdent(block.target_column)} FROM ${previous}`;
         ctes.push(`${cte} AS (${sql})`);
         previous = cte;
         return;

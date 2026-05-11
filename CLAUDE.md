@@ -44,10 +44,11 @@ Run from repo root. The Makefile is authoritative. Ignore `justfile`.
 
 ```sh
 make tools             # one-off: install buf, golangci-lint, sqlc, gofumpt to ./bin
-make ci                # tidy + vet + lint + test  (the gate to pass before pushing)
+make ci                # tidy + vet + lint + contract drift checks + test
 make test              # unit tests, -race + coverage, fast (no Docker)
 make test-integration  # integration (testcontainers, NEEDS DOCKER)
-make gen               # regen proto Go + sqlc (run after touching proto/ or *.sql)
+make gen               # regen proto Go + sqlc + OpenAPI + SDKs
+make contracts-check   # verify OpenAPI + TypeScript/Python/Java SDK drift
 make build-services    # one binary per service into ./bin/
 ```
 

@@ -69,14 +69,27 @@ func buildRouter(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers
 	// lib/api/apps.ts. Public read by slug stays outside the auth group so
 	// embedded / portal consumers can render published apps anonymously.
 	r.Get("/api/v1/apps/public/{slug}", h.GetPublishedApp)
+	r.Get("/api/v1/apps/public/{slug}/embed", h.GetAppEmbedInfo)
+	r.Route("/api/v1/widgets", func(api chi.Router) {
+		api.Use(authmw.Middleware(jwt))
+		api.Get("/catalog", h.ListWidgetCatalog)
+	})
 	r.Route("/api/v1/apps", func(api chi.Router) {
 		api.Use(authmw.Middleware(jwt))
 
+		api.Get("/templates", h.ListAppTemplates)
+		api.Post("/from-template", h.CreateAppFromTemplate)
 		api.Get("/", h.ListApps)
 		api.Post("/", h.CreateApp)
 		api.Get("/{id}", h.GetApp)
 		api.Patch("/{id}", h.UpdateApp)
 		api.Delete("/{id}", h.DeleteApp)
+		api.Get("/{id}/preview", h.PreviewApp)
+		api.Post("/{id}/pages", h.AddPage)
+		api.Patch("/{id}/pages/{pageID}", h.UpdatePage)
+		api.Delete("/{id}/pages/{pageID}", h.DeletePage)
+		api.Get("/{id}/slate-package", h.GetSlatePackage)
+		api.Post("/{id}/slate-package", h.ImportSlatePackage)
 		api.Get("/{id}/versions", h.ListAppVersions)
 		api.Post("/{id}/publish", h.PublishApp)
 	})

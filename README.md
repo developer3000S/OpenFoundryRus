@@ -61,10 +61,11 @@ provided as a thin shim over `make` for muscle memory.
 
 ```sh
 make tools             # one-off: install buf, golangci-lint, sqlc, gofumpt to ./bin
-make ci                # tidy + vet + lint + test (full local CI gate)
+make ci                # tidy + vet + lint + contract drift checks + test
 make test              # fast unit tests (-race + coverage, no Docker)
 make test-integration  # tests behind //go:build integration (needs Docker)
-make gen               # regen proto Go + sqlc
+make gen               # regen proto Go + sqlc + OpenAPI + SDKs
+make contracts-check   # verify OpenAPI + TypeScript/Python/Java SDK drift
 make build             # compile every package
 make build-services    # one binary per service into ./bin/
 make lint              # golangci-lint

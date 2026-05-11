@@ -73,3 +73,51 @@ func TestExecutePythonTransformWithRealSidecar(t *testing.T) {
 		t.Fatalf("expected pipeline integration error, got %v", err)
 	}
 }
+
+func TestExecutePythonTransformParsesStravaAndGPXWithRealSidecar(t *testing.T) {
+	mgr := startPipelineSidecar(t)
+	exec := NewSidecarTransformExecutor(SidecarTransform{Mgr: mgr})
+
+	source := `
+import json
+import sys
+import xml.etree.ElementTree as ET
+
+activity = config["strava_activity"]
+root = ET.fromstring(config["gpx"])
+points = root.findall(".//{*}trkpt")
+elevations = [float(pt.find("{*}ele").text) for pt in points if pt.find("{*}ele") is not None]
+gain_m = sum(max(0, elevations[i] - elevations[i - 1]) for i in range(1, len(elevations)))
+print("parsed trail demo")
+print("gpx points=%d" % len(points), file=sys.stderr)
+result_rows = [{
+    "activity_id": str(activity["id"]),
+    "distance_miles": round(float(activity["distance"]) / 1609.344, 3),
+    "elevation_gain_ft": round(gain_m * 3.28084, 1),
+    "gpx_points": len(points),
+}]
+rows_affected = len(result_rows)
+result = {"status": "ok", "kind": "trail_parse"}
+`
+	got, err := exec.ExecutePythonTransform(context.Background(), TransformRequest{
+		Source: source,
+		ConfigJSON: []byte(`{
+			"strava_activity":{"id":987,"distance":8046.72},
+			"gpx":"<gpx><trk><trkseg><trkpt lat=\"40.0\" lon=\"-105.0\"><ele>1600</ele></trkpt><trkpt lat=\"40.1\" lon=\"-105.1\"><ele>1610</ele></trkpt><trkpt lat=\"40.2\" lon=\"-105.2\"><ele>1605</ele></trkpt></trkseg></trk></gpx>"
+		}`),
+		PreparedInputsJSON: []byte(`[]`),
+		TimeoutSeconds:     10,
+	})
+	if err != nil {
+		t.Fatalf("ExecutePythonTransform trail parse: %v", err)
+	}
+	if got.Stdout != "parsed trail demo\n" || !strings.Contains(got.Stderr, "gpx points=3") {
+		t.Fatalf("stdout/stderr drift: stdout=%q stderr=%q", got.Stdout, got.Stderr)
+	}
+	if got.RowsAffected == nil || *got.RowsAffected != 1 {
+		t.Fatalf("rows_affected = %v, want 1", got.RowsAffected)
+	}
+	if len(got.ResultRows) != 1 || !strings.Contains(string(got.ResultRows[0]), `"distance_miles":5`) || !strings.Contains(string(got.ResultRows[0]), `"gpx_points":3`) {
+		t.Fatalf("trail result rows drift: %s", got.ResultRows)
+	}
+}

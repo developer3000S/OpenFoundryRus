@@ -43,7 +43,7 @@ import { CreateAppModal } from '@/lib/components/apps/CreateAppModal';
 import { ImportSlateModal } from '@/lib/components/apps/ImportSlateModal';
 import { PublishAppModal, type PublishAppDraft } from '@/lib/components/apps/PublishAppModal';
 import { ThemePanel } from '@/lib/components/apps/ThemePanel';
-import { WidgetCatalog, getDefaultWidgetCatalog } from '@/lib/components/apps/WidgetCatalog';
+import { WidgetCatalog, getWidgetCatalogItems } from '@/lib/components/apps/WidgetCatalog';
 import { WorkshopToolbar } from '@/lib/components/apps/WorkshopToolbar';
 import { JsonEditor } from '@/lib/components/JsonEditor';
 import { ConfirmDialog } from '@/lib/components/ConfirmDialog';
@@ -477,7 +477,7 @@ export function AppsPage() {
 
   // ---------- pages mutations -------------------------------------------------
   const { pages } = useMemo(() => parsePages(draft.pages_json), [draft.pages_json]);
-  const catalog = useMemo(() => getDefaultWidgetCatalog(widgetCatalog), [widgetCatalog]);
+  const catalog = useMemo(() => getWidgetCatalogItems(widgetCatalog), [widgetCatalog]);
   const selectedPage = pages.find((page) => page.id === selectedPageId) ?? pages[0] ?? null;
   const selectedWidget = selectedPage?.widgets.find((widget) => widget.id === selectedWidgetId) ?? null;
 

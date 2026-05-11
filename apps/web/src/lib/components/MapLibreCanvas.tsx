@@ -21,7 +21,14 @@ interface MapLibreCanvasProps {
   zoom?: number;
   height?: number | string;
   className?: string;
+  preserveDrawingBuffer?: boolean;
   onMapLoad?: (map: MapLibreMap) => void;
+}
+
+declare global {
+  interface Window {
+    __openFoundryMapLibreMaps?: MapLibreMap[];
+  }
 }
 
 export function MapLibreCanvas({
@@ -30,6 +37,7 @@ export function MapLibreCanvas({
   zoom = 3.3,
   height = 360,
   className,
+  preserveDrawingBuffer = false,
   onMapLoad,
 }: MapLibreCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -53,10 +61,14 @@ export function MapLibreCanvas({
         center,
         zoom,
         attributionControl: false,
+        canvasContextAttributes: preserveDrawingBuffer ? { preserveDrawingBuffer: true } : undefined,
       });
 
       map.addControl(new maplibre.NavigationControl({ showCompass: false }), 'top-right');
       mapRef.current = map;
+      if (import.meta.env.DEV) {
+        window.__openFoundryMapLibreMaps = [...(window.__openFoundryMapLibreMaps ?? []), map];
+      }
 
       map.on('load', () => {
         if (!disposed) onMapLoadRef.current?.(map);
@@ -65,6 +77,9 @@ export function MapLibreCanvas({
 
     return () => {
       disposed = true;
+      if (import.meta.env.DEV && mapRef.current) {
+        window.__openFoundryMapLibreMaps = (window.__openFoundryMapLibreMaps ?? []).filter((map) => map !== mapRef.current);
+      }
       mapRef.current?.remove();
       mapRef.current = null;
     };

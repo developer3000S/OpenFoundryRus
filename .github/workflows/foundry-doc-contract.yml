@@ -1,0 +1,32 @@
+name: Foundry doc contract
+
+on:
+  pull_request:
+    paths:
+      - "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      - "docs/reference/foundry-public-docs-parity-policy.md"
+      - "docs/reference/foundry-compatibility-glossary.md"
+      - "tools/check_foundry_doc_links.py"
+      - ".github/workflows/foundry-doc-contract.yml"
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  palantir-links:
+    name: Palantir docs links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Check external Palantir documentation links
+        env:
+          OF_DOC_CONTRACT_ALLOWED_STATUSES: "429"
+        run: python3 tools/check_foundry_doc_links.py

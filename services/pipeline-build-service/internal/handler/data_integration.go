@@ -121,6 +121,11 @@ func RetryPipelineRun(w http.ResponseWriter, r *http.Request) {
 	req := models.TriggerPipelineRequest{FromNodeID: fromNodeID, SkipUnchanged: body.SkipUnchanged}
 	run, err := startPipelineRun(r, pipeline, req, previous.StartedBy, "retry", fromNodeID, &previous.ID, previous.AttemptNumber+1, previous.ExecutionContext, repo)
 	if err != nil {
+		var validationFailure pipelineStrictValidationFailure
+		if errors.As(err, &validationFailure) {
+			writePipelineSchemaValidationFailure(w, validationFailure.Report)
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -232,6 +237,13 @@ func currentDataIntegrationRunRepository(w http.ResponseWriter) (DataIntegration
 
 func startPipelineRun(r *http.Request, pipeline *models.Pipeline, req models.TriggerPipelineRequest, startedBy *uuid.UUID, triggerType string, fromNodeID *string, retryOfRunID *uuid.UUID, attemptNumber int32, contextJSON json.RawMessage, repo DataIntegrationRunRepository) (*models.PipelineRun, error) {
 	ports, _ := currentExecutionPorts()
+	validationFailure, err := validationFailureForRuntimePipeline(pipeline)
+	if err != nil {
+		return nil, err
+	}
+	if validationFailure != nil {
+		return nil, *validationFailure
+	}
 	run, err := repo.OpenPipelineRunWithOptions(r.Context(), pipeline, req, startedBy, triggerType, fromNodeID, retryOfRunID, attemptNumber, contextJSON)
 	if err != nil {
 		return nil, err
@@ -241,20 +253,25 @@ func startPipelineRun(r *http.Request, pipeline *models.Pipeline, req models.Tri
 		finishRunBestEffort(r.Context(), repo, run.ID, "failed", nil, err.Error())
 		return nil, err
 	}
+	if err := repo.MarkPipelineRunRunning(r.Context(), run.ID); err != nil {
+		finishRunBestEffort(r.Context(), repo, run.ID, "failed", nil, err.Error())
+		return nil, err
+	}
 	runner := ports.NodeRunner
 	if runner == nil {
-		runner = runtimeNodeRunner{JobRunner: ports.JobRunner, Python: ports.Python}
+		runner = newRuntimeNodeRunner(ports)
 	}
+	audit := newCapturingAuditSink(ports.Audit)
 	execCtx, cancel := context.WithCancel(r.Context())
 	unregister := registerExecutionCancel(plan.BuildID, cancel)
 	defer unregister()
-	outcome, err := executor.Execute(execCtx, plan, runner, ports.Transactions, ports.Committer, ports.Audit)
+	outcome, err := executor.Execute(execCtx, plan, runner, ports.Transactions, ports.Committer, audit)
 	if err != nil {
 		finishRunBestEffort(r.Context(), repo, run.ID, "failed", nil, err.Error())
 		return nil, err
 	}
 	status, errMsg := pipelineRunStatus(outcome)
-	nodeResults, _ := json.Marshal(outcome.Nodes)
+	nodeResults, _ := json.Marshal(pipelineRunNodeResults(plan, outcome, audit.Events()))
 	if err := repo.FinishPipelineRun(r.Context(), run.ID, status, nodeResults, errMsg); err != nil {
 		return nil, err
 	}
@@ -322,8 +339,17 @@ func firstFailedNode(raw json.RawMessage) *string {
 	}
 	if json.Unmarshal(raw, &rows) == nil {
 		for _, row := range rows {
-			if row.Status == "failed" && row.NodeID != "" {
+			if strings.EqualFold(row.Status, "failed") && row.NodeID != "" {
 				return &row.NodeID
+			}
+		}
+	}
+	var legacy map[string]string
+	if json.Unmarshal(raw, &legacy) == nil {
+		for id, state := range legacy {
+			if strings.EqualFold(state, "failed") || strings.EqualFold(state, "BUILD_FAILED") {
+				v := id
+				return &v
 			}
 		}
 	}

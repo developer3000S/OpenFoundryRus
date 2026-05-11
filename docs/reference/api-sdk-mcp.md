@@ -16,30 +16,29 @@ The repository uses `tools/of-cli` to generate and validate several outputs:
 
 | Artifact | Location |
 | --- | --- |
-| OpenAPI contract | `apps/web/static/generated/openapi/openfoundry.json` |
+| OpenAPI contract | `apps/web/public/generated/openapi/openfoundry.json` |
 | TypeScript SDK | `sdks/typescript/openfoundry-sdk` |
 | Python SDK | `sdks/python/openfoundry-sdk` |
 | Java SDK | `sdks/java/openfoundry-sdk` |
 | Terraform provider schema | `infra/terraform/providers/openfoundry/provider.schema.json` |
-| Frontend Terraform schema | `apps/web/static/generated/terraform/openfoundry-provider.json` |
+| Frontend Terraform schema | `apps/web/public/generated/terraform/openfoundry-provider.json` |
 
 ## Core Recipes
 
-The root `justfile` exposes the main workflows:
+The root `Makefile` exposes the main workflows:
 
 ```bash
-just openapi-gen
-just openapi-check
-just sdk-typescript-gen
-just sdk-typescript-check
-just sdk-typescript-typecheck
-just sdk-python-gen
-just sdk-python-check
-just sdk-python-compile
-just sdk-java-gen
-just sdk-java-check
-just sdk-java-compile
-just terraform-schema
+make openapi-gen
+make openapi-check
+make sdk-typescript-gen
+make sdk-typescript-check
+make sdk-python-gen
+make sdk-python-check
+make sdk-java-gen
+make sdk-java-check
+make sdk-check
+make contracts-gen
+make contracts-check
 ```
 
 ## MCP Surface

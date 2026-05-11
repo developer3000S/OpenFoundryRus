@@ -1,8 +1,8 @@
 # edge-gateway-service (Go)
 
 HTTP edge gateway: reverse-proxies every public route to the right
-bounded-context service. Stateless. **First Phase 2 service migrated**
-from the Rust workspace at `services/edge-gateway-service/`.
+bounded-context service. Stateless Go service rooted at
+`services/edge-gateway-service/`.
 
 ## What it does
 
@@ -35,7 +35,7 @@ from the Rust workspace at `services/edge-gateway-service/`.
 
 | Method | Path       | Purpose                             |
 | ------ | ---------- | ----------------------------------- |
-| GET    | `/healthz` | Liveness payload (Rust-compatible). |
+| GET    | `/healthz` | Canonical liveness payload. |
 | GET    | `/metrics` | Prometheus scrape (default Go runtime + process collectors). |
 
 Everything else is forwarded — see the router table for the full map.
@@ -72,9 +72,8 @@ OF_RATE_LIMIT__ANONYMOUS_REQUESTS_PER_MINUTE=300
 OF_UPSTREAM__DATASET_VERSIONING_SERVICE_URL=http://dvs.openfoundry.svc:50078
 ```
 
-The full upstream URL set + every default port mirrors the Rust
-gateway's `config.rs` so a single Helm `values.yaml` drives both
-implementations during cutover.
+The full upstream URL set + every default port is kept stable so Compose,
+Helm, and smoke scenarios can use the same route names.
 
 ## Build / run
 
@@ -92,20 +91,12 @@ docker build -t openfoundry/edge-gateway-service:dev \
   -f services/edge-gateway-service/Dockerfile .
 ```
 
-## Cutover protocol
+## Historical cutover note
 
-This is the strangler-fig pattern's first real run:
-
-1. Deploy the Go pod alongside the Rust pod, **same Helm release**.
-2. Add a header-based router rule on the upstream LB:
-   `X-Of-Migration: go-canary` → Go pod, default → Rust pod.
-3. Run the **contract diff suite** (TODO under
-   `tests/contract-diff/`) on every CI build comparing byte-identical
-   responses between the two implementations.
-4. Traffic ramp: 1 % → 10 % → 50 % → 100 %, ≥ 24 h per step with
-   error-budget gates.
-5. Soak: 100 % Go for ≥ 14 days before removing the Rust pod.
-6. Decommission: remove the Rust crate from the Cargo workspace.
+This service was originally introduced during a Rust-to-Go migration. The
+live repository no longer contains a `services/gateway` Rust source tree.
+For current changes, treat `services/edge-gateway-service` plus
+`internal/proxy/router_table.go` as the canonical gateway implementation.
 
 ## Wire-compat invariants (do not break)
 

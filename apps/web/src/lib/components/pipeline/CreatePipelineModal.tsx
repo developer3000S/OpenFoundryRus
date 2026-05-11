@@ -21,7 +21,8 @@ interface TypeCard {
 
 const TYPE_CARDS: TypeCard[] = [
   { id: 'BATCH', title: 'Batch', summary: 'Recompute every dataset on each run.', latency: 'High', complexity: 'Low' },
-  { id: 'FASTER', title: 'Faster', summary: 'DataFusion-backed batch for small-to-medium datasets.', latency: 'Medium', complexity: 'Low' },
+  { id: 'FASTER', title: 'Lightweight / Faster', summary: 'OpenFoundry local table execution for fast interactive previews.', latency: 'Low', complexity: 'Low' },
+  { id: 'DISTRIBUTED', title: 'Spark / Flink distributed', summary: 'Submit graph nodes through the distributed runtime adapter.', latency: 'Cluster', complexity: 'Medium' },
   { id: 'INCREMENTAL', title: 'Incremental', summary: 'Process only the rows that changed since the last build.', latency: 'Low', complexity: 'Medium' },
   { id: 'STREAMING', title: 'Streaming', summary: 'Run continuously over an upstream stream.', latency: 'Very low', complexity: 'High' },
   { id: 'EXTERNAL', title: 'External', summary: 'Push compute down to Databricks or Snowflake via virtual tables.', latency: 'Variable', complexity: 'Medium' },
@@ -72,6 +73,7 @@ export function CreatePipelineModal({ open, onClose, onCreated }: CreatePipeline
         ...(pipelineType === 'EXTERNAL' ? { external: extra as unknown as Parameters<typeof createPipeline>[0]['external'] } : {}),
         ...(pipelineType === 'INCREMENTAL' ? { incremental: extra as unknown as Parameters<typeof createPipeline>[0]['incremental'] } : {}),
         ...(pipelineType === 'STREAMING' ? { streaming: extra as unknown as Parameters<typeof createPipeline>[0]['streaming'] } : {}),
+        ...(pipelineType === 'DISTRIBUTED' ? { distributed: { engine: 'spark', ...extra } as unknown as Parameters<typeof createPipeline>[0]['distributed'] } : {}),
       });
       onCreated(created.id);
       onClose();

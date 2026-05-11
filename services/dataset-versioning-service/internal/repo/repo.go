@@ -120,6 +120,9 @@ func BuildDatasetStoragePath(prefix string, datasetID uuid.UUID) string {
 // owned by the versioning pipeline, not by this insert.
 func (r *Repo) CreateDataset(ctx context.Context, body *models.CreateDatasetRequest, ownerID uuid.UUID) (*models.Dataset, error) {
 	id := uuid.New()
+	if body.ID != nil && *body.ID != uuid.Nil {
+		id = *body.ID
+	}
 	format := "parquet"
 	if body.Format != nil && *body.Format != "" {
 		format = strings.ToLower(*body.Format)

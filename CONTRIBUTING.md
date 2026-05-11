@@ -126,8 +126,9 @@ merge commits in `main`.
 - **Branch names**: `<type>/<short-description>` (e.g.
   `feat/nexus-bulk-export`, `fix/auth-jwt-leeway`,
   `docs/contributing-guide`).
-- **Commits**: [Conventional Commits](https://www.conventionalcommits.org/),
-  enforced in CI; drives the changelog.
+- **PR title / final squash commit**:
+  [Conventional Commits](https://www.conventionalcommits.org/),
+  enforced by the `contribution-policy` CI workflow; drives the changelog.
 
   ```
   feat(ontology): add bulk import endpoint
@@ -261,14 +262,15 @@ disclosure process in [`SECURITY.md`](SECURITY.md).
 - OpenFoundry is licensed under **AGPL-3.0-only** (see [`LICENSE`](LICENSE)).
 - By contributing you agree your contribution is licensed under the
   same terms.
-- All commits must be **signed off** with the
+- All non-merge commits must be **signed off** with the
   [Developer Certificate of Origin](https://developercertificate.org/):
 
   ```bash
   git commit -s -m "feat(scope): your message"
   ```
 
-  CI rejects PRs whose commits are not signed off.
+  The `contribution-policy` CI workflow rejects PRs whose commits are not
+  signed off.
 
 ## Getting help
 

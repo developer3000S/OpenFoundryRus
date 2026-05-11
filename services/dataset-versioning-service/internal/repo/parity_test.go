@@ -17,16 +17,12 @@ import (
 	"github.com/openfoundry/openfoundry-go/services/dataset-versioning-service/internal/repo"
 )
 
-func TestRustMigrationsExistInGoRepo(t *testing.T) {
-	rust := migrationNames(t, filepath.Join("..", "..", "..", "..", "..", "services", "dataset-versioning-service", "migrations"))
-	goMigrations := migrationNames(t, "migrations")
-	goSet := map[string]bool{}
-	for _, name := range goMigrations {
-		goSet[name] = true
-	}
-	for _, name := range rust {
-		require.Truef(t, goSet[name], "missing Go migration for Rust migration %s", name)
-	}
+func TestGoMigrationsExistInEmbeddedRepo(t *testing.T) {
+	migrations := migrationNames(t, "migrations")
+	require.NotEmpty(t, migrations)
+	require.Contains(t, migrations, "20260419100001_initial_datasets.sql")
+	require.Contains(t, migrations, "20260501000001_versioning_init.sql")
+	require.Contains(t, migrations, "20260501120000_dataset_rid_compat.sql")
 }
 
 func migrationNames(t *testing.T, dir string) []string {

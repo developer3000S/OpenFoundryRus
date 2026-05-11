@@ -86,6 +86,28 @@ func (h *Handlers) ListLinkTypes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": items, "total": len(items)})
 }
 
+func (h *Handlers) GetLinkType(w http.ResponseWriter, r *http.Request) {
+	if _, ok := authmw.FromContext(r.Context()); !ok {
+		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	link, err := h.Repo.GetLinkType(r.Context(), id)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if link == nil {
+		writeJSONErr(w, http.StatusNotFound, "link type not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, link)
+}
+
 func (h *Handlers) CreateLinkType(w http.ResponseWriter, r *http.Request) {
 	claims, ok := authmw.FromContext(r.Context())
 	if !ok {
@@ -108,4 +130,31 @@ func (h *Handlers) CreateLinkType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
+}
+
+func (h *Handlers) UpdateLinkType(w http.ResponseWriter, r *http.Request) {
+	if _, ok := authmw.FromContext(r.Context()); !ok {
+		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var body models.UpdateLinkTypeRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	updated, err := h.Repo.UpdateLinkType(r.Context(), id, &body)
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if updated == nil {
+		writeJSONErr(w, http.StatusNotFound, "link type not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
 }

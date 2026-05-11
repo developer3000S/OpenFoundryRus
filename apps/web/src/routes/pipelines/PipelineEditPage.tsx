@@ -2,21 +2,34 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import {
+  createPipelineProposal,
+  generatePipelineTransformById,
   getPipeline,
+  listPipelineVersions,
   listRuns,
+  pipelineDAGWithNodes,
+  pipelineNodesFromDAG,
+  pipelineSchemaGuidanceById,
+  publishPipeline,
   retryPipelineRun,
+  restorePipelineVersion,
   triggerRun,
   updatePipeline,
   validatePipelineById,
   type Pipeline,
+  type PipelineDAG,
+  type PipelineJoinSchemaGuidance,
   type PipelineNode,
   type PipelineRun,
+  type PipelineVersion,
+  type PipelineUnionSchemaGuidance,
   type PipelineValidationResponse,
 } from '@/lib/api/pipelines';
 import { JsonEditor } from '@/lib/components/JsonEditor';
 import { Tabs } from '@/lib/components/Tabs';
 import { Glyph } from '@/lib/components/ui/Glyph';
 import { PipelineCanvas } from '@/lib/components/pipeline/PipelineCanvas';
+import { NodePreviewPanel } from '@/lib/components/pipeline/NodePreviewPanel';
 import { PipelineNodeList } from '@/lib/components/pipeline/PipelineNodeList';
 import { AddFoundryDataDialog } from '@/lib/components/pipeline/AddFoundryDataDialog';
 import { TransformStackEditor } from '@/lib/components/pipeline/TransformStackEditor';
@@ -37,16 +50,39 @@ function parseJson<T>(value: string, fallback: T): T {
   }
 }
 
+type PipelineOutputConfig = {
+  kind?: string;
+  object_type_id?: string;
+  object_type_name?: string;
+  primary_key?: string;
+};
+
+function outputConfigForNode(node?: PipelineNode): PipelineOutputConfig {
+  if (!node || typeof node.config !== 'object' || node.config === null) return {};
+  const config = node.config as Record<string, unknown>;
+  const output = config._output;
+  if (typeof output === 'object' && output !== null) return output as PipelineOutputConfig;
+  return config as PipelineOutputConfig;
+}
+
+function isPipelineObjectOutput(node?: PipelineNode): node is PipelineNode {
+  if (!node) return false;
+  const output = outputConfigForNode(node);
+  return output.kind === 'object_type' || node.transform_type.toLowerCase().includes('object');
+}
+
 export function PipelineEditPage() {
   const { id = '', runId } = useParams<{ id: string; runId?: string }>();
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [runs, setRuns] = useState<PipelineRun[]>([]);
+  const [versions, setVersions] = useState<PipelineVersion[]>([]);
   const [validation, setValidation] = useState<PipelineValidationResponse | null>(null);
-  const [tab, setTab] = useState<'canvas' | 'nodes' | 'config' | 'runs' | 'validate'>(runId ? 'runs' : 'canvas');
+  const [tab, setTab] = useState<'canvas' | 'nodes' | 'config' | 'runs' | 'history' | 'validate'>(runId ? 'runs' : 'canvas');
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [statusValue, setStatusValue] = useState('draft');
+  const [branchName, setBranchName] = useState('main');
   const [nodesJson, setNodesJson] = useState('');
   const [scheduleJson, setScheduleJson] = useState('');
   const [retryJson, setRetryJson] = useState('');
@@ -55,6 +91,7 @@ export function PipelineEditPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [historyBusy, setHistoryBusy] = useState(false);
   const [addDataOpen, setAddDataOpen] = useState(false);
   const [transformStack, setTransformStack] = useState<TransformStack | null>(null);
   const [transformOriginNodeId, setTransformOriginNodeId] = useState<string | null>(null);
@@ -63,6 +100,8 @@ export function PipelineEditPage() {
   const [joinOriginIds, setJoinOriginIds] = useState<{ left: string; right: string } | null>(null);
   const [joinLeftSchema, setJoinLeftSchema] = useState<string[]>([]);
   const [joinRightSchema, setJoinRightSchema] = useState<string[]>([]);
+  const [joinGuidance, setJoinGuidance] = useState<PipelineJoinSchemaGuidance | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   function resolveSourceDatasetId(nodeId: string, allNodes: PipelineNode[]): string | null {
     const seen = new Set<string>();
@@ -84,6 +123,18 @@ export function PipelineEditPage() {
     return null;
   }
 
+  function currentDAG(): PipelineDAG {
+    return parseJson<PipelineDAG>(nodesJson, pipeline?.dag ?? []);
+  }
+
+  function currentNodes(): PipelineNode[] {
+    return pipelineNodesFromDAG(currentDAG());
+  }
+
+  function setPipelineNodes(nodes: PipelineNode[]) {
+    setNodesJson(JSON.stringify(pipelineDAGWithNodes(currentDAG(), nodes), null, 2));
+  }
+
   async function fetchSchemaForNode(node: PipelineNode, allNodes: PipelineNode[]): Promise<string[]> {
     const datasetId = resolveSourceDatasetId(node.id, allNodes);
     if (!datasetId) return [];
@@ -96,18 +147,37 @@ export function PipelineEditPage() {
   }
 
   function handleStartJoin(left: PipelineNode, right: PipelineNode) {
-    setJoinDraft(newJoinDraft({ id: left.id, label: left.label }, { id: right.id, label: right.label }));
+    const draft = newJoinDraft({ id: left.id, label: left.label }, { id: right.id, label: right.label });
+    setJoinDraft(draft);
     setJoinOriginIds({ left: left.id, right: right.id });
-    const allNodes = parseJson<PipelineNode[]>(nodesJson, []);
+    const allNodes = currentNodes();
     setJoinLeftSchema([]);
     setJoinRightSchema([]);
+    setJoinGuidance(null);
     void fetchSchemaForNode(left, allNodes).then(setJoinLeftSchema);
     void fetchSchemaForNode(right, allNodes).then(setJoinRightSchema);
+    if (pipeline) {
+      void pipelineSchemaGuidanceById(pipeline.id, {
+        dag: currentDAG(),
+        kind: 'join',
+        left_node_id: left.id,
+        right_node_id: right.id,
+        join: draft as unknown as Record<string, unknown>,
+      }).then((response) => {
+        if (response.join) {
+          setJoinGuidance(response.join);
+          setJoinLeftSchema(response.join.left_schema.map((field) => field.name));
+          setJoinRightSchema(response.join.right_schema.map((field) => field.name));
+        }
+      }).catch(() => {
+        // Dataset preview fallback remains available when guidance is unavailable.
+      });
+    }
   }
 
   function handleApplyJoin(next: JoinDraft) {
     if (!joinOriginIds) return;
-    const existing = parseJson<PipelineNode[]>(nodesJson, []);
+    const existing = currentNodes();
     const sql = composeJoinSql(next);
     const newId = makeNodeId('join');
     const newNode: PipelineNode = {
@@ -119,18 +189,23 @@ export function PipelineEditPage() {
       input_dataset_ids: [],
       output_dataset_id: null,
     };
-    setNodesJson(JSON.stringify([...existing, newNode], null, 2));
+    setPipelineNodes([...existing, newNode]);
   }
 
   const [unionDraft, setUnionDraft] = useState<UnionDraft | null>(null);
   const [unionInputIds, setUnionInputIds] = useState<string[]>([]);
+  const [unionGuidance, setUnionGuidance] = useState<PipelineUnionSchemaGuidance | null>(null);
   const [outputDraft, setOutputDraft] = useState<OutputDraft | null>(null);
   const [outputNodeId, setOutputNodeId] = useState<string | null>(null);
   const [deployOpen, setDeployOpen] = useState(false);
+  const [aipOpen, setAipOpen] = useState(false);
+  const [aipPrompt, setAipPrompt] = useState('');
+  const [aipBusy, setAipBusy] = useState(false);
+  const [aipMessage, setAipMessage] = useState('');
 
-  function handleAddOutput(source: PipelineNode, kind: 'dataset' | 'object_type' | 'time_series' | 'virtual_table') {
-    if (kind !== 'dataset') return;
-    const existing = parseJson<PipelineNode[]>(nodesJson, []);
+  function handleAddOutput(source: PipelineNode, kind: 'dataset' | 'object_type' | 'link_type' | 'time_series' | 'virtual_table') {
+    if (kind !== 'dataset' && kind !== 'object_type' && kind !== 'link_type') return;
+    const existing = currentNodes();
     const stamp = new Date().toLocaleString('en-US', {
       weekday: 'short',
       month: 'short',
@@ -140,7 +215,7 @@ export function PipelineEditPage() {
       minute: '2-digit',
       second: '2-digit',
     });
-    const displayName = `New dataset ${stamp}`;
+    const displayName = kind === 'object_type' ? `New object type ${stamp}` : kind === 'link_type' ? `New link type ${stamp}` : `New dataset ${stamp}`;
     const sourceConfig = source.config as { _stack?: { blocks?: unknown[] }; _join?: unknown; _union?: unknown } | undefined;
     const totalColumns = (() => {
       // Best-effort estimate without running the engine.
@@ -149,17 +224,79 @@ export function PipelineEditPage() {
       return 11;
     })();
     const newId = makeNodeId('output');
+    const targetDatasetId = crypto.randomUUID();
+    const datasetRID = `ri.foundry.main.dataset.${targetDatasetId}`;
+    const targetObjectTypeId = crypto.randomUUID();
+    const targetLinkTypeId = crypto.randomUUID();
+    const objectTypeName = `${source.label || source.id} object`.replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'PipelineObject';
+    const objectOutputs = existing.filter(isPipelineObjectOutput);
+    const sourceObjectOutput = isPipelineObjectOutput(source) ? source : objectOutputs[0];
+    const targetObjectOutput = objectOutputs.find((node) => node.id !== sourceObjectOutput?.id);
+    const sourceObjectOutputConfig = outputConfigForNode(sourceObjectOutput);
+    const targetObjectOutputConfig = outputConfigForNode(targetObjectOutput);
+    const sourceObjectName = sourceObjectOutput?.label || sourceObjectOutputConfig.object_type_name || 'Source';
+    const targetObjectName = targetObjectOutput?.label || targetObjectOutputConfig.object_type_name || 'Target';
+    const linkTypeName = `${sourceObjectName} to ${targetObjectName}`.replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'PipelineLink';
+    const sourceObjectTypeId = sourceObjectOutputConfig.object_type_id || crypto.randomUUID();
+    const targetObjectTypeIdForLink = targetObjectOutputConfig.object_type_id || crypto.randomUUID();
+    const sourcePrimaryKey = sourceObjectOutputConfig.primary_key || 'id';
+    const targetPrimaryKey = targetObjectOutputConfig.primary_key || 'id';
+    const dependsOn = kind === 'link_type'
+      ? Array.from(new Set([source.id, sourceObjectOutput?.id, targetObjectOutput?.id].filter(Boolean) as string[]))
+      : [source.id];
     const newNode: PipelineNode = {
       id: newId,
       label: displayName,
-      transform_type: 'output_dataset',
-      config: { _output: { kind: 'dataset', columns_total: totalColumns, columns_mapped: totalColumns } },
-      depends_on: [source.id],
+      transform_type: kind === 'object_type' ? 'output_object_type' : kind === 'link_type' ? 'output_link_type' : 'output_dataset',
+      config: {
+        _output: {
+          kind,
+          dataset_id: targetDatasetId,
+          dataset_rid: datasetRID,
+          dataset_name: displayName,
+          display_name: displayName,
+          branch: 'main',
+          write_mode: 'SNAPSHOT',
+          file_format: 'PARQUET',
+          logical_path: 'part-00000.ndjson',
+          ...(kind === 'object_type' ? {
+            object_type_id: targetObjectTypeId,
+            object_type_name: objectTypeName,
+            plural_display_name: `${displayName}s`,
+            primary_key: 'id',
+            icon: 'cube',
+            color: '#2d72d2',
+            editable: true,
+            allow_edits: true,
+            property_mapping: [
+              { source_field: 'id', target_property: 'id', property_type: 'string', display_name: 'ID', required: true, unique_constraint: true },
+            ],
+          } : kind === 'link_type' ? {
+            link_type_id: targetLinkTypeId,
+            link_type_name: linkTypeName,
+            link_display_name: displayName,
+            cardinality: 'many_to_many',
+            source_object_node_id: sourceObjectOutput?.id || '',
+            target_object_node_id: targetObjectOutput?.id || '',
+            source_object_type_id: sourceObjectTypeId,
+            target_object_type_id: targetObjectTypeIdForLink,
+            source_primary_key: sourcePrimaryKey,
+            target_primary_key: targetPrimaryKey,
+            source_key_column: sourcePrimaryKey,
+            target_key_column: targetPrimaryKey,
+            tenant: 'default',
+          } : {}),
+          columns_total: totalColumns,
+          columns_mapped: totalColumns,
+        },
+      },
+      depends_on: dependsOn,
       input_dataset_ids: [],
-      output_dataset_id: null,
+      output_dataset_id: targetDatasetId,
     };
-    setNodesJson(JSON.stringify([...existing, newNode], null, 2));
+    setPipelineNodes([...existing, newNode]);
     setOutputDraft({
+      kind,
       display_name: displayName,
       source_node_id: source.id,
       source_node_label: source.label,
@@ -172,19 +309,45 @@ export function PipelineEditPage() {
   function handleRenameOutput(name: string) {
     setOutputDraft((current) => (current ? { ...current, display_name: name } : current));
     if (!outputNodeId) return;
-    const existing = parseJson<PipelineNode[]>(nodesJson, []);
-    const updated = existing.map((node) => (node.id === outputNodeId ? { ...node, label: name } : node));
-    setNodesJson(JSON.stringify(updated, null, 2));
+    const existing = currentNodes();
+    const updated = existing.map((node) => {
+      if (node.id !== outputNodeId) return node;
+      const currentConfig = (node.config ?? {}) as Record<string, unknown>;
+      const currentOutput = (currentConfig._output ?? {}) as Record<string, unknown>;
+      return {
+        ...node,
+        label: name,
+        config: {
+          ...currentConfig,
+          _output: { ...currentOutput, dataset_name: name, display_name: name },
+        },
+      };
+    });
+    setPipelineNodes(updated);
   }
 
   function handleStartUnion(inputs: PipelineNode[]) {
-    setUnionDraft(newUnionDraft(inputs.map((entry) => ({ id: entry.id, label: entry.label }))));
+    const draft = newUnionDraft(inputs.map((entry) => ({ id: entry.id, label: entry.label })));
+    setUnionDraft(draft);
     setUnionInputIds(inputs.map((entry) => entry.id));
+    setUnionGuidance(null);
+    if (pipeline) {
+      void pipelineSchemaGuidanceById(pipeline.id, {
+        dag: currentDAG(),
+        kind: 'union',
+        input_node_ids: inputs.map((entry) => entry.id),
+        union: { union_type: draft.union_type },
+      }).then((response) => {
+        if (response.union) setUnionGuidance(response.union);
+      }).catch(() => {
+        // Union can still be authored; strict validation will catch issues later.
+      });
+    }
   }
 
   function handleApplyUnion(next: UnionDraft) {
     if (unionInputIds.length < 2) return;
-    const existing = parseJson<PipelineNode[]>(nodesJson, []);
+    const existing = currentNodes();
     const sql = composeUnionSql(next);
     const newId = makeNodeId('union');
     const newNode: PipelineNode = {
@@ -196,7 +359,7 @@ export function PipelineEditPage() {
       input_dataset_ids: [],
       output_dataset_id: null,
     };
-    setNodesJson(JSON.stringify([...existing, newNode], null, 2));
+    setPipelineNodes([...existing, newNode]);
   }
 
   function handleOpenTransform(node: PipelineNode) {
@@ -226,9 +389,9 @@ export function PipelineEditPage() {
   function handleApplyTransformStack(next: TransformStack) {
     if (!transformOriginNodeId) return;
     const sourceNodeId = transformEditingNodeId
-      ? (parseJson<PipelineNode[]>(nodesJson, []).find((entry) => entry.id === transformEditingNodeId)?.depends_on[0] ?? transformOriginNodeId)
+      ? (currentNodes().find((entry) => entry.id === transformEditingNodeId)?.depends_on[0] ?? transformOriginNodeId)
       : transformOriginNodeId;
-    const existing = parseJson<PipelineNode[]>(nodesJson, []);
+    const existing = currentNodes();
     const sql = composeTransformStackSql(next);
     if (transformEditingNodeId) {
       const updated = existing.map((entry) => {
@@ -240,7 +403,7 @@ export function PipelineEditPage() {
           config: { sql, _stack: next },
         };
       });
-      setNodesJson(JSON.stringify(updated, null, 2));
+      setPipelineNodes(updated);
       return;
     }
     const newId = makeNodeId('transform');
@@ -253,7 +416,7 @@ export function PipelineEditPage() {
       input_dataset_ids: next.source_dataset_id ? [next.source_dataset_id] : [],
       output_dataset_id: null,
     };
-    setNodesJson(JSON.stringify([...existing, newNode], null, 2));
+    setPipelineNodes([...existing, newNode]);
     setTransformEditingNodeId(newId);
   }
 
@@ -273,7 +436,7 @@ export function PipelineEditPage() {
 
   function handleAddDatasets(datasets: Dataset[]) {
     if (datasets.length === 0) return;
-    const existing = parseJson<PipelineNode[]>(nodesJson, []);
+    const existing = currentNodes();
     const startsEmpty = isPipelineEmpty(existing);
     const baseNodes: PipelineNode[] = startsEmpty ? [] : [...existing];
     for (const dataset of datasets) {
@@ -287,7 +450,7 @@ export function PipelineEditPage() {
         output_dataset_id: null,
       });
     }
-    setNodesJson(JSON.stringify(baseNodes, null, 2));
+    setPipelineNodes(baseNodes);
   }
 
   async function load() {
@@ -300,6 +463,7 @@ export function PipelineEditPage() {
       setName(nextPipeline.name);
       setDescription(nextPipeline.description);
       setStatusValue(nextPipeline.status);
+      setBranchName(nextPipeline.branch_name || 'main');
       setNodesJson(JSON.stringify(nextPipeline.dag, null, 2));
       setScheduleJson(JSON.stringify(nextPipeline.schedule_config, null, 2));
       setRetryJson(JSON.stringify(nextPipeline.retry_policy, null, 2));
@@ -320,9 +484,21 @@ export function PipelineEditPage() {
     }
   }
 
+  async function loadVersions() {
+    if (!id) return;
+    try {
+      const res = await listPipelineVersions(id);
+      setVersions(res.data);
+    } catch {
+      // History is additive context; authoring should still work if the backend is not wired.
+      setVersions([]);
+    }
+  }
+
   useEffect(() => {
     void load();
     void loadRuns();
+    void loadVersions();
   }, [id]);
 
   useEffect(() => {
@@ -338,14 +514,17 @@ export function PipelineEditPage() {
         name,
         description,
         status: statusValue,
-        nodes: parseJson<PipelineNode[]>(nodesJson, []),
+        branch_name: branchName.trim() || 'main',
+        dag: parseJson<PipelineDAG>(nodesJson, pipeline.dag),
         schedule_config: parseJson(scheduleJson, pipeline.schedule_config),
         retry_policy: parseJson(retryJson, pipeline.retry_policy),
       });
       setPipeline(updated);
+      setBranchName(updated.branch_name || branchName.trim() || 'main');
       setNodesJson(JSON.stringify(updated.dag, null, 2));
       setScheduleJson(JSON.stringify(updated.schedule_config, null, 2));
       setRetryJson(JSON.stringify(updated.retry_policy, null, 2));
+      await loadVersions();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Save failed');
     } finally {
@@ -400,7 +579,111 @@ export function PipelineEditPage() {
     }
   }
 
-  const parsedNodes = parseJson<PipelineNode[]>(nodesJson, []);
+  async function generateAIPTransform() {
+    if (!pipeline || aipPrompt.trim() === '') return;
+    setAipBusy(true);
+    setAipMessage('');
+    setError('');
+    try {
+      const existing = currentNodes();
+      const selected = selectedNodeId ? [selectedNodeId] : existing.length > 0 ? [existing[existing.length - 1].id] : [];
+      const response = await generatePipelineTransformById(pipeline.id, {
+        prompt: aipPrompt.trim(),
+        dag: currentDAG(),
+        selected_node_ids: selected,
+        sample_size: 10,
+      });
+      if (response.nodes.length > 0) {
+        setPipelineNodes([...existing, ...response.nodes]);
+        setSelectedNodeId(response.nodes[response.nodes.length - 1].id);
+      }
+      setAipMessage(response.preview_error?.message || response.description);
+      setAipPrompt('');
+      setAipOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'AIP generation failed');
+    } finally {
+      setAipBusy(false);
+    }
+  }
+
+  function applyLifecyclePipeline(nextPipeline: Pipeline) {
+    setPipeline(nextPipeline);
+    setName(nextPipeline.name);
+    setDescription(nextPipeline.description);
+    setStatusValue(nextPipeline.status);
+    setBranchName(nextPipeline.branch_name || 'main');
+    setNodesJson(JSON.stringify(nextPipeline.dag, null, 2));
+    setScheduleJson(JSON.stringify(nextPipeline.schedule_config, null, 2));
+    setRetryJson(JSON.stringify(nextPipeline.retry_policy, null, 2));
+  }
+
+  async function openProposal() {
+    if (!pipeline) return;
+    setHistoryBusy(true);
+    setError('');
+    try {
+      const title = `${name || pipeline.name} proposal`;
+      const response = await createPipelineProposal(pipeline.id, {
+        title,
+        description: description || 'Pipeline draft ready for review.',
+        branch_name: branchName.trim() || 'main',
+      });
+      applyLifecyclePipeline(response.pipeline);
+      await loadVersions();
+      setTab('history');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Proposal failed');
+    } finally {
+      setHistoryBusy(false);
+    }
+  }
+
+  async function publishDraft() {
+    if (!pipeline) return;
+    setHistoryBusy(true);
+    setError('');
+    try {
+      const response = await publishPipeline(pipeline.id, {
+        message: `Published ${new Date().toLocaleString()}`,
+        branch_name: branchName.trim() || 'main',
+        proposal_title: pipeline.proposal_title || undefined,
+        proposal_description: pipeline.proposal_description || undefined,
+      });
+      applyLifecyclePipeline(response.pipeline);
+      await loadVersions();
+      setTab('history');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Publish failed');
+    } finally {
+      setHistoryBusy(false);
+    }
+  }
+
+  async function restoreVersion(version: PipelineVersion, asDraft = true) {
+    if (!pipeline) return;
+    const target = asDraft ? 'draft' : 'published pipeline';
+    if (typeof window !== 'undefined' && !window.confirm(`Restore version ${version.version_number} as ${target}?`)) return;
+    setHistoryBusy(true);
+    setError('');
+    try {
+      const response = await restorePipelineVersion(pipeline.id, version.id, {
+        as_draft: asDraft,
+        message: `Restored version ${version.version_number}`,
+      });
+      applyLifecyclePipeline(response.pipeline);
+      await loadVersions();
+      setTab('history');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Restore failed');
+    } finally {
+      setHistoryBusy(false);
+    }
+  }
+
+  const parsedDAG = currentDAG();
+  const parsedNodes = pipelineNodesFromDAG(parsedDAG);
+  const selectedPreviewNode = selectedNodeId ? (parsedNodes.find((node) => node.id === selectedNodeId) ?? null) : null;
   const highlightedRun = runId ? runs.find((run) => run.id === runId) : null;
 
   if (loading) {
@@ -441,6 +724,9 @@ export function PipelineEditPage() {
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <span className="of-chip of-chip-active">{pipeline.status}</span>
+            <span className="of-chip">{pipeline.branch_name || branchName || 'main'}</span>
+            <span className="of-chip">{pipeline.proposal_state || 'none'}</span>
+            <span className="of-chip">{pipeline.published_at ? `published ${new Date(pipeline.published_at).toLocaleDateString()}` : 'unpublished'}</span>
             <span className="of-chip">{pipeline.pipeline_type ?? 'BATCH'}</span>
           </div>
         </div>
@@ -463,12 +749,21 @@ export function PipelineEditPage() {
               <option value="archived">archived</option>
             </select>
             <span className="of-text-muted" style={{ alignSelf: 'center', fontSize: 11 }}>
-              {runs.length} run{runs.length === 1 ? '' : 's'}
+              {runs.length} run{runs.length === 1 ? '' : 's'} | {versions.length} version{versions.length === 1 ? '' : 's'}
             </span>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <button type="button" onClick={() => setAipOpen(true)} disabled={aipBusy} className="of-button">
+              <Glyph name="sparkles" size={12} /> AIP Generate
+            </button>
             <button type="button" onClick={() => void runValidate()} disabled={busy} className="of-button">
               Validate
+            </button>
+            <button type="button" onClick={() => void openProposal()} disabled={historyBusy} className="of-button">
+              Open proposal
+            </button>
+            <button type="button" onClick={() => void publishDraft()} disabled={historyBusy} className="of-button">
+              Publish draft
             </button>
             <button type="button" onClick={() => void runNow()} disabled={busy} className="of-button">
               Run now
@@ -504,7 +799,7 @@ export function PipelineEditPage() {
       )}
 
       <section className="of-panel" style={{ overflow: 'hidden' }}>
-        <Tabs tabs={['canvas', 'nodes', 'config', 'runs', 'validate'] as const} active={tab} onChange={setTab} />
+        <Tabs tabs={['canvas', 'nodes', 'config', 'runs', 'history', 'validate'] as const} active={tab} onChange={setTab} />
 
         <div style={{ padding: tab === 'canvas' ? 0 : 10 }}>
           {tab === 'canvas' && (
@@ -513,20 +808,54 @@ export function PipelineEditPage() {
                 nodes={parsedNodes}
                 status={statusValue}
                 scheduleConfig={parseJson(scheduleJson, { enabled: false, cron: null })}
-                onChange={(next) => setNodesJson(JSON.stringify(next, null, 2))}
+                onChange={(next) => setPipelineNodes(next)}
                 onTransform={(node) => handleOpenTransform(node)}
                 onJoinStart={(left, right) => handleStartJoin(left, right)}
                 onUnionStart={(inputs) => handleStartUnion(inputs)}
                 onAddOutput={(source, kind) => handleAddOutput(source, kind)}
+                onSelect={(node) => setSelectedNodeId(node?.id ?? null)}
               />
               {isPipelineEmpty(parsedNodes) ? (
                 <PipelineWelcomePanel onAddFoundryData={() => setAddDataOpen(true)} />
               ) : null}
+              <NodePreviewPanel pipelineId={pipeline.id} node={selectedPreviewNode} draftDag={parsedDAG} draftKey={nodesJson} />
+              {aipOpen && (
+                <PipelineAIPGeneratePanel
+                  prompt={aipPrompt}
+                  busy={aipBusy}
+                  selectedNodeLabel={selectedPreviewNode?.label ?? (parsedNodes.length > 0 ? parsedNodes[parsedNodes.length - 1].label : 'New graph')}
+                  onPromptChange={setAipPrompt}
+                  onClose={() => setAipOpen(false)}
+                  onGenerate={() => void generateAIPTransform()}
+                />
+              )}
+              {aipMessage && !aipOpen && (
+                <div
+                  className="of-panel"
+                  style={{
+                    position: 'absolute',
+                    right: 12,
+                    bottom: 12,
+                    width: 340,
+                    padding: 10,
+                    zIndex: 8,
+                    fontSize: 12,
+                    boxShadow: '0 12px 24px rgba(15, 23, 42, 0.08)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span>{aipMessage}</span>
+                    <button type="button" className="of-button" style={{ fontSize: 11 }} onClick={() => setAipMessage('')}>
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {tab === 'nodes' && (
-            <PipelineNodeList nodes={parsedNodes} onChange={(next) => setNodesJson(JSON.stringify(next, null, 2))} />
+            <PipelineNodeList nodes={parsedNodes} onChange={(next) => setPipelineNodes(next)} />
           )}
 
           {tab === 'config' && (
@@ -541,6 +870,16 @@ export function PipelineEditPage() {
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
                   className="of-input"
+                  style={{ marginTop: 4 }}
+                />
+              </label>
+              <label style={{ fontSize: 12 }}>
+                Branch
+                <input
+                  value={branchName}
+                  onChange={(event) => setBranchName(event.target.value)}
+                  className="of-input"
+                  placeholder="main"
                   style={{ marginTop: 4 }}
                 />
               </label>
@@ -584,6 +923,91 @@ export function PipelineEditPage() {
                 )}
               </tbody>
             </table>
+          )}
+
+          {tab === 'history' && (
+            <section style={{ display: 'grid', gap: 10 }}>
+              <div className="of-toolbar" style={{ justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="of-chip">draft: {pipeline.draft_updated_at ? new Date(pipeline.draft_updated_at).toLocaleString() : 'not saved'}</span>
+                  <span className="of-chip">published: {pipeline.published_at ? new Date(pipeline.published_at).toLocaleString() : 'none'}</span>
+                  <span className="of-chip">active: {pipeline.active_version_id ? pipeline.active_version_id.slice(0, 8) : 'none'}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button type="button" onClick={() => void loadVersions()} disabled={historyBusy} className="of-button">
+                    Refresh
+                  </button>
+                  <button type="button" onClick={() => void publishDraft()} disabled={historyBusy} className="of-button of-button--primary">
+                    Publish draft
+                  </button>
+                </div>
+              </div>
+              <table className="of-table">
+                <thead>
+                  <tr>
+                    <th>Version</th>
+                    <th>Kind</th>
+                    <th>Branch</th>
+                    <th>Message</th>
+                    <th>Created</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {versions.map((version) => (
+                    <tr key={version.id}>
+                      <td style={{ fontFamily: 'var(--font-mono)' }}>v{version.version_number}</td>
+                      <td>
+                        <span className={version.id === pipeline.active_version_id ? 'of-chip of-chip-active' : 'of-chip'}>
+                          {version.version_kind}
+                        </span>
+                      </td>
+                      <td>{version.branch_name || 'main'}</td>
+                      <td>
+                        <div style={{ display: 'grid', gap: 2 }}>
+                          <span>{version.message || `${version.name} snapshot`}</span>
+                          {version.restored_from_version_id && (
+                            <span className="of-text-muted" style={{ fontSize: 11 }}>
+                              restored from {version.restored_from_version_id.slice(0, 8)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>{new Date(version.created_at).toLocaleString()}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            onClick={() => void restoreVersion(version, true)}
+                            disabled={historyBusy}
+                            className="of-button"
+                            style={{ fontSize: 11 }}
+                          >
+                            Restore draft
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void restoreVersion(version, false)}
+                            disabled={historyBusy}
+                            className="of-button"
+                            style={{ fontSize: 11 }}
+                          >
+                            Restore + publish
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {versions.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="of-text-muted">
+                        No saved versions yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </section>
           )}
 
           {tab === 'validate' && (
@@ -636,7 +1060,9 @@ export function PipelineEditPage() {
           setJoinOriginIds(null);
           setJoinLeftSchema([]);
           setJoinRightSchema([]);
+          setJoinGuidance(null);
         }}
+        guidance={joinGuidance}
         onApply={handleApplyJoin}
       />
 
@@ -646,7 +1072,9 @@ export function PipelineEditPage() {
         onClose={() => {
           setUnionDraft(null);
           setUnionInputIds([]);
+          setUnionGuidance(null);
         }}
+        guidance={unionGuidance}
         onApply={handleApplyUnion}
       />
 
@@ -739,6 +1167,67 @@ function PipelineWelcomePanel({ onAddFoundryData }: { onAddFoundryData: () => vo
           enabled={false}
         />
       </ul>
+    </div>
+  );
+}
+
+function PipelineAIPGeneratePanel({
+  prompt,
+  busy,
+  selectedNodeLabel,
+  onPromptChange,
+  onClose,
+  onGenerate,
+}: {
+  prompt: string;
+  busy: boolean;
+  selectedNodeLabel: string;
+  onPromptChange: (value: string) => void;
+  onClose: () => void;
+  onGenerate: () => void;
+}) {
+  const canGenerate = prompt.trim().length > 0 && !busy;
+  return (
+    <div
+      className="of-panel"
+      style={{
+        position: 'absolute',
+        top: 16,
+        right: 16,
+        width: 'min(420px, calc(100% - 32px))',
+        padding: 12,
+        zIndex: 9,
+        boxShadow: '0 16px 32px rgba(15, 23, 42, 0.12)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <p className="of-eyebrow">AIP</p>
+          <p style={{ margin: '3px 0 0', fontSize: 14, fontWeight: 700 }}>Generate transform</p>
+          <p className="of-text-muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
+            Target: {selectedNodeLabel}
+          </p>
+        </div>
+        <button type="button" className="of-button" onClick={onClose} aria-label="Close AIP generator" style={{ width: 30, padding: 0 }}>
+          <Glyph name="x" size={13} />
+        </button>
+      </div>
+      <textarea
+        className="of-input"
+        value={prompt}
+        onChange={(event) => onPromptChange(event.target.value)}
+        rows={6}
+        placeholder="Filter trail runs over 5 miles and add an LLM summary column."
+        style={{ marginTop: 10, minHeight: 116, resize: 'vertical' }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+        <button type="button" className="of-button" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+        <button type="button" className="of-button of-button--primary" onClick={onGenerate} disabled={!canGenerate}>
+          {busy ? 'Generating...' : 'Generate'}
+        </button>
+      </div>
     </div>
   );
 }

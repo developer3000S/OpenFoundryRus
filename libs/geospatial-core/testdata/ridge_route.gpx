@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="OpenFoundry GEO.4 fixture" xmlns="http://www.topografix.com/GPX/1/1">
+  <rte>
+    <rtept lat="39.990000" lon="-105.280000"><ele>1600</ele></rtept>
+    <rtept lat="39.991000" lon="-105.281500"><ele>1618</ele></rtept>
+    <rtept lat="39.992000" lon="-105.283000"><ele>1612</ele></rtept>
+  </rte>
+</gpx>

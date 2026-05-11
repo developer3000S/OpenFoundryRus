@@ -1,5 +1,5 @@
-// Command ontology-exploratory-analysis-service is the substrate-only
-// shell binary for the consolidated exploratory-analysis plane.
+// Command ontology-exploratory-analysis-service is the consolidated
+// exploratory-analysis plane.
 //
 // Per docs/architecture/service-consolidation-map.md this crate is the
 // *target* of four pending merges:
@@ -8,9 +8,10 @@
 //   - geospatial-intelligence-service (S8 / ADR-0030 — absorbed)
 //   - scenario-simulation-service
 //
-// Until those merges land and a kernel `handlers::exploratory` ships,
-// this binary mounts only `/health` + `/readiness` (matching Rust).
-// The migrations for the consolidated tables (`scenario_simulations`,
+// GEO.1 promotes the absorbed geospatial handlers to the normal binary under
+// `/api/v1/geospatial/*`; the remaining consolidation domains stay behind
+// their explicit handler wiring. The migrations for the consolidated tables
+// (`scenario_simulations`,
 // `scenario_runs`, `time_series`, `time_series_points`,
 // `time_series_storage_partitions`) DO ship — when the merges land,
 // the schema is already in place.
@@ -33,6 +34,7 @@ import (
 	"github.com/openfoundry/openfoundry-go/libs/capabilities/probes"
 	"github.com/openfoundry/openfoundry-go/libs/observability"
 	"github.com/openfoundry/openfoundry-go/services/ontology-exploratory-analysis-service/internal/config"
+	"github.com/openfoundry/openfoundry-go/services/ontology-exploratory-analysis-service/internal/handlers/geospatial"
 	"github.com/openfoundry/openfoundry-go/services/ontology-exploratory-analysis-service/internal/repo"
 	"github.com/openfoundry/openfoundry-go/services/ontology-exploratory-analysis-service/internal/server"
 )
@@ -72,7 +74,8 @@ func main() {
 	}
 
 	metrics := observability.NewMetrics()
-	srv := server.New(cfg, metrics, probes.Postgres("primary", pool))
+	geo := &geospatial.AppState{DB: pool}
+	srv := server.New(cfg, metrics, geo, probes.Postgres("primary", pool))
 	if err := server.Run(ctx, srv, log); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("server exited with error", slog.String("error", err.Error()))
 		os.Exit(1)

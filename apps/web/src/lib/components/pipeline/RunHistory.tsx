@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { abortBuild, listRuns, retryPipelineRun, triggerRun, type PipelineRun } from '@/lib/api/pipelines';
+import { abortBuild, listRuns, pipelineNodeResultsFromRun, retryPipelineRun, triggerRun, type PipelineRun } from '@/lib/api/pipelines';
 import { Glyph } from '@/lib/components/ui/Glyph';
 import { RunLogs } from './RunLogs';
 import { LiveLogViewer } from './LiveLogViewer';
@@ -11,20 +11,24 @@ interface RunHistoryProps {
 }
 
 const LIVE_STATUSES = new Set([
-  'running', 'pending', 'BUILD_RUNNING', 'BUILD_QUEUED',
+  'queued', 'running', 'pending', 'BUILD_RUNNING', 'BUILD_QUEUED',
   'BUILD_RESOLUTION', 'BUILD_ABORTING', 'RUN_PENDING', 'ABORT_PENDING',
 ]);
 
 function statusTone(status: string) {
   const s = status.toLowerCase();
   if (s === 'completed' || s === 'succeeded' || s === 'success') return 'of-status-success';
-  if (s === 'failed' || s === 'error' || s === 'aborted') return 'of-status-danger';
-  if (s === 'running' || s === 'pending' || s.includes('build_')) return 'of-status-info';
+  if (s === 'failed' || s === 'error' || s === 'aborted' || s === 'cancelled' || s === 'canceled') return 'of-status-danger';
+  if (s === 'running' || s === 'pending' || s === 'queued' || s.includes('build_')) return 'of-status-info';
   return 'of-status-warning';
 }
 
 function fmt(ts: string | null) {
   return ts ? new Date(ts).toLocaleString() : '—';
+}
+
+function logRidForRun(run: PipelineRun) {
+  return pipelineNodeResultsFromRun(run).find((result) => result.log_rid)?.log_rid ?? `ri.foundry.main.job.${run.id}`;
 }
 
 export function RunHistory({ pipelineId, readOnly = false }: RunHistoryProps) {
@@ -90,7 +94,7 @@ export function RunHistory({ pipelineId, readOnly = false }: RunHistoryProps) {
   }, [pipelineId]);
 
   useEffect(() => {
-    const hasRunning = runs.some((r) => r.status === 'running');
+    const hasRunning = runs.some((r) => LIVE_STATUSES.has(r.status));
     if (hasRunning && !pollRef.current) {
       pollRef.current = setInterval(() => void reload(), 5000);
     } else if (!hasRunning && pollRef.current) {
@@ -222,7 +226,7 @@ export function RunHistory({ pipelineId, readOnly = false }: RunHistoryProps) {
                         >
                           Logs
                         </button>
-                        {!readOnly && run.status === 'running' && (
+                        {!readOnly && (run.status === 'running' || run.status === 'queued') && (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -236,7 +240,7 @@ export function RunHistory({ pipelineId, readOnly = false }: RunHistoryProps) {
                             Abort
                           </button>
                         )}
-                        {!readOnly && (run.status === 'failed' || run.status === 'aborted') && (
+                        {!readOnly && (run.status === 'failed' || run.status === 'aborted' || run.status === 'cancelled') && (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -263,11 +267,11 @@ export function RunHistory({ pipelineId, readOnly = false }: RunHistoryProps) {
       {selectedRun && (
         <div style={{ borderTop: '1px solid var(--border-subtle)', padding: 10, display: 'grid', gap: 10 }}>
           {LIVE_STATUSES.has(selectedRun.status) ? (
-            <LiveLogViewer jobRid={`ri.foundry.main.job.${selectedRun.id}`} mode="live" />
+            <LiveLogViewer jobRid={logRidForRun(selectedRun)} mode="live" />
           ) : (
             <>
               <RunLogs run={selectedRun} onClose={() => setSelectedRunId(null)} />
-              <LiveLogViewer jobRid={`ri.foundry.main.job.${selectedRun.id}`} mode="historical" />
+              <LiveLogViewer jobRid={logRidForRun(selectedRun)} mode="historical" />
             </>
           )}
         </div>

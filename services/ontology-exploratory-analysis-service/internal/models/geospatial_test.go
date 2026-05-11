@@ -138,6 +138,18 @@ func TestCoordinateDistanceKm(t *testing.T) {
 	assert.InDelta(t, wantPole, pole.DistanceKm(pole2), 1e-9)
 }
 
+func TestCoordinateAndBoundsValidation(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, (Coordinate{Lat: 40.4168, Lon: -3.7038}).Validate())
+	require.Error(t, (Coordinate{Lat: 91, Lon: 0}).Validate())
+	require.NoError(t, (Bounds{MinLat: 40.3, MinLon: -3.8, MaxLat: 40.5, MaxLon: -3.6}).Validate())
+
+	err := (Bounds{MinLat: 40.5, MinLon: -3.8, MaxLat: 40.3, MaxLon: -3.6}).Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "min_lat")
+}
+
 func TestBoundsContainsAndIntersects(t *testing.T) {
 	t.Parallel()
 	b := Bounds{MinLat: 0, MinLon: 0, MaxLat: 10, MaxLon: 10}
@@ -270,12 +282,12 @@ func TestLayerRowToDefinitionDecodesJSON(t *testing.T) {
 func TestLayerRowToDefinitionRejectsUnknownEnum(t *testing.T) {
 	t.Parallel()
 	row := LayerRow{
-		ID:            uuid.New(),
-		SourceKind:    "weird",
-		GeometryType:  "point",
-		Style:         []byte("{}"),
-		Features:      []byte("[]"),
-		Tags:          []byte("[]"),
+		ID:           uuid.New(),
+		SourceKind:   "weird",
+		GeometryType: "point",
+		Style:        []byte("{}"),
+		Features:     []byte("[]"),
+		Tags:         []byte("[]"),
 	}
 	_, err := row.ToDefinition()
 	require.Error(t, err)

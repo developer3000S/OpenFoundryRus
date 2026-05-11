@@ -2,6 +2,15 @@
 
 Go runtime for the Foundry Data Connection app migration. The Go service now uses the same runtime configuration names and defaults as the Rust service where those defaults exist.
 
+## Compatibility naming
+
+Data Connection public payloads should follow the frozen terminology in
+[`docs/reference/foundry-compatibility-glossary.md`](../../docs/reference/foundry-compatibility-glossary.md):
+use `source` for Data Connection sources, `source_rid` for stable source
+identity, `webhook` for outbound callable definitions, and `output_parameters`
+for parsed webhook/action outputs. Legacy `/connections` aliases may remain at
+the HTTP edge, but internal and new product docs should prefer `source`.
+
 ## Required in production
 
 | Variable | Description |

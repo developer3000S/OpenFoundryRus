@@ -4,12 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - "infra/k8s/platform/observability/prometheus-rules/**"
+      - "infra/observability/prometheus-rules/**"
       - ".github/workflows/prometheus-rules.yml"
   pull_request:
     branches: [main]
     paths:
-      - "infra/k8s/platform/observability/prometheus-rules/**"
+      - "infra/observability/prometheus-rules/**"
       - ".github/workflows/prometheus-rules.yml"
 
 permissions:
@@ -35,6 +35,6 @@ jobs:
             /usr/local/bin/promtool
           promtool --version
       - name: Check rule syntax (all components)
-        run: promtool check rules infra/k8s/platform/observability/prometheus-rules/*.yaml
+        run: promtool check rules infra/observability/prometheus-rules/*.yaml
       - name: Run alert unit tests
-        run: promtool test rules infra/k8s/platform/observability/prometheus-rules/tests/*.yaml
+        run: promtool test rules infra/observability/prometheus-rules/tests/*.yaml

@@ -80,5 +80,6 @@ func TestRoutesIncludesNewSpatialEndpoints(t *testing.T) {
 	}
 	require.NoError(t, chi.Walk(router, walker))
 	assert.True(t, seen["POST /query"], "POST /query missing: %v", seen)
+	assert.True(t, seen["POST /clusters"], "POST /clusters missing: %v", seen)
 	assert.True(t, seen["POST /cluster"], "POST /cluster missing: %v", seen)
 }

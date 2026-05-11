@@ -29,17 +29,18 @@ jobs:
           # S8 / ADR-0030: approvals-service merged → workflow-automation-service.
           # S8 / ADR-0030: automation-operations-service merged → workflow-automation-service.
           - audit-compliance-service
-          - data-asset-catalog-service
+          # S8 / ADR-0030: data-asset-catalog-service merged → dataset-versioning-service.
+          - dataset-versioning-service
           - edge-gateway-service
           - iceberg-catalog-service
           - identity-federation-service
           - ontology-actions-service
           - ontology-definition-service
           - ontology-indexer
-          - pipeline-authoring-service
+          # S8 / ADR-0030: pipeline-authoring-service and
+          # pipeline-schedule-service merged → pipeline-build-service.
           - pipeline-build-service
           - pipeline-runner
-          - pipeline-schedule-service
           - reindex-coordinator-service
           - sql-bi-gateway-service
           - workflow-automation-service
@@ -59,6 +60,8 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=sha
+      - name: Assert service Dockerfile exists
+        run: test -f "services/${{ matrix.service }}/Dockerfile"
       - uses: docker/build-push-action@v6
         with:
           context: .

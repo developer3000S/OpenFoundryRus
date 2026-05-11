@@ -52,6 +52,7 @@ type Dataset struct {
 // CreateDatasetRequest is the body of POST /v1/datasets, mirroring Rust
 // `CreateDatasetRequest`.
 type CreateDatasetRequest struct {
+	ID           *uuid.UUID      `json:"id,omitempty"`
 	Name         string          `json:"name"`
 	Description  *string         `json:"description,omitempty"`
 	Format       *string         `json:"format,omitempty"`
@@ -816,6 +817,13 @@ type StartTransactionBody struct {
 	Summary    *string         `json:"summary"`
 }
 
+type StageTransactionFile struct {
+	LogicalPath  string        `json:"logical_path"`
+	PhysicalPath string        `json:"physical_path"`
+	SizeBytes    int64         `json:"size_bytes"`
+	Operation    FileOperation `json:"operation"`
+}
+
 type ListTxQuery struct {
 	Branch *string `json:"branch"`
 	Before *string `json:"before"`
@@ -1082,6 +1090,43 @@ type SchemaResponse struct {
 
 type PutSchemaBody struct {
 	Schema DatasetSchema `json:"schema"`
+}
+
+type CommitDatasetOutputRequest struct {
+	CreateIfMissing bool                    `json:"create_if_missing"`
+	DatasetName     string                  `json:"dataset_name,omitempty"`
+	Description     *string                 `json:"description,omitempty"`
+	Format          *string                 `json:"format,omitempty"`
+	Branch          string                  `json:"branch,omitempty"`
+	TransactionType TransactionType         `json:"transaction_type,omitempty"`
+	Summary         string                  `json:"summary,omitempty"`
+	Provenance      JSONValue               `json:"provenance,omitempty"`
+	Schema          *DatasetSchema          `json:"schema,omitempty"`
+	Files           []CommitOutputFile      `json:"files,omitempty"`
+	PreviewColumns  []string                `json:"preview_columns,omitempty"`
+	PreviewRows     [][]JSONValue           `json:"preview_rows,omitempty"`
+	LineageLinks    []PutDatasetLineageLink `json:"lineage_links,omitempty"`
+	Metadata        JSONValue               `json:"metadata,omitempty"`
+}
+
+type CommitOutputFile struct {
+	LogicalPath string        `json:"logical_path"`
+	StoragePath string        `json:"storage_path,omitempty"`
+	SizeBytes   int64         `json:"size_bytes"`
+	ContentType *string       `json:"content_type,omitempty"`
+	Metadata    JSONValue     `json:"metadata,omitempty"`
+	Operation   FileOperation `json:"operation,omitempty"`
+}
+
+type CommitDatasetOutputResponse struct {
+	DatasetID    uuid.UUID               `json:"dataset_id"`
+	DatasetRID   string                  `json:"dataset_rid"`
+	Branch       string                  `json:"branch"`
+	Transaction  RuntimeTransaction      `json:"transaction"`
+	Schema       *DatasetSchema          `json:"schema,omitempty"`
+	Files        []DatasetFileIndexEntry `json:"files"`
+	Preview      PreviewDataResponse     `json:"preview"`
+	LineageLinks []DatasetLineageLink    `json:"lineage_links,omitempty"`
 }
 
 type ValidateRequest struct {

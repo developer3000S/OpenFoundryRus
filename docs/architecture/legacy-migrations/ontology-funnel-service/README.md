@@ -5,7 +5,7 @@ This service ingests datasets and streams into ontology objects
 sqlx migrations** — all storage today comes via
 `ontology-service`'s legacy schema (tables `ontology_funnel_sources`,
 `ontology_funnel_runs`, archived under
-[`legacy-migrations/ontology-definition-service/`](../ontology-definition-service/)).
+[`legacy-migrations/ontology-definition-service/`](../ontology-definition-service/README.md)).
 
 ## S1.7 split
 

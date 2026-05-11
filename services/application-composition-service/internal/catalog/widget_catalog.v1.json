@@ -1,0 +1,850 @@
+{
+  "catalog_version": "2026-05-11.ws.3",
+  "schema_version": "openfoundry.workshop.widget_catalog.v1",
+  "items": [
+    {
+      "widget_type": "text",
+      "widget_kind": "content",
+      "label": "Text block",
+      "description": "Markdown copy, briefing notes, and section headers.",
+      "category": "content",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "content": { "type": "string" },
+          "align": { "type": "string", "enum": ["left", "center", "right"] }
+        }
+      },
+      "input_variables": [],
+      "output_variables": [],
+      "events": [
+        {
+          "name": "click",
+          "label": "Click",
+          "description": "Runs configured click actions.",
+          "action_kinds": ["set_variable", "navigate", "open_url", "refresh"],
+          "payload_schema": { "type": "object", "properties": { "widget_id": { "type": "string" } } }
+        }
+      ],
+      "permissions": ["app:read"],
+      "display": {
+        "icon": "document",
+        "accent": "neutral",
+        "tags": ["markdown", "copy"],
+        "sort_order": 10,
+        "preferred_chrome": "plain"
+      },
+      "default_props": { "content": "### New section\nAdd context for this workspace." },
+      "default_size": { "width": 12, "height": 2 },
+      "supported_bindings": [],
+      "supports_children": false
+    },
+    {
+      "widget_type": "metric",
+      "widget_kind": "visualization",
+      "label": "Metric",
+      "description": "Single value with optional delta.",
+      "category": "analytics",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "value": { "type": ["string", "number"] },
+          "delta": { "type": ["string", "number"] },
+          "format": { "type": "string" },
+          "source_variable_id": { "type": "string" }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "value",
+          "kind": "primitive_or_table",
+          "label": "Metric value",
+          "description": "Primitive, query, dataset, or object-set aggregation used as the displayed value.",
+          "required": false
+        }
+      ],
+      "output_variables": [],
+      "events": [],
+      "permissions": ["app:read", "data:read"],
+      "display": {
+        "icon": "sparkles",
+        "accent": "green",
+        "tags": ["kpi", "value"],
+        "sort_order": 20,
+        "preferred_chrome": "card"
+      },
+      "default_props": { "value": "128", "delta": "+4.2%" },
+      "default_size": { "width": 3, "height": 2 },
+      "supported_bindings": ["query", "dataset", "object_set"],
+      "supports_children": false
+    },
+    {
+      "widget_type": "table",
+      "widget_kind": "visualization",
+      "label": "Table",
+      "description": "Paginated records from query, dataset, or object set bindings.",
+      "category": "analytics",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "page_size": { "type": "integer", "minimum": 1 },
+          "striped": { "type": "boolean" },
+          "columns": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "rows",
+          "kind": "table",
+          "label": "Rows",
+          "description": "Rows from a query, dataset, ontology object set, or binding.",
+          "required": false
+        }
+      ],
+      "output_variables": [
+        {
+          "id": "selected_row",
+          "kind": "row_selection",
+          "label": "Selected row",
+          "description": "The row selected by the user.",
+          "required": false
+        }
+      ],
+      "events": [
+        {
+          "name": "row_select",
+          "label": "Row select",
+          "description": "Runs when a row becomes selected.",
+          "action_kinds": ["set_variable", "navigate", "refresh"],
+          "payload_schema": { "type": "object", "properties": { "row_id": { "type": "string" } } }
+        }
+      ],
+      "permissions": ["app:read", "data:read", "ontology:read"],
+      "display": {
+        "icon": "list",
+        "accent": "blue",
+        "tags": ["rows", "grid"],
+        "sort_order": 30,
+        "preferred_chrome": "card"
+      },
+      "default_props": { "page_size": 8, "striped": true },
+      "default_size": { "width": 6, "height": 4 },
+      "supported_bindings": ["query", "dataset", "ontology", "object_set"],
+      "supports_children": false
+    },
+    {
+      "widget_type": "object_table",
+      "widget_kind": "object_set",
+      "label": "Object table",
+      "description": "Object-set table with selected object output.",
+      "category": "core",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "source_variable_id": { "type": "string" },
+          "columns": { "type": "array" },
+          "multi_select": { "type": "boolean" }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "object_set",
+          "kind": "object_set",
+          "label": "Object set",
+          "description": "Objects displayed as rows.",
+          "required": true
+        }
+      ],
+      "output_variables": [
+        {
+          "id": "selected_objects",
+          "kind": "object_set_selection",
+          "label": "Selected objects",
+          "description": "Selected objects published as an object set variable.",
+          "required": false
+        }
+      ],
+      "events": [
+        {
+          "name": "selection_change",
+          "label": "Selection change",
+          "description": "Runs after row selection changes.",
+          "action_kinds": ["set_variable", "navigate", "apply_action", "refresh"],
+          "payload_schema": { "type": "object", "properties": { "object_ids": { "type": "array", "items": { "type": "string" } } } }
+        }
+      ],
+      "permissions": ["app:read", "ontology:read"],
+      "display": {
+        "icon": "list",
+        "accent": "blue",
+        "tags": ["object-set", "selection"],
+        "sort_order": 40,
+        "preferred_chrome": "card"
+      },
+      "default_props": { "source_variable_id": "", "columns": [] },
+      "default_size": { "width": 7, "height": 4 },
+      "supported_bindings": ["object_set"],
+      "supports_children": false
+    },
+    {
+      "widget_type": "filter_list",
+      "widget_kind": "filter",
+      "label": "Filter list",
+      "description": "Filter controls backed by object set filter variables.",
+      "category": "filtering",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "source_variable_id": { "type": "string" },
+          "filters": { "type": "array" },
+          "layout": { "type": "string", "enum": ["vertical", "pill"] }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "object_set",
+          "kind": "object_set",
+          "label": "Object set",
+          "description": "Object set whose properties can be filtered.",
+          "required": true
+        }
+      ],
+      "output_variables": [
+        {
+          "id": "filters",
+          "kind": "object_set_filter",
+          "label": "Object-set filters",
+          "description": "Filter variable emitted by the widget.",
+          "required": false
+        }
+      ],
+      "events": [
+        {
+          "name": "filter_change",
+          "label": "Filter change",
+          "description": "Runs after filter values change.",
+          "action_kinds": ["set_variable", "refresh"],
+          "payload_schema": { "type": "object", "properties": { "filter_count": { "type": "integer" } } }
+        }
+      ],
+      "permissions": ["app:read", "ontology:read"],
+      "display": {
+        "icon": "settings",
+        "accent": "orange",
+        "tags": ["filter", "object-set"],
+        "sort_order": 50,
+        "preferred_chrome": "panel"
+      },
+      "default_props": { "source_variable_id": "", "filters": [] },
+      "default_size": { "width": 4, "height": 4 },
+      "supported_bindings": ["object_set"],
+      "supports_children": false
+    },
+    {
+      "widget_type": "property_list",
+      "widget_kind": "object_set",
+      "label": "Property list",
+      "description": "Selected-object property display.",
+      "category": "core",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "source_variable_id": { "type": "string" },
+          "properties": { "type": "array" },
+          "hide_nulls": { "type": "boolean" }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "selected_object",
+          "kind": "object_set_selection",
+          "label": "Selected object",
+          "description": "One selected object or single-row object set.",
+          "required": true
+        }
+      ],
+      "output_variables": [],
+      "events": [],
+      "permissions": ["app:read", "ontology:read"],
+      "display": {
+        "icon": "document",
+        "accent": "teal",
+        "tags": ["properties", "details"],
+        "sort_order": 60,
+        "preferred_chrome": "card"
+      },
+      "default_props": { "source_variable_id": "", "properties": [] },
+      "default_size": { "width": 4, "height": 4 },
+      "supported_bindings": ["object_set"],
+      "supports_children": false
+    },
+    {
+      "widget_type": "object_set_title",
+      "widget_kind": "object_set",
+      "label": "Object set title",
+      "description": "Count or title for an object set.",
+      "category": "core",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "source_variable_id": { "type": "string" },
+          "title_template": { "type": "string" },
+          "show_count": { "type": "boolean" }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "object_set",
+          "kind": "object_set",
+          "label": "Object set",
+          "description": "Object set summarized by the title.",
+          "required": true
+        }
+      ],
+      "output_variables": [],
+      "events": [],
+      "permissions": ["app:read", "ontology:read"],
+      "display": {
+        "icon": "document",
+        "accent": "teal",
+        "tags": ["title", "count"],
+        "sort_order": 70,
+        "preferred_chrome": "plain"
+      },
+      "default_props": { "source_variable_id": "" },
+      "default_size": { "width": 4, "height": 2 },
+      "supported_bindings": ["object_set"],
+      "supports_children": false
+    },
+    {
+      "widget_type": "chart",
+      "widget_kind": "visualization",
+      "label": "Chart",
+      "description": "Line, bar, area, pie, or scatter visualizations.",
+      "category": "analytics",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "chart_type": { "type": "string", "enum": ["line", "bar", "area", "pie", "scatter"] },
+          "x_field": { "type": "string" },
+          "y_field": { "type": "string" },
+          "series_field": { "type": "string" }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "data",
+          "kind": "table",
+          "label": "Chart data",
+          "description": "Tabular data used to compute the chart series.",
+          "required": false
+        }
+      ],
+      "output_variables": [
+        {
+          "id": "selected_points",
+          "kind": "chart_selection",
+          "label": "Selected points",
+          "description": "Selected chart marks or source rows.",
+          "required": false
+        }
+      ],
+      "events": [
+        {
+          "name": "mark_select",
+          "label": "Mark select",
+          "description": "Runs when a chart mark is selected.",
+          "action_kinds": ["set_variable", "refresh"],
+          "payload_schema": { "type": "object", "properties": { "series": { "type": "string" } } }
+        }
+      ],
+      "permissions": ["app:read", "data:read"],
+      "display": {
+        "icon": "graph",
+        "accent": "purple",
+        "tags": ["visualization", "chart"],
+        "sort_order": 80,
+        "preferred_chrome": "card"
+      },
+      "default_props": { "chart_type": "line", "x_field": "label", "y_field": "value" },
+      "default_size": { "width": 6, "height": 4 },
+      "supported_bindings": ["query", "dataset", "object_set"],
+      "supports_children": false
+    },
+    {
+      "widget_type": "chart_xy",
+      "widget_kind": "visualization",
+      "label": "XY chart",
+      "description": "Object-aware XY chart.",
+      "category": "visualization",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "source_variable_id": { "type": "string" },
+          "x_property": { "type": "string" },
+          "y_property": { "type": "string" },
+          "series_kind": { "type": "string", "enum": ["bar", "line", "scatter"] }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "object_set",
+          "kind": "object_set",
+          "label": "Object set",
+          "description": "Object set plotted on the chart.",
+          "required": true
+        }
+      ],
+      "output_variables": [
+        {
+          "id": "selected_objects",
+          "kind": "object_set_selection",
+          "label": "Selected objects",
+          "description": "Objects selected by chart interaction.",
+          "required": false
+        }
+      ],
+      "events": [
+        {
+          "name": "mark_select",
+          "label": "Mark select",
+          "description": "Runs when a chart mark is selected.",
+          "action_kinds": ["set_variable", "refresh"],
+          "payload_schema": { "type": "object", "properties": { "object_id": { "type": "string" } } }
+        }
+      ],
+      "permissions": ["app:read", "ontology:read"],
+      "display": {
+        "icon": "graph",
+        "accent": "purple",
+        "tags": ["object-set", "xy"],
+        "sort_order": 90,
+        "preferred_chrome": "card"
+      },
+      "default_props": { "source_variable_id": "", "x_property": "", "y_property": "", "series_kind": "bar" },
+      "default_size": { "width": 6, "height": 4 },
+      "supported_bindings": ["object_set"],
+      "supports_children": false
+    },
+    {
+      "widget_type": "chart_pie",
+      "widget_kind": "visualization",
+      "label": "Pie chart",
+      "description": "Object-aware pie chart.",
+      "category": "visualization",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "source_variable_id": { "type": "string" },
+          "label_property": { "type": "string" },
+          "value_property": { "type": "string" }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "object_set",
+          "kind": "object_set",
+          "label": "Object set",
+          "description": "Object set aggregated into pie slices.",
+          "required": true
+        }
+      ],
+      "output_variables": [
+        {
+          "id": "selected_slice",
+          "kind": "object_set_filter",
+          "label": "Selected slice filter",
+          "description": "Filter implied by a selected pie slice.",
+          "required": false
+        }
+      ],
+      "events": [
+        {
+          "name": "slice_select",
+          "label": "Slice select",
+          "description": "Runs when a pie slice is selected.",
+          "action_kinds": ["set_variable", "refresh"],
+          "payload_schema": { "type": "object", "properties": { "label": { "type": "string" } } }
+        }
+      ],
+      "permissions": ["app:read", "ontology:read"],
+      "display": {
+        "icon": "graph",
+        "accent": "purple",
+        "tags": ["object-set", "pie"],
+        "sort_order": 100,
+        "preferred_chrome": "card"
+      },
+      "default_props": { "source_variable_id": "", "label_property": "", "value_property": "" },
+      "default_size": { "width": 5, "height": 4 },
+      "supported_bindings": ["object_set"],
+      "supports_children": false
+    },
+    {
+      "widget_type": "scenario",
+      "widget_kind": "control",
+      "label": "Scenario controls",
+      "description": "What-if parameters that feed runtime bindings and agents.",
+      "category": "workshop",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "headline": { "type": "string" },
+          "parameters": { "type": "array" },
+          "apply_label": { "type": "string" },
+          "reset_label": { "type": "string" }
+        }
+      },
+      "input_variables": [],
+      "output_variables": [
+        {
+          "id": "scenario_values",
+          "kind": "scenario",
+          "label": "Scenario values",
+          "description": "Current what-if parameter values.",
+          "required": false
+        }
+      ],
+      "events": [
+        {
+          "name": "apply",
+          "label": "Apply",
+          "description": "Runs when scenario values are applied.",
+          "action_kinds": ["set_variable", "refresh", "apply_action"],
+          "payload_schema": { "type": "object", "properties": { "parameters": { "type": "object" } } }
+        },
+        {
+          "name": "reset",
+          "label": "Reset",
+          "description": "Runs when scenario values are reset.",
+          "action_kinds": ["set_variable", "refresh"],
+          "payload_schema": { "type": "object" }
+        }
+      ],
+      "permissions": ["app:read"],
+      "display": {
+        "icon": "settings",
+        "accent": "orange",
+        "tags": ["scenario", "control"],
+        "sort_order": 110,
+        "preferred_chrome": "panel"
+      },
+      "default_props": {
+        "headline": "Scenario controls",
+        "parameters": [
+          { "name": "demand_multiplier", "label": "Demand multiplier", "type": "number", "default_value": "1.0" }
+        ],
+        "apply_label": "Apply scenario",
+        "reset_label": "Reset"
+      },
+      "default_size": { "width": 5, "height": 4 },
+      "supported_bindings": [],
+      "supports_children": false
+    },
+    {
+      "widget_type": "agent",
+      "widget_kind": "ai",
+      "label": "Embedded agent",
+      "description": "Prompt box backed by an OpenFoundry agent.",
+      "category": "ai",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "agent_id": { "type": "string" },
+          "welcome_message": { "type": "string" },
+          "submit_label": { "type": "string" }
+        },
+        "required": ["agent_id"]
+      },
+      "input_variables": [
+        {
+          "id": "context",
+          "kind": "primitive_or_object_set",
+          "label": "Agent context",
+          "description": "Optional variable context sent with the prompt.",
+          "required": false
+        }
+      ],
+      "output_variables": [
+        {
+          "id": "response",
+          "kind": "agent_response",
+          "label": "Agent response",
+          "description": "Latest response returned by the embedded agent.",
+          "required": false
+        }
+      ],
+      "events": [
+        {
+          "name": "submit",
+          "label": "Submit",
+          "description": "Runs when a prompt is submitted.",
+          "action_kinds": ["invoke_agent", "set_variable"],
+          "payload_schema": { "type": "object", "properties": { "prompt": { "type": "string" } } }
+        }
+      ],
+      "permissions": ["app:read", "agent:invoke"],
+      "display": {
+        "icon": "sparkles",
+        "accent": "violet",
+        "tags": ["agent", "ai"],
+        "sort_order": 120,
+        "preferred_chrome": "card"
+      },
+      "default_props": {
+        "agent_id": "",
+        "welcome_message": "Ask the embedded agent for help.",
+        "submit_label": "Run agent"
+      },
+      "default_size": { "width": 7, "height": 4 },
+      "supported_bindings": [],
+      "supports_children": false
+    },
+    {
+      "widget_type": "button",
+      "widget_kind": "action",
+      "label": "Action button",
+      "description": "Trigger navigation, links, filters, or workflow actions.",
+      "category": "actions",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "label": { "type": "string" },
+          "variant": { "type": "string", "enum": ["primary", "secondary", "danger"] },
+          "events": { "type": "array" }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "action_context",
+          "kind": "primitive_or_object_set",
+          "label": "Action context",
+          "description": "Optional context passed to button actions.",
+          "required": false
+        }
+      ],
+      "output_variables": [],
+      "events": [
+        {
+          "name": "click",
+          "label": "Click",
+          "description": "Runs when the button is clicked.",
+          "action_kinds": ["set_variable", "navigate", "open_url", "apply_action", "refresh", "export"],
+          "payload_schema": { "type": "object" }
+        }
+      ],
+      "permissions": ["app:read", "action:execute"],
+      "display": {
+        "icon": "run",
+        "accent": "green",
+        "tags": ["action", "button"],
+        "sort_order": 130,
+        "preferred_chrome": "plain"
+      },
+      "default_props": { "label": "Run action", "variant": "primary" },
+      "default_size": { "width": 3, "height": 1 },
+      "supported_bindings": [],
+      "supports_children": false
+    },
+    {
+      "widget_type": "button_group",
+      "widget_kind": "action",
+      "label": "Button group",
+      "description": "Trigger one or more Workshop actions.",
+      "category": "actions",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "buttons": { "type": "array" },
+          "orientation": { "type": "string", "enum": ["horizontal", "vertical"] }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "action_context",
+          "kind": "primitive_or_object_set",
+          "label": "Action context",
+          "description": "Optional context passed to group actions.",
+          "required": false
+        }
+      ],
+      "output_variables": [
+        {
+          "id": "last_action",
+          "kind": "primitive",
+          "label": "Last action",
+          "description": "Identifier of the most recent button action.",
+          "required": false
+        }
+      ],
+      "events": [
+        {
+          "name": "button_click",
+          "label": "Button click",
+          "description": "Runs when a button in the group is clicked.",
+          "action_kinds": ["set_variable", "navigate", "open_url", "apply_action", "refresh", "export"],
+          "payload_schema": { "type": "object", "properties": { "button_id": { "type": "string" } } }
+        }
+      ],
+      "permissions": ["app:read", "action:execute"],
+      "display": {
+        "icon": "run",
+        "accent": "green",
+        "tags": ["action", "group"],
+        "sort_order": 140,
+        "preferred_chrome": "plain"
+      },
+      "default_props": { "buttons": [] },
+      "default_size": { "width": 4, "height": 2 },
+      "supported_bindings": [],
+      "supports_children": false
+    },
+    {
+      "widget_type": "map",
+      "widget_kind": "geospatial",
+      "label": "Map",
+      "description": "MapLibre object layers with points, lines, polygons, selection, and tooltips.",
+      "category": "spatial",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "base_layer_kind": { "type": "string", "enum": ["blank", "raster"] },
+          "layers": { "type": "array" },
+          "overlay_layers": { "type": "array" },
+          "output_object_set_variable_id": { "type": "string" },
+          "output_shape_variable_id": { "type": "string" }
+        }
+      },
+      "input_variables": [
+        {
+          "id": "layers",
+          "kind": "table_or_object_set",
+          "label": "Layer data",
+          "description": "Object sets, queries, datasets, or saved geospatial layers rendered on the map.",
+          "required": false
+        }
+      ],
+      "output_variables": [
+        {
+          "id": "active_object",
+          "kind": "object",
+          "label": "Active object",
+          "description": "Object currently clicked or focused on the map.",
+          "required": false
+        },
+        {
+          "id": "selected_objects",
+          "kind": "object_set_selection",
+          "label": "Selected objects",
+          "description": "Map-selected objects as an object set variable.",
+          "required": false
+        },
+        {
+          "id": "drawn_shape",
+          "kind": "geojson_shape",
+          "label": "Drawn shape",
+          "description": "GeoJSON shape drawn by the user.",
+          "required": false
+        },
+        {
+          "id": "shape_search_results",
+          "kind": "object_set",
+          "label": "Shape search results",
+          "description": "Objects intersecting the drawn shape.",
+          "required": false
+        }
+      ],
+      "events": [
+        {
+          "name": "object_select",
+          "label": "Object select",
+          "description": "Runs when a map feature is selected.",
+          "action_kinds": ["set_variable", "navigate", "apply_action", "refresh"],
+          "payload_schema": { "type": "object", "properties": { "object_id": { "type": "string" } } }
+        },
+        {
+          "name": "shape_change",
+          "label": "Shape change",
+          "description": "Runs when a drawn shape changes.",
+          "action_kinds": ["set_variable", "refresh"],
+          "payload_schema": { "type": "object", "properties": { "geojson": { "type": "object" } } }
+        }
+      ],
+      "permissions": ["app:read", "geospatial:read", "ontology:read"],
+      "display": {
+        "icon": "object",
+        "accent": "blue",
+        "tags": ["map", "geojson", "object-set"],
+        "sort_order": 150,
+        "preferred_chrome": "tool"
+      },
+      "default_props": {
+        "base_layer_kind": "blank",
+        "latitude_field": "lat",
+        "longitude_field": "lon",
+        "label_field": "label",
+        "layers": [
+          {
+            "id": "points",
+            "title": "Objects",
+            "source": "binding",
+            "geometry_type": "point",
+            "latitude_field": "lat",
+            "longitude_field": "lon",
+            "label_field": "label",
+            "color": "#2d72d2",
+            "visible": true
+          }
+        ]
+      },
+      "default_size": { "width": 8, "height": 4 },
+      "supported_bindings": ["query", "dataset", "object_set"],
+      "supports_children": false
+    },
+    {
+      "widget_type": "container",
+      "widget_kind": "layout",
+      "label": "Container",
+      "description": "Grouped nested widget section for composite layouts.",
+      "category": "layout",
+      "config_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "title": { "type": "string" },
+          "variant": { "type": "string", "enum": ["plain", "card", "section"] }
+        }
+      },
+      "input_variables": [],
+      "output_variables": [],
+      "events": [],
+      "permissions": ["app:read"],
+      "display": {
+        "icon": "cube",
+        "accent": "neutral",
+        "tags": ["layout", "children"],
+        "sort_order": 160,
+        "preferred_chrome": "section"
+      },
+      "default_props": { "title": "Section", "variant": "card" },
+      "default_size": { "width": 12, "height": 4 },
+      "supported_bindings": [],
+      "supports_children": true
+    }
+  ]
+}

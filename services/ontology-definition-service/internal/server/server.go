@@ -62,6 +62,8 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, m *obs
 		// optionally filters by `object_type_id`; same handler for both.
 		api.Get("/links", h.ListLinkTypes)
 		api.Post("/links", h.CreateLinkType)
+		api.Get("/links/{id}", h.GetLinkType)
+		api.Patch("/links/{id}", h.UpdateLinkType)
 	}
 
 	// Mount on both the legacy `/api/v1/ontology-definition` prefix

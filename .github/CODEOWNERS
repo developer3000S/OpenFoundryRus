@@ -26,15 +26,14 @@
 /CHANGELOG.md                                   @open-foundry/maintainers
 /LICENSE                                        @open-foundry/maintainers
 /ROADMAP.md                                     @open-foundry/maintainers
-/Cargo.toml                                     @open-foundry/architecture-council @open-foundry/platform-runtime
-/Cargo.lock                                     @open-foundry/platform-runtime
+/go.mod                                         @open-foundry/architecture-council @open-foundry/platform-runtime
+/go.sum                                         @open-foundry/platform-runtime
+/Makefile                                       @open-foundry/platform-runtime
+/.golangci.yml                                  @open-foundry/architecture-council @open-foundry/platform-runtime
 /package.json                                   @open-foundry/frontend-team
 /pnpm-workspace.yaml                            @open-foundry/frontend-team
 /pnpm-lock.yaml                                 @open-foundry/frontend-team
 /justfile                                       @open-foundry/platform-runtime
-/clippy.toml                                    @open-foundry/architecture-council
-/rustfmt.toml                                   @open-foundry/architecture-council
-/deny.toml                                      @open-foundry/security-team
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GitHub configuration & CI
@@ -59,8 +58,8 @@
 /libs/storage-abstraction/                      @open-foundry/data-platform
 /libs/query-engine/                             @open-foundry/data-platform
 /libs/vector-store/                             @open-foundry/ai-platform
-/libs/ml-kernel/                                @open-foundry/ai-platform
-/libs/ai-kernel/                                @open-foundry/ai-platform
+/libs/ml-kernel-go/                             @open-foundry/ai-platform
+/libs/ai-kernel-go/                             @open-foundry/ai-platform
 /libs/ontology-kernel/                          @open-foundry/ontology-team
 /libs/geospatial-core/                          @open-foundry/analytics-team
 /libs/plugin-sdk/                               @open-foundry/developer-platform
@@ -113,12 +112,15 @@
 # Infrastructure (infra/)
 # ─────────────────────────────────────────────────────────────────────────────
 /infra/                                         @open-foundry/platform-runtime
-/infra/docker-compose.dev.yml                   @open-foundry/platform-runtime
-/infra/docker-compose.yml                       @open-foundry/platform-runtime
-/infra/k8s/                                     @open-foundry/platform-runtime
-/infra/k8s/platform/observability/             @open-foundry/observability-team @open-foundry/platform-runtime
-/infra/local/nginx/                             @open-foundry/platform-runtime
-/infra/local/postgres-init/                     @open-foundry/data-platform
+/compose.yaml                                   @open-foundry/platform-runtime
+/infra/compose/                                 @open-foundry/platform-runtime
+/infra/compose/docker-compose.dev.yml           @open-foundry/platform-runtime
+/infra/compose/docker-compose.yml               @open-foundry/platform-runtime
+/infra/compose/local/nginx/                     @open-foundry/platform-runtime
+/infra/compose/local/postgres-init/             @open-foundry/data-platform
+/infra/helm/                                    @open-foundry/platform-runtime
+/infra/helm/infra/observability/                @open-foundry/observability-team @open-foundry/platform-runtime
+/infra/observability/                           @open-foundry/observability-team @open-foundry/platform-runtime
 /infra/terraform/                               @open-foundry/platform-runtime @open-foundry/security-team
 /infra/runbooks/                                @open-foundry/observability-team @open-foundry/platform-runtime
 /infra/scripts/                                 @open-foundry/platform-runtime

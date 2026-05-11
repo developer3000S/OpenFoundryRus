@@ -1,6 +1,6 @@
 # OpenFoundry Python SDK
 
-Generated from `apps/web/static/generated/openapi/openfoundry.json`.
+Generated from `apps/web/public/generated/openapi/openfoundry.json`.
 
 Version: `0.1.0`
 

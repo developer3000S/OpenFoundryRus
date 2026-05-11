@@ -98,6 +98,9 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 }
 
 func parseArgs(args []string, stderr io.Writer) (cliConfig, error) {
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
 		return cliConfig{}, errors.New(usage)
 	}

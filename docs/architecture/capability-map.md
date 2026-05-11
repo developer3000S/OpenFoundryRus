@@ -23,7 +23,10 @@ The P2 flow shows the core operational backbone:
 - operate on the data
 - expose results through pipelines, queries, streaming, reports, and maps
 
-This is reflected in service folders such as `data-connector`, `dataset-service`, `pipeline-service`, `sql-bi-gateway-service`, `streaming-service`, `report-service`, and `geospatial-service`.
+This is reflected in service folders such as `connector-management-service`,
+`ingestion-replication-service`, `dataset-versioning-service`,
+`pipeline-build-service`, `sql-bi-gateway-service`, `notebook-runtime-service`,
+and `ontology-exploratory-analysis-service`.
 
 ### Semantic and governance layer
 
@@ -34,30 +37,33 @@ That capability is reflected in a family of dedicated ontology services:
 - `ontology-definition-service` — control plane for schema, governance, and definitions
 - `object-database-service` — write authority for object and link instances
 - `ontology-query-service` — serving plane for search, graph, views, and KNN
-- `ontology-actions-service` — action validation and execution
-- `ontology-security-service` — policy compilation and permission-aware query filters
-- `ontology-funnel-service` — batch ingestion
-- `ontology-functions-service` — function runtime
+- `ontology-actions-service` — action validation/execution plus the consolidated funnel, function runtime, and rule/policy surfaces
 
-Together with `audit-service`, `auth-service`, and related shared middleware, these services implement the CQRS ontology stack described in the architecture documentation.
+Together with `audit-compliance-service`, `identity-federation-service`,
+`authorization-policy-service`, and related shared middleware, these services
+implement the CQRS ontology stack described in the architecture documentation.
 
 #### `ontology-actions-service` — runtime detail
 
-`ontology-actions-service` is the dedicated binary that hosts the Action Types
-runtime extracted from the legacy ontology service. Its router is built by
-`ontology_actions_service::build_router` (in `services/ontology-actions-service/src/lib.rs`)
-and the handlers themselves live in `libs/ontology-kernel`. Full HTTP contract,
-environment variables and Foundry mapping are documented in
+`ontology-actions-service` is the dedicated Go binary that hosts the Action
+Types runtime extracted from the legacy ontology service. Its router is built by
+`server.BuildRouter` in
+`services/ontology-actions-service/internal/server/server.go`, and the handlers
+themselves live in `libs/ontology-kernel`. Full HTTP contract, environment
+variables and Foundry mapping are documented in
 [`services/ontology-actions-service/README.md`](../../services/ontology-actions-service/README.md).
 
 Runtime dependencies (configurable via environment variables — defaults match
-the in-cluster service map in `services/edge-gateway-service/src/config.rs`):
+the in-cluster service map in
+`services/edge-gateway-service/internal/config/config.go`):
 
 - **Postgres** — owns the `action_types`, `action_executions` (revert ledger),
   `action_what_if_branches` and `action_execution_side_effects` tables.
-  Migrations under `services/ontology-actions-service/migrations/` are applied
-  on startup; the integration suite under
-  `libs/ontology-kernel/tests/actions_integration.rs` reuses the same files.
+  Definition metadata is accessed through the Go
+  `domain.NewPostgresDefinitionStore` boundary in `libs/ontology-kernel`.
+  Runtime object/link/action hot-path stores are wired through
+  Cassandra/Scylla, with idempotent table migrations supplied by
+  `libs/cassandra-kernel.OntologyRuntimeMigrations`.
 - **`audit-compliance-service`** — every `execute_action` /
   `execute_action_batch` / inline-edit emits a structured audit event (success,
   denied, failure). Failure to deliver is logged but never aborts the action.
@@ -74,19 +80,24 @@ the in-cluster service map in `services/edge-gateway-service/src/config.rs`):
 
 Observability:
 
-- Prometheus counters exported from `ontology_kernel::metrics` (`action_executions_total`,
-  `action_failures_total{failure_type}`, latency histograms).
+- Prometheus counters exported from `libs/ontology-kernel/metrics`
+  (`action_executions_total`, `action_failures_total{failure_type}`, latency
+  histograms).
 - JSON aggregation surface at `GET /api/v1/ontology/actions/{id}/metrics?window=…`
   computed directly from the `action_executions` ledger.
 
-End-to-end coverage runs via `just test-actions` (Rust integration suite +
-Playwright spec at `apps/web/tests/e2e/action-types.spec.ts`).
+Backend coverage runs through Go tests such as
+`go test ./services/ontology-actions-service/... ./libs/ontology-kernel/...`.
+End-to-end coverage uses smoke scenarios via
+`go run ./tools/of-cli -- smoke run --scenario <file> --output <file>`.
 
 ### Developer platform
 
 The P4 flow demonstrates that the platform also includes repository-like development primitives such as branches, commits, search, and review-oriented flows.
 
-That capability maps cleanly onto `code-repo-service`, and connects naturally with `app-builder-service` and `marketplace-service`.
+That capability maps cleanly onto `code-repository-review-service`, and
+connects naturally with `application-composition-service` and
+`federation-product-exchange-service`.
 
 ### AI and ML
 
@@ -98,7 +109,10 @@ The P5 flow shows provider-backed AI and ML capabilities as first-class parts of
 - semantic search
 - model training jobs
 
-This is represented by `ai-service`, `ml-service`, and supporting shared crates such as `vector-store`.
+This is represented by `agent-runtime-service`, `llm-catalog-service`,
+`retrieval-context-service`, `ai-evaluation-service`, `model-catalog-service`,
+`model-deployment-service`, and supporting shared Go packages such as
+`libs/ai-kernel-go`.
 
 ### Enterprise analytics
 
@@ -109,7 +123,7 @@ The P6 flow extends the runtime path into richer analytics and geospatial use ca
 If you need to understand a product area quickly, start with the matching smoke scenario and then read:
 
 1. the corresponding frontend route in `apps/web/src/routes`
-2. the service crate under `services/`
+2. the service directory under `services/`
 3. the domain contracts under `proto/`
 
 That path usually gives you the shortest route from user behavior to implementation.

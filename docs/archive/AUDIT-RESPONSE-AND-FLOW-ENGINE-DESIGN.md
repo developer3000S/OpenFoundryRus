@@ -134,7 +134,7 @@ Coste estimado: 2‑3 sprints. Beneficio: observabilidad realmente operativa.
 
 **Cómo se adopta:**
 
-1. Etiquetar nodos con `openfoundry.io/chassis=<frame-id>` y `openfoundry.io/rack=<rack>` en bootstrap.
+1. Etiquetar nodos con `openfoundry.io/chassis={frame_id}` y `openfoundry.io/rack={rack}` en bootstrap.
 2. CRUSH map declarado en values.yaml con regla `step chooseleaf firstn 0 type chassis`.
 3. EC 8+3 con `failureDomain: chassis` para pools de datos generales; EC 4+2 con `failureDomain: rack` para pools Iceberg críticos.
 4. Mon=5 con `topologySpreadConstraints` por chassis.
@@ -459,7 +459,7 @@ La divergencia con el prompt se cierra con un ADR formal explicando criterios. Y
 
 **Mantengo. No introducir StarRocks por adelantado.** Justificación:
 
-- **StarRocks soluciona un problema real solo si el SLO de dashboards interactivos es < 200ms p99 con cardinalidades altas (>100M filas).** Si ese SLO no está medido y validado contra Trino, introducir StarRocks es over‑engineering.
+- **StarRocks soluciona un problema real solo si el SLO de dashboards interactivos es menor que 200ms p99 con cardinalidades altas (mas de 100M filas).** Si ese SLO no está medido y validado contra Trino, introducir StarRocks es over‑engineering.
 - **ADR‑0014 retiró Trino, ADR‑0029 lo reintrodujo.** Esto refleja maduración: el equipo entendió por qué hacía falta. Trino es el mejor federated SQL open source, y para "analítica histórica con federación" cumple.
 - **DataFusion local + Iceberg via Flight SQL** cubre el caso de "consulta cacheable o de dataset acotado" con latencias sub‑segundo. Ya está integrado en `sql-bi-gateway-service`.
 - **Materializaciones en Cassandra + Vespa** cubren los read models hot. Si un dashboard concreto necesita < 200 ms p99, se materializa específicamente — no se introduce todo un OLAP store por cubrir un caso.
@@ -776,7 +776,7 @@ Hay otras alternativas (Cadence, que es la versión Uber pre‑Temporal; Conduct
         └────────────────────────────────────────────────────────────────┘
                                    │                          │
                   NATS subjects   │                         │  Kafka topics
-                  flow.tasks.<type>│                         │  flow.events.v1
+                  flow.tasks.{type} │                        │  flow.events.v1
                                    ▼                          ▼
                   ┌──────────────────────────┐     audit-sink → Iceberg
                   │  Workers (Deployments)   │
@@ -997,11 +997,11 @@ tasks:
 #### 14.2 Convenciones
 
 - `${input.X}` resuelve a inputs del workflow.
-- `${tasks.<id>.output.X}` resuelve a output de una tarea anterior.
+- `${tasks.{id}.output.X}` resuelve a output de una tarea anterior.
 - `${var.X}` resuelve a variable definida con `set_variable`.
 - `${secrets.X}` resuelve a un secret referenciado por nombre (no embebido).
 - Expressions: subset de jq (`length`, `keys`, `select`, `map`, comparaciones).
-- `out: <name>` asigna el output de la tarea a `tasks.<id>.output` y opcionalmente a una variable.
+- `out: {name}` asigna el output de la tarea a `tasks.{id}.output` y opcionalmente a una variable.
 
 #### 14.3 Control flow
 
@@ -1054,7 +1054,7 @@ tasks:
 - **kafka_publish** — publica un mensaje a un topic.
 - **ontology_action** — ejecuta una acción de la ontología (vía ontology-actions-service).
 - **connector** — invoca un conector (data ingestion, webhook, etc.).
-- **custom** — `task_type: custom.<name>`, lo recoge un worker registrado.
+- **custom** — `task_type: custom.{name}`, lo recoge un worker registrado.
 
 #### 15.3 Tareas humanas
 
@@ -1218,8 +1218,8 @@ on_failure:
 4. Engine DAGExecutor encuentra el primer task; lo inserta en `flow.task_runs` (state=scheduled).
 5. Se publica un evento `flow.events.v1` (`run.started`) vía outbox.
 6. Si la tarea es de engine (decision, fork…), engine la ejecuta inline y avanza.
-7. Si la tarea es de worker, se publica a NATS subject `flow.tasks.<task_type>`.
-8. Worker hace poll, reclama (UPDATE state=claimed, claimed_by=<id>, deadline_at=now()+timeout), ejecuta, y POST `/complete` o `/fail`.
+7. Si la tarea es de worker, se publica a NATS subject `flow.tasks.{task_type}`.
+8. Worker hace poll, reclama (UPDATE state=claimed, claimed_by={id}, deadline_at=now()+timeout), ejecuta, y POST `/complete` o `/fail`.
 9. Engine procesa la respuesta, avanza el DAG, repite.
 10. Cuando no quedan tareas pendientes, run pasa a state=succeeded.
 11. Se publica `run.completed` vía outbox.
@@ -1274,7 +1274,7 @@ func (w *Worker) Register(taskType string, h Handler) { /* ... */ }
 
 func (w *Worker) Run(ctx context.Context) error {
     // 1. Connect to NATS
-    // 2. Subscribe to flow.tasks.<taskType> for each registered handler
+    // 2. Subscribe to flow.tasks.{taskType} for each registered handler
     // 3. On message: respect bulkhead semaphore, claim via API,
     //    execute handler, complete/fail via API
     // 4. Heartbeat each task every 5s
@@ -1337,7 +1337,7 @@ const w = new Worker({
   concurrency: 16,
 });
 
-w.register<{ document_ids: string[] }>(
+w.register(
   'classify_documents',
   async (input) => {
     const args = input.payload;
@@ -1486,7 +1486,7 @@ Cada transición publica un evento `flow.events.v1` vía outbox:
 
 ```json
 {
-  "event_id": "<deterministic uuid v5>",
+  "event_id": "{deterministic uuid v5}",
   "kind": "task.completed",
   "run_id": "...",
   "task_run_id": "...",
@@ -1505,11 +1505,11 @@ audit-sink consume y materializa a Iceberg `of_audit.flow_events` con retention 
 
 Tres puntos de evaluación:
 
-1. **Run start.** `Permit (principal, action: "Flow::Run", resource: Flow::"<name>:<version>") when …`
+1. **Run start.** `Permit (principal, action: "Flow::Run", resource: Flow::"{name}:{version}") when …`
    - Política puede restringir qué workflows un user puede ejecutar.
    - Política puede restringir input (e.g., solo tu tenant).
 
-2. **Human task respond.** `Permit (principal, action: "FlowHumanTask::Respond", resource: HumanTask::"<id>")`
+2. **Human task respond.** `Permit (principal, action: "FlowHumanTask::Respond", resource: HumanTask::"{id}")`
    - Verifica que el principal está en el rol/usuario asignado.
    - Verifica que el principal tiene clearance para ver el form_data.
 
@@ -1521,7 +1521,7 @@ Schema Cedar adicional:
 entity Flow in [Tenant] {
     name: String,
     version: Long,
-    permissions_required: Set<String>
+    permissions_required: Set[String]
 };
 
 entity FlowRun in [Flow, Tenant] {
@@ -1828,7 +1828,7 @@ Adopciones de auditoría P0. Sin esto no hay producción.
 
 - [ ] ADR formal Vespa vs OpenSearch — conclusión: Vespa.
 - [ ] ADR formal Ceph vs Ozone — conclusión: Ceph con CRUSH.
-- [ ] ADR formal No StarRocks — conclusión: Trino + DataFusion + materializaciones, reevaluar si SLO < 200ms p99 con > 100M filas.
+- [ ] ADR formal No StarRocks — conclusión: Trino + DataFusion + materializaciones, reevaluar si SLO menor que 200ms p99 con mas de 100M filas.
 - [ ] ADR formal No Valkey — conclusión: Redis solo rate-limit; Cassandra + L1 in-process basta.
 
 ---

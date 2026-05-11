@@ -104,16 +104,21 @@ This layout signals that the repository is designed to support more than one ope
 
 ## Local Commands
 
-Common local deployment and runtime entry points are exposed in `justfile`:
+Common local deployment and runtime entry points are split between the
+canonical `Makefile`, the Compose stack, and the Go `of-cli` smoke runner:
 
 ```bash
-just infra-up
-just infra-down
-just infra-up-full
-just dev-stack
-just dev-stack-fast
-just smoke
+make tools
+make build-services
+cd infra/compose && docker compose up -d
+go run ./tools/of-cli -- smoke run \
+  --scenario smoke/scenarios/p2-runtime-critical-path.json \
+  --output smoke/results/p2-runtime-critical-path.json
+./smoke/chaos/run.sh
 ```
+
+The root `justfile` is only a compatibility shim over `make`; do not add
+new deployment recipes there unless they delegate to a Makefile target.
 
 ## Chart Validation
 

@@ -30,14 +30,28 @@ CREATE TABLE IF NOT EXISTS object_types (
     id          UUID PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
+    plural_display_name TEXT,
     description TEXT NOT NULL DEFAULT '',
     primary_key_property TEXT,
     icon        TEXT,
     color       TEXT,
+    editable    BOOLEAN NOT NULL DEFAULT FALSE,
+    backing_dataset_id UUID,
+    backing_dataset_rid TEXT,
+    pipeline_rid TEXT,
+    managed_by TEXT,
     owner_id    UUID NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE object_types
+    ADD COLUMN IF NOT EXISTS plural_display_name TEXT,
+    ADD COLUMN IF NOT EXISTS editable BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS backing_dataset_id UUID,
+    ADD COLUMN IF NOT EXISTS backing_dataset_rid TEXT,
+    ADD COLUMN IF NOT EXISTS pipeline_rid TEXT,
+    ADD COLUMN IF NOT EXISTS managed_by TEXT;
 
 CREATE TABLE IF NOT EXISTS properties (
     id               UUID PRIMARY KEY,

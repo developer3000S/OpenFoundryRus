@@ -84,7 +84,7 @@ func NewOutputClient(store TransactionStore, catalog TableWriterCatalog) *Output
 	return &OutputClient{Store: store, Catalog: catalog}
 }
 
-func (c *OutputClient) Commit(ctx context.Context, tx executor.OutputTransaction) error {
+func (c *OutputClient) Commit(ctx context.Context, tx executor.OutputTransaction, _ executor.NodeResult) error {
 	if !Handles(tx.DatasetRID) {
 		return nil
 	}

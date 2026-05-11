@@ -1,7 +1,6 @@
-// Package server wires the substrate-only HTTP surface for
-// ontology-exploratory-analysis-service. Mirrors the Rust binary
-// which mounts only `/health` + `/readiness` until the four
-// service-consolidation merges promote domain handlers to public.
+// Package server wires the HTTP surface for
+// ontology-exploratory-analysis-service. The normal binary mounts substrate
+// probes plus the geospatial API absorbed from geospatial-intelligence-service.
 package server
 
 import (
@@ -16,15 +15,16 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/openfoundry/openfoundry-go/libs/core-models/health"
 	"github.com/openfoundry/openfoundry-go/libs/capabilities"
+	"github.com/openfoundry/openfoundry-go/libs/core-models/health"
 	"github.com/openfoundry/openfoundry-go/libs/observability"
 	"github.com/openfoundry/openfoundry-go/services/ontology-exploratory-analysis-service/internal/config"
 	"github.com/openfoundry/openfoundry-go/services/ontology-exploratory-analysis-service/internal/handlers"
+	"github.com/openfoundry/openfoundry-go/services/ontology-exploratory-analysis-service/internal/handlers/geospatial"
 )
 
-func New(cfg *config.Config, m *observability.Metrics, probes ...capabilities.DependencyProbe) *http.Server {
-	r := buildRouter(cfg, m, nil, probes...)
+func New(cfg *config.Config, m *observability.Metrics, geo *geospatial.AppState, probes ...capabilities.DependencyProbe) *http.Server {
+	r := buildRouter(cfg, m, nil, geo, probes...)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return &http.Server{
 		Addr:              addr,
@@ -37,7 +37,7 @@ func New(cfg *config.Config, m *observability.Metrics, probes ...capabilities.De
 // /readiness, /healthz, /metrics). Mirrors the Rust binary's
 // substrate-only surface.
 func BuildRouter(cfg *config.Config, m *observability.Metrics, probes ...capabilities.DependencyProbe) http.Handler {
-	return buildRouter(cfg, m, nil, probes...)
+	return buildRouter(cfg, m, nil, nil, probes...)
 }
 
 // BuildRouterWithHandlers returns a router with the saved-view /
@@ -46,10 +46,17 @@ func BuildRouter(cfg *config.Config, m *observability.Metrics, probes ...capabil
 // Rust-equivalent CRUD surface live; the binary main passes nil to
 // preserve the substrate-only contract documented in src/main.rs.
 func BuildRouterWithHandlers(cfg *config.Config, m *observability.Metrics, h *handlers.Handlers, probes ...capabilities.DependencyProbe) http.Handler {
-	return buildRouter(cfg, m, h, probes...)
+	return buildRouter(cfg, m, h, nil, probes...)
 }
 
-func buildRouter(cfg *config.Config, m *observability.Metrics, h *handlers.Handlers, probes ...capabilities.DependencyProbe) chi.Router {
+// BuildRouterWithGeospatial returns a router with the productive geospatial
+// surface mounted alongside substrate probes. Tests use this constructor to
+// smoke the normal binary route set without opening a real listener.
+func BuildRouterWithGeospatial(cfg *config.Config, m *observability.Metrics, geo *geospatial.AppState, probes ...capabilities.DependencyProbe) http.Handler {
+	return buildRouter(cfg, m, nil, geo, probes...)
+}
+
+func buildRouter(cfg *config.Config, m *observability.Metrics, h *handlers.Handlers, geo *geospatial.AppState, probes ...capabilities.DependencyProbe) chi.Router {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, chimw.Compress(5))
 	r.Use(chimw.Timeout(15 * time.Second))
@@ -80,6 +87,9 @@ func buildRouter(cfg *config.Config, m *observability.Metrics, h *handlers.Handl
 		if h.Actions != nil {
 			h.MountWriteback(r)
 		}
+	}
+	if geo != nil {
+		r.Mount("/api/v1/geospatial", geo.Routes())
 	}
 
 	if _, err := caps.IngestChiRoutes(r, capabilities.IngestOptions{

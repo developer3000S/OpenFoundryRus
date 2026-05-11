@@ -14,11 +14,14 @@ export interface AppTheme {
 }
 
 export interface AppSettings {
+	schema_version?: string;
 	home_page_id: string | null;
 	navigation_style: string;
 	max_width: string;
 	show_branding: boolean;
 	custom_css: string | null;
+	workshop_variables?: WorkshopVariableDefinition[];
+	runtime_metadata?: AppRuntimeMetadata;
 	builder_experience: string;
 	ontology_source_type_id: string | null;
 	object_set_variables: AppObjectSetVariable[];
@@ -28,11 +31,33 @@ export interface AppSettings {
 	slate: SlateSettings;
 }
 
+export interface AppRuntimeMetadata {
+	schema_version: string;
+	public_slug: string;
+	runtime_mode: string;
+	status: string;
+	home_page_id?: string;
+}
+
 export interface AppObjectSetVariable {
 	id: string;
 	name: string;
 	object_set_id: string | null;
 	object_type_id: string | null;
+}
+
+export interface WorkshopVariableDefinition {
+	id: string;
+	kind: string;
+	name: string;
+	object_type_id?: string;
+	source_widget_id?: string;
+	source_variable_id?: string;
+	filter_variable_id?: string;
+	static_filter?: Record<string, unknown>;
+	static_filters?: Array<Record<string, unknown>>;
+	default_value?: unknown;
+	metadata?: Record<string, unknown>;
 }
 
 export interface ConsumerModeSettings {
@@ -126,6 +151,14 @@ export interface WidgetEvent {
 	config: Record<string, unknown>;
 }
 
+export interface WorkshopAction {
+	id: string;
+	kind: string;
+	action_type_id?: string | null;
+	label?: string | null;
+	config?: Record<string, unknown>;
+}
+
 export interface AppWidget {
 	id: string;
 	widget_type: string;
@@ -133,9 +166,13 @@ export interface AppWidget {
 	description: string;
 	position: AppWidgetPosition;
 	props: Record<string, unknown>;
+	config?: Record<string, unknown>;
 	binding?: WidgetBinding | null;
+	bindings?: WidgetBinding[];
 	events: WidgetEvent[];
+	actions?: WorkshopAction[];
 	children: AppWidget[];
+	runtime_metadata?: Record<string, unknown>;
 }
 
 export interface PageLayout {
@@ -143,6 +180,34 @@ export interface PageLayout {
 	columns: number;
 	gap: string;
 	max_width: string;
+	direction?: string;
+	scrollable?: boolean;
+}
+
+export interface AppSection {
+	id: string;
+	title?: string;
+	description?: string;
+	layout: PageLayout;
+	widgets?: AppWidget[];
+	sections?: AppSection[];
+	visible?: boolean;
+	props?: Record<string, unknown>;
+	events?: WidgetEvent[];
+	actions?: WorkshopAction[];
+}
+
+export interface AppOverlay {
+	id: string;
+	name: string;
+	overlay_type: 'drawer' | 'modal' | string;
+	visible_variable_id?: string;
+	layout: PageLayout;
+	sections?: AppSection[];
+	widgets?: AppWidget[];
+	props?: Record<string, unknown>;
+	events?: WidgetEvent[];
+	actions?: WorkshopAction[];
 }
 
 export interface AppPage {
@@ -152,7 +217,10 @@ export interface AppPage {
 	description: string;
 	layout: PageLayout;
 	widgets: AppWidget[];
+	sections?: AppSection[];
+	overlays?: AppOverlay[];
 	visible: boolean;
+	runtime_metadata?: Record<string, unknown>;
 }
 
 export interface AppDefinition {
@@ -221,11 +289,44 @@ export interface WidgetDefaultSize {
 	height: number;
 }
 
+export interface WidgetCatalogVariable {
+	id: string;
+	kind: string;
+	label: string;
+	description: string;
+	required: boolean;
+}
+
+export interface WidgetCatalogEvent {
+	name: string;
+	label: string;
+	description: string;
+	action_kinds: string[];
+	payload_schema?: Record<string, unknown>;
+}
+
+export interface WidgetCatalogDisplay {
+	icon: string;
+	accent: string;
+	tags: string[];
+	sort_order: number;
+	preferred_chrome: string;
+}
+
 export interface WidgetCatalogItem {
+	catalog_version?: string;
+	schema_version?: string;
 	widget_type: string;
+	widget_kind?: string;
 	label: string;
 	description: string;
 	category: string;
+	config_schema?: Record<string, unknown>;
+	input_variables?: WidgetCatalogVariable[];
+	output_variables?: WidgetCatalogVariable[];
+	events?: WidgetCatalogEvent[];
+	permissions?: string[];
+	display?: WidgetCatalogDisplay;
 	default_props: Record<string, unknown>;
 	default_size: WidgetDefaultSize;
 	supported_bindings: string[];
@@ -280,6 +381,7 @@ export interface SlateRoundTripResponse {
 }
 
 export interface AppVersionSnapshot {
+	schema_version?: string;
 	name: string;
 	slug: string;
 	description: string;

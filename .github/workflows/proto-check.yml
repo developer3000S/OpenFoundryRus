@@ -52,26 +52,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Build OpenAPI from proto contracts
-        run: go run ./tools/of-cli docs generate-openapi --proto-dir proto --output /tmp/of-cli-openapi.json
-      - name: Validate committed OpenAPI is parseable JSON 3.x
-        run: |
-          python3 - <<'PY'
-          import json
-          doc = json.load(open("apps/web/public/generated/openapi/openfoundry.json"))
-          version = doc.get("openapi", "")
-          assert version.startswith("3."), f"unexpected openapi version: {version!r}"
-          assert "paths" in doc, "missing 'paths' top-level key"
-          PY
+      - name: Validate committed OpenAPI matches proto contracts
+        run: make openapi-check
 
   sdk-typescript:
-    name: TypeScript SDK Typecheck
+    name: TypeScript SDK Drift Check & Typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -81,25 +73,36 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: make sdk-typescript-check
       - run: pnpm --dir apps/web exec tsc -p ../../sdks/typescript/openfoundry-sdk/tsconfig.json --noEmit
 
   sdk-python:
-    name: Python SDK Compile
+    name: Python SDK Drift Check & Compile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: make sdk-python-check
       - run: python -m compileall sdks/python/openfoundry-sdk
 
   sdk-java:
-    name: Java SDK Compile
+    name: Java SDK Drift Check & Compile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+      - run: make sdk-java-check
       - run: find sdks/java/openfoundry-sdk/src/main/java -name '*.java' -print0 | xargs -0 javac --release 17 -d /tmp/java-out

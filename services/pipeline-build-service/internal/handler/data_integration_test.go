@@ -46,7 +46,7 @@ func TestRunOutcomeSucceededWhenBuildStarted(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rr.Code)
 	require.Len(t, repo.runs, 1)
 	for _, run := range repo.runs {
-		require.Equal(t, "completed", run.Status)
+		require.Equal(t, "succeeded", run.Status)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestCoalesceReRunWhenPreviousActive(t *testing.T) {
 	rr := httptest.NewRecorder()
 	AbortDataIntegrationBuild(rr, requestWithURLParam(http.MethodPost, "/api/v1/data-integration/builds/"+activeID.String()+"/abort", nil, "run_id", activeID.String()))
 	require.Equal(t, http.StatusOK, rr.Code)
-	require.Equal(t, "aborted", repo.runs[activeID].Status)
+	require.Equal(t, "cancelled", repo.runs[activeID].Status)
 }
 
 func TestEventTriggerObservedPersistsUntilRun(t *testing.T) {
@@ -184,9 +184,15 @@ func (r *dataIntegrationRepo) OpenPipelineRun(ctx context.Context, pipeline *mod
 }
 func (r *dataIntegrationRepo) OpenPipelineRunWithOptions(_ context.Context, pipeline *models.Pipeline, _ models.TriggerPipelineRequest, startedBy *uuid.UUID, triggerType string, fromNodeID *string, retryOfRunID *uuid.UUID, attemptNumber int32, contextJSON json.RawMessage) (*models.PipelineRun, error) {
 	id := uuid.New()
-	run := models.PipelineRun{ID: id, PipelineID: pipeline.ID, Status: "running", TriggerType: triggerType, StartedBy: startedBy, AttemptNumber: attemptNumber, StartedFromNodeID: fromNodeID, RetryOfRunID: retryOfRunID, ExecutionContext: contextJSON, StartedAt: time.Now().UTC()}
+	run := models.PipelineRun{ID: id, PipelineID: pipeline.ID, Status: "queued", TriggerType: triggerType, StartedBy: startedBy, AttemptNumber: attemptNumber, StartedFromNodeID: fromNodeID, RetryOfRunID: retryOfRunID, ExecutionContext: contextJSON, StartedAt: time.Now().UTC()}
 	r.runs[id] = run
 	return &run, nil
+}
+func (r *dataIntegrationRepo) MarkPipelineRunRunning(_ context.Context, runID uuid.UUID) error {
+	run := r.runs[runID]
+	run.Status = "running"
+	r.runs[runID] = run
+	return nil
 }
 func (r *dataIntegrationRepo) FinishPipelineRun(_ context.Context, runID uuid.UUID, status string, nodeResults json.RawMessage, errorMessage *string) error {
 	run := r.runs[runID]
@@ -216,10 +222,10 @@ func (r *dataIntegrationRepo) AbortPipelineRun(_ context.Context, runID uuid.UUI
 	if !ok {
 		return nil, false, nil
 	}
-	if run.Status != "running" {
+	if run.Status != "running" && run.Status != "queued" {
 		return nil, true, nil
 	}
-	run.Status = "aborted"
+	run.Status = "cancelled"
 	r.runs[runID] = run
 	return &run, true, nil
 }

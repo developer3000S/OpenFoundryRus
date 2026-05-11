@@ -61,7 +61,7 @@ func TestPythonSidecarConfigMapsServiceConfigToManager(t *testing.T) {
 func TestBuildStateRequiresDatabaseURLUnlessDevMode(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.JWTSecret = "test-secret"
-	_, _, err := buildState(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	_, _, _, err := buildState(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL is required") {
 		t.Fatalf("expected clear DATABASE_URL error, got %v", err)
 	}
@@ -70,12 +70,15 @@ func TestBuildStateRequiresDatabaseURLUnlessDevMode(t *testing.T) {
 func TestBuildStateDevModeUsesExplicitInMemoryState(t *testing.T) {
 	cfg := &config.Config{DevMode: true}
 	cfg.JWTSecret = "test-secret"
-	state, cleanup, err := buildState(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	state, cleanup, deps, err := buildState(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("buildState: %v", err)
 	}
 	if cleanup != nil {
 		t.Fatal("dev in-memory state should not return production cleanup")
+	}
+	if deps != nil {
+		t.Fatalf("dev in-memory state should not return dependency probes, got %#v", deps)
 	}
 	if state == nil || state.Stores.Objects == nil || state.DB != nil {
 		t.Fatalf("unexpected dev state: %#v", state)
@@ -85,7 +88,7 @@ func TestBuildStateDevModeUsesExplicitInMemoryState(t *testing.T) {
 func TestBuildStateWithDatabaseURLRequiresCassandraStores(t *testing.T) {
 	cfg := &config.Config{DatabaseURL: "postgres://user:pass@localhost:5432/openfoundry"}
 	cfg.JWTSecret = "test-secret"
-	_, _, err := buildState(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	_, _, _, err := buildState(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil || !strings.Contains(err.Error(), "CASSANDRA_CONTACT_POINTS is required") {
 		t.Fatalf("expected clear Cassandra stores error, got %v", err)
 	}
@@ -113,7 +116,7 @@ func TestBuildStoresValidatesKeyspaceBeforeDial(t *testing.T) {
 		CassandraContactPoints: "127.0.0.1:9042",
 		CassandraKeyspace:      "bad-keyspace",
 	}
-	_, _, err := buildStores(context.Background(), cfg, nil)
+	_, _, _, err := buildStores(context.Background(), cfg, nil)
 	if err == nil || !strings.Contains(err.Error(), "not a valid CQL identifier") {
 		t.Fatalf("expected keyspace validation error, got %v", err)
 	}

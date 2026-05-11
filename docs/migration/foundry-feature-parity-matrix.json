@@ -1,0 +1,972 @@
+{
+  "schema_version": "2026-05-10.w0.1",
+  "generated_at": "2026-05-10",
+  "scope": "Public-docs-based parity matrix for Pipeline Builder, Workshop, Geospatial, Data Connection, Ontology Actions, and Functions.",
+  "required_fields": [
+    "foundry_feature",
+    "openfoundry_surface",
+    "status",
+    "owner",
+    "doc_refs",
+    "tests",
+    "notes"
+  ],
+  "status_vocabulary": {
+    "done": "Feature is implemented, tested, documented, and verified through API or UI evidence.",
+    "partial": "Some OpenFoundry surface exists, but behavior is incomplete or not wired end-to-end.",
+    "todo": "No meaningful implementation found in the current repository inventory.",
+    "blocked": "Implementation exists behind an unavailable dependency, missing runtime wiring, or an unmounted route."
+  },
+  "rows": [
+    {
+      "foundry_feature": "Pipeline Builder: graph authoring and point-and-click pipeline editor",
+      "openfoundry_surface": [
+        "apps/web/src/routes/pipelines/PipelineEditPage.tsx",
+        "apps/web/src/lib/components/pipeline/AddFoundryDataDialog.tsx",
+        "apps/web/src/lib/components/pipeline/JoinEditor.tsx",
+        "apps/web/src/lib/components/pipeline/DeployDrawer.tsx"
+      ],
+      "status": "partial",
+      "owner": "pipeline-build-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/overview",
+        "https://www.palantir.com/docs/foundry/building-pipelines/create-batch-pipeline-pb/"
+      ],
+      "tests": [
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md",
+        "apps/web/e2e/workshop-map-widget.spec.ts"
+      ],
+      "notes": "The React editor surface exists, including dataset import, join editing, lineage, logs, and deploy affordances. The matrix treats runtime execution, previews, outputs, and transform catalog as separate rows."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: persisted pipeline CRUD and authoring API",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/handler/handlers.go",
+        "services/pipeline-build-service/internal/handler/pipeline_crud_test.go",
+        "services/pipeline-build-service/internal/postgres/pipelines.go",
+        "apps/web/src/lib/api/pipelines.ts"
+      ],
+      "status": "partial",
+      "owner": "pipeline-build-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/overview"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/pipeline_crud_test.go",
+        "docs/migration/pipeline-build-service-parity-plan.md"
+      ],
+      "notes": "CRUD and route-shape parity are documented as closed when repositories are configured; product-level graph semantics still need the Pipeline IR contract from PB.1."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: branch, draft, proposal, publish, and history lifecycle",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/migrations/20260511000000_pipeline_authoring_lifecycle.sql",
+        "services/pipeline-build-service/internal/postgres/pipelines.go",
+        "services/pipeline-build-service/internal/handler/handlers.go",
+        "apps/web/src/routes/pipelines/PipelineEditPage.tsx",
+        "apps/web/src/lib/api/pipelines.ts"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/overview",
+        "https://www.palantir.com/docs/foundry/pipeline-builder/branches-overview/"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/pipeline_crud_test.go"
+      ],
+      "notes": "Draft DAG and published DAG are stored separately, versions record draft/proposal/published/restored snapshots, build execution reads the published DAG when available, and the editor can open proposals, publish drafts, list history, and restore prior versions."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: build lifecycle, jobs, logs, abort/retry, and run status",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/migrations/20260511001000_pipeline_run_orchestration_lifecycle.sql",
+        "services/pipeline-build-service/internal/handler/data_integration.go",
+        "services/pipeline-build-service/internal/handler/execution.go",
+        "services/pipeline-build-service/internal/postgres/repository.go",
+        "services/pipeline-build-service/internal/handler/abort.go",
+        "services/pipeline-build-service/internal/logs/logs.go",
+        "apps/web/src/lib/components/pipeline/RunLogs.tsx",
+        "apps/web/src/lib/components/pipeline/PipelineRunDetailDrawer.tsx"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/overview",
+        "https://www.palantir.com/docs/foundry/api/"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/build_resolution_test.go",
+        "services/pipeline-build-service/internal/handler/data_integration_test.go",
+        "services/pipeline-build-service/internal/handler/execution_test.go",
+        "services/pipeline-build-service/internal/postgres/repository_test.go",
+        "services/pipeline-build-service/internal/handler/job_logs_test.go",
+        "services/pipeline-build-service/internal/handler/abort_test.go"
+      ],
+      "notes": "Runs now persist queued -> running -> succeeded/failed/cancelled, capture rich per-node node_results with lifecycle events, attempts, row counts, schema deltas, output resources, and log RIDs, and the run detail UI renders the historical explanation with abort/retry controls."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: transform execution runtime for SQL, Python, LLM, WASM, passthrough, and distributed compute",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/handler/lightweight_runtime.go",
+        "services/pipeline-build-service/internal/handler/llm_runtime.go",
+        "services/pipeline-build-service/internal/domain/engine/runtime.go",
+        "services/pipeline-build-service/internal/domain/engine/dag_executor.go",
+        "services/pipeline-build-service/internal/runtime/python.go",
+        "services/pipeline-build-service/internal/spark/spark.go"
+      ],
+      "status": "partial",
+      "owner": "pipeline-build-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/transforms-overview/",
+        "https://www.palantir.com/docs/foundry/transforms-python/compute-engines",
+        "https://www.palantir.com/docs/foundry/pipeline-builder/pipeline-builder-llm"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/execution_test.go",
+        "services/pipeline-build-service/internal/handler/llm_runtime_test.go",
+        "services/pipeline-build-service/internal/domain/engine/engine_test.go",
+        "services/pipeline-build-service/internal/runtime/python_test.go",
+        "services/pipeline-build-service/internal/runtime/sidecar_integration_test.go"
+      ],
+      "notes": "Runtime dispatch now uses existing OpenFoundry components: in-memory pipeline-expression table transforms for lightweight input/filter/select/output, Python sidecar dispatch for Python nodes, AI-service dispatch for LLM nodes, and Spark adapter dispatch for distributed nodes. WASM/remote remain future adapters."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: lightweight/faster pipeline type",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/models/pipeline.go",
+        "services/pipeline-build-service/internal/postgres/pipelines.go",
+        "services/pipeline-build-service/internal/handler/execution.go",
+        "apps/web/src/routes/pipelines/PipelineNewPage.tsx",
+        "apps/web/src/lib/components/pipeline/CreatePipelineModal.tsx"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/building-pipelines/create-faster-pipeline-pb/"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/models/pipeline_type_test.go",
+        "services/pipeline-build-service/internal/handler/pipeline_crud_test.go",
+        "services/pipeline-build-service/internal/handler/execution_test.go"
+      ],
+      "notes": "pipeline_type=FASTER is persisted through authoring CRUD, LIGHTWEIGHT aliases normalize to FASTER, execution plans advertise preferred_runtime=lightweight_table, the create flow presents Lightweight / Faster, and the benchmark fixture exercises local table/expression execution without DuckDB/DataFusion."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: Python transform support",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/runtime/python.go",
+        "services/pipeline-build-service/internal/handler/python_transform.go",
+        "services/pipeline-build-service/internal/handler/execution.go",
+        "services/pipeline-build-service/internal/handler/transform_catalog.go",
+        "libs/python-sidecar/manager.go",
+        "python/openfoundry_pyruntime"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, libs/python-sidecar, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/transforms-python/lightweight-overview",
+        "https://www.palantir.com/docs/foundry/transforms-python/pipelines"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/execution_test.go",
+        "services/pipeline-build-service/internal/runtime/python_test.go",
+        "services/pipeline-build-service/internal/runtime/sidecar_integration_test.go",
+        "libs/python-sidecar/manager_test.go"
+      ],
+      "notes": "python_transform is in the catalog, sidecar-backed python nodes receive upstream rows as prepared_inputs/input_rows, typed output schemas feed validation, package allowlists and timeout clamps are enforced, stdout/stderr are captured, and result_rows become downstream table rows for output commits."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: Spark/Flink distributed pipeline type",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/handler/distributed_runtime.go",
+        "services/pipeline-build-service/internal/spark/spark.go",
+        "services/pipeline-build-service/internal/models/pipeline.go",
+        "services/pipeline-build-service/migrations/20260511002000_distributed_pipeline_type.sql",
+        "apps/web/src/routes/pipelines/PipelineNewPage.tsx",
+        "apps/web/src/lib/components/pipeline/CreatePipelineModal.tsx"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/overview",
+        "https://www.palantir.com/docs/foundry/transforms-python/compute-engines"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/distributed_runtime_test.go",
+        "services/pipeline-build-service/internal/handler/execution_test.go",
+        "services/pipeline-build-service/internal/handler/pipeline_crud_test.go",
+        "services/pipeline-build-service/internal/spark/spark_test.go",
+        "services/pipeline-build-service/internal/handler/spark_runs_test.go"
+      ],
+      "notes": "pipeline_type=DISTRIBUTED is now a persisted authoring choice. The executor sends unchanged graph nodes through a DistributedTransformRunner; Spark/PySpark submit SparkApplication CRs through existing Kubernetes wiring, and Flink is a typed injected adapter boundary with an explicit config-gated error until a Flink runner is supplied."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: per-node preview and typed preview errors",
+      "openfoundry_surface": [
+        "apps/web/src/routes/pipelines/PipelineEditPage.tsx",
+        "apps/web/src/lib/components/pipeline/NodePreviewPanel.tsx",
+        "services/pipeline-build-service/internal/handler/preview.go",
+        "services/pipeline-build-service/internal/handler/lightweight_runtime.go"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/building-pipelines/create-batch-pipeline-pb/",
+        "https://www.palantir.com/docs/foundry/pipeline-builder/overview"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/preview_test.go",
+        "apps/web/e2e/pipeline-preview.spec.ts"
+      ],
+      "notes": "Selected-node preview now POSTs the draft DAG or GETs a persisted pipeline, prunes execution to the target node's upstream chain, returns typed errors, and renders source/transform/join/union/output rows in the canvas preview panel."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: strict schema validation before build",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/handler/schema_validation.go",
+        "services/pipeline-build-service/internal/handler/execution.go",
+        "services/pipeline-build-service/internal/handler/data_integration.go",
+        "services/pipeline-build-service/internal/server/server.go",
+        "apps/web/src/lib/api/pipelines.ts"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/overview",
+        "https://www.palantir.com/docs/foundry/pipeline-builder/functions-index/"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/schema_validation_test.go"
+      ],
+      "notes": "Draft and persisted validation endpoints now return node/column/code/message diagnostics, and run start/retry paths fail before opening a build when missing columns, incompatible joins/unions, invalid casts, nullability, duplicate names, output primary keys, declared output schemas, or geospatial logical constraints are invalid."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: transform and expression catalog",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/handler/transform_catalog.go",
+        "services/pipeline-build-service/internal/server/server.go",
+        "apps/web/src/lib/api/pipelines.ts",
+        "apps/web/src/lib/components/pipeline/TransformStackEditor.tsx",
+        "apps/web/src/lib/components/pipeline/transformStack.ts"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/transforms-overview/",
+        "https://www.palantir.com/docs/foundry/pipeline-builder/functions-index/",
+        "https://www.palantir.com/docs/foundry/pipeline-builder/pipeline-builder-llm"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/transform_catalog_test.go"
+      ],
+      "notes": "pipeline_transform_catalog.v1 is served by API with typed form fields, default configs, output contracts, docs, and execution status for select/drop/rename, cast, filter, formula, normalize units, derive column, aggregate, sort, join, union, explode, JSON extract, CSV parse, output mapping, normalize column names, and the AI-service-backed llm_node. The stack editor consumes the catalog and falls back locally if unavailable."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: reusable functions and UDF nodes",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/handler/function_registry.go",
+        "services/pipeline-build-service/internal/handler/lightweight_runtime.go",
+        "services/pipeline-build-service/internal/handler/transform_catalog.go",
+        "services/pipeline-build-service/internal/handler/execution.go",
+        "apps/web/src/lib/api/pipelines.ts"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/transforms-overview/",
+        "https://www.palantir.com/docs/foundry/transforms-python/transforms-python-api"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/pipeline_function_test.go",
+        "services/pipeline-build-service/internal/handler/transform_catalog_test.go"
+      ],
+      "notes": "Pipeline Builder exposes versioned registry functions in the transform catalog, including typed parameters and execution status, and the lightweight runtime can resolve and execute expression UDF nodes with function_auto_upgrade. Python UDF catalog entries are visible but remain function-bridge gated separately from Python transform nodes."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: join and union schema guidance",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/handler/schema_guidance.go",
+        "services/pipeline-build-service/internal/handler/schema_validation.go",
+        "apps/web/src/lib/components/pipeline/JoinEditor.tsx",
+        "apps/web/src/lib/components/pipeline/UnionEditor.tsx",
+        "apps/web/src/routes/pipelines/PipelineEditPage.tsx"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/transforms-overview/"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/schema_guidance_test.go",
+        "services/pipeline-build-service/internal/handler/testdata/schema_guidance"
+      ],
+      "notes": "Draft and persisted guidance endpoints now suggest compatible join keys, flag join key type mismatches, report union missing/extra/incompatible columns, expose input/output schemas, and feed those diagnostics into the visual join/union editors."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: dataset outputs and build lineage",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/handler/dataset_output_committer.go",
+        "services/dataset-versioning-service/internal/handlers/output_commit.go",
+        "apps/web/src/routes/pipelines/PipelineEditPage.tsx",
+        "services/dataset-versioning-service"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, dataset-versioning-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/building-pipelines/create-batch-pipeline-pb/",
+        "https://www.palantir.com/docs/foundry/api/"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/dataset_output_committer_test.go",
+        "services/dataset-versioning-service/internal/handlers/handlers_test.go",
+        "services/pipeline-build-service/internal/domain/lineage/lineage_test.go"
+      ],
+      "notes": "Output nodes now get stable target dataset IDs in the editor, successful executions POST inferred schema/preview/file metadata/lineage to dataset-versioning, and pipeline output metadata is marked committed only after the dataset commit succeeds."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: Ontology object and link outputs",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/handler/ontology_object_output_committer.go",
+        "services/pipeline-build-service/internal/handler/execution.go",
+        "services/pipeline-build-service/internal/handler/schema_validation.go",
+        "services/ontology-definition-service/internal/models/models.go",
+        "services/ontology-definition-service/internal/repo/repo.go",
+        "services/object-database-service/internal/handlers/handlers.go",
+        "apps/web/src/routes/pipelines/PipelineEditPage.tsx",
+        "libs/ontology-kernel/handlers/types/types.go",
+        "libs/ontology-kernel/handlers/links/links.go",
+        "libs/ontology-kernel/handlers/bindings/bindings.go",
+        "services/ontology-definition-service",
+        "services/object-database-service"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, ontology-definition-service, object-database-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/outputs-add-ontology-output/",
+        "https://www.palantir.com/docs/foundry/object-link-types/object-types-overview",
+        "https://www.palantir.com/docs/foundry/object-link-types/create-link-type/"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/ontology_object_output_committer_test.go",
+        "services/pipeline-build-service/internal/handler/schema_validation_test.go",
+        "services/object-database-service/internal/server/server_test.go",
+        "libs/ontology-kernel/handlers/types/types_test.go",
+        "libs/ontology-kernel/handlers/links/links_test.go",
+        "libs/ontology-kernel/handlers/bindings/bindings_test.go"
+      ],
+      "notes": "Object outputs deploy backed object types/properties, and link outputs now deploy/update link types, validate source/target object outputs plus one-to-many/many-to-many join/FK columns, and materialize link rows into object-database."
+    },
+    {
+      "foundry_feature": "Pipeline Builder: LLM node and AIP-assisted generation",
+      "openfoundry_surface": [
+        "services/pipeline-build-service/internal/handler/llm_runtime.go",
+        "services/pipeline-build-service/internal/handler/aip_generation.go",
+        "services/pipeline-build-service/internal/handler/transform_catalog.go",
+        "services/pipeline-build-service/internal/server/server.go",
+        "apps/web/src/routes/pipelines/PipelineEditPage.tsx",
+        "apps/web/src/lib/api/pipelines.ts",
+        "services/agent-runtime-service"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, apps/web, agent-runtime-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/pipeline-builder-llm",
+        "https://www.palantir.com/docs/foundry/pipeline-builder/pipeline-builder-aip/index.html"
+      ],
+      "tests": [
+        "services/pipeline-build-service/internal/handler/llm_runtime_test.go",
+        "services/pipeline-build-service/internal/handler/aip_generation_test.go",
+        "services/pipeline-build-service/internal/handler/transform_catalog_test.go"
+      ],
+      "notes": "llm nodes call the configured AI service, write outputs as ordinary downstream table columns, and preview through the selected upstream chain. AIP generation endpoints request normal PipelineNode JSON from the same provider, append it to the graph in the editor, and preview the generated node before returning."
+    },
+    {
+      "foundry_feature": "Workshop: app/module/page/section/widget schema, CRUD, preview, publish, and public runtime load",
+      "openfoundry_surface": [
+        "services/application-composition-service/internal/models/workshop_schema.go",
+        "apps/web/src/lib/api/apps.ts",
+        "services/application-composition-service/internal/server/server.go",
+        "services/application-composition-service/internal/handlers/apps.go",
+        "services/application-composition-service/internal/repo/repo.go",
+        "apps/web/src/routes/apps/AppRuntimePage.tsx",
+        "apps/web/src/lib/components/apps/AppRenderer.tsx"
+      ],
+      "status": "partial",
+      "owner": "application-composition-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/overview/",
+        "https://www.palantir.com/docs/foundry/workshop/concepts-layouts/"
+      ],
+      "tests": [
+        "services/application-composition-service/internal/models/workshop_schema_test.go",
+        "services/application-composition-service/internal/server/workshop_routes_test.go",
+        "services/application-composition-service/internal/models/composition_test.go",
+        "services/application-composition-service/internal/server/server.go"
+      ],
+      "notes": "WS.1/WS.2 are implemented for schema and frontend endpoint coverage: 2026-05-11.ws.1 normalizes pages/layouts/sections/overlays/widgets/configs/bindings/events/actions/variables/runtime metadata/public slug, and draft preview/public embed/page CRUD/template/Slate endpoints are mounted. Deeper publish/version lifecycle semantics remain tracked in WS.19."
+    },
+    {
+      "foundry_feature": "Workshop: templates, widget catalog, Slate package import/export, and page CRUD backend endpoints",
+      "openfoundry_surface": [
+        "apps/web/src/lib/api/apps.ts",
+        "apps/web/src/lib/components/apps/WidgetCatalog.tsx",
+        "services/application-composition-service/internal/catalog/widget_catalog.v1.json",
+        "services/application-composition-service/internal/catalog/widget_catalog.go",
+        "services/application-composition-service/internal/handlers/workshop_endpoints.go",
+        "services/application-composition-service/internal/handlers/apps.go",
+        "services/application-composition-service/internal/server/server.go",
+        "services/edge-gateway-service/internal/proxy/router_table.go"
+      ],
+      "status": "done",
+      "owner": "application-composition-service, apps/web, edge-gateway-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/concepts-widgets",
+        "https://www.palantir.com/docs/foundry/workshop/getting-started/",
+        "https://www.palantir.com/docs/foundry/workshop/widgets-visualization"
+      ],
+      "tests": [
+        "services/application-composition-service/internal/catalog/widget_catalog_test.go",
+        "services/application-composition-service/internal/catalog/testdata/widget_catalog_snapshot.json",
+        "services/application-composition-service/internal/server/workshop_routes_test.go",
+        "services/edge-gateway-service/internal/proxy/router_table_test.go"
+      ],
+      "notes": "WS.2/WS.3 are implemented: the backend responds to the frontend's widget catalog, app templates, from-template, page CRUD, draft preview, Slate package import/export, and public embed calls. The widget catalog now comes from versioned backend data with config schemas, variables, events, permissions, and display metadata instead of local or Go hardcoded widget lists."
+    },
+    {
+      "foundry_feature": "Workshop: visual page/section/widget editor",
+      "openfoundry_surface": [
+        "apps/web/src/routes/apps/WorkshopEditorPage.tsx",
+        "apps/web/src/lib/components/apps/AppPagesEditor.tsx",
+        "apps/web/src/lib/components/apps/WorkshopToolbar.tsx",
+        "apps/web/src/lib/components/apps/LayoutTemplatePicker.tsx"
+      ],
+      "status": "partial",
+      "owner": "apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/overview/",
+        "https://www.palantir.com/docs/foundry/workshop/concepts-layouts/",
+        "https://www.palantir.com/docs/foundry/workshop/concepts-widgets"
+      ],
+      "tests": [
+        "docs/use-case-development/workshop-equivalent/current-vs-target.md"
+      ],
+      "notes": "The editor and toolbar exist. Backend parity and variable/event behavior determine whether it reaches Foundry-style Workshop depth."
+    },
+    {
+      "foundry_feature": "Workshop: object-aware widgets including Object Table, Filter List, Property List, Object Set Title, Chart XY, and Pie Chart",
+      "openfoundry_surface": [
+        "apps/web/src/routes/apps/WorkshopEditorPage.tsx",
+        "apps/web/src/lib/components/apps/widgets/adapters.tsx",
+        "apps/web/src/lib/components/apps/AppWidgetRenderer.tsx"
+      ],
+      "status": "partial",
+      "owner": "apps/web, ontology services",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/widgets-object-table/index.html",
+        "https://www.palantir.com/docs/foundry/workshop/widgets-property-list",
+        "https://www.palantir.com/docs/foundry/workshop/widgets-chart/"
+      ],
+      "tests": [
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "Workshop widget adapters are registered and render against the WS.4 variable engine. Remaining parity work is mainly richer object-set execution semantics and action wiring."
+    },
+    {
+      "foundry_feature": "Workshop: variable engine and object set filter variables",
+      "openfoundry_surface": [
+        "apps/web/src/lib/components/apps/widgets/workshopVariables.ts",
+        "apps/web/src/lib/components/apps/AppWidgetRenderer.tsx",
+        "apps/web/src/lib/components/apps/widgets/WorkshopMapWidget.tsx",
+        "apps/web/src/routes/apps/WorkshopEditorPage.tsx",
+        "apps/web/src/lib/components/apps/widgets/WorkshopRuntimeProvider.tsx",
+        "services/application-composition-service/internal/models/workshop_schema.go"
+      ],
+      "status": "done",
+      "owner": "apps/web, ontology services",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/concepts-variables/",
+        "https://www.palantir.com/docs/foundry/workshop/object-set-filter-variables/"
+      ],
+      "tests": [
+        "apps/web/src/lib/components/apps/widgets/workshopVariables.test.ts",
+        "apps/web/src/lib/components/apps/widgets/workshopMap.test.ts",
+        "services/application-composition-service/internal/models/workshop_schema_test.go"
+      ],
+      "notes": "WS.4 is implemented: runtime variables now resolve through a central dependency graph with primitive, object-set, object-set filter, selected-object, aggregation, shape, URL, and runtime-parameter values. Editor preview and published runtime share the same engine; object widgets and Map widget consume linked filter variables and selected object-set outputs through engine helpers rather than ad hoc per-widget state."
+    },
+    {
+      "foundry_feature": "Workshop: events and navigational actions",
+      "openfoundry_surface": [
+        "apps/web/src/lib/components/apps/AppRenderer.tsx",
+        "apps/web/src/lib/components/apps/AppWidgetRenderer.tsx",
+        "apps/web/src/lib/api/apps.ts"
+      ],
+      "status": "partial",
+      "owner": "apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/concepts-events",
+        "https://www.palantir.com/docs/foundry/workshop/widgets-button-group/"
+      ],
+      "tests": [
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "Runtime event shapes and basic actions exist. Foundry-style event ordering, variable updates, action execution, exports, and command events need a formal engine."
+    },
+    {
+      "foundry_feature": "Workshop: Button Group triggering Ontology Actions",
+      "openfoundry_surface": [
+        "apps/web/src/routes/apps/WorkshopEditorPage.tsx",
+        "apps/web/src/lib/components/apps/widgets/adapters.tsx",
+        "apps/web/src/lib/api/ontology.ts",
+        "libs/ontology-kernel/handlers/actions/execute.go"
+      ],
+      "status": "partial",
+      "owner": "apps/web, ontology-actions-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/actions-use/",
+        "https://www.palantir.com/docs/foundry/workshop/widgets-button-group/",
+        "https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/actions/apply-action/"
+      ],
+      "tests": [
+        "libs/ontology-kernel/handlers/actions/execute_test.go",
+        "libs/ontology-kernel/handlers/actions/batch_test.go",
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "Ontology action execution exists. Workshop action form/button integration still appears narrower than Foundry's generic Button Group action behavior."
+    },
+    {
+      "foundry_feature": "Workshop: Map widget",
+      "openfoundry_surface": [
+        "apps/web/src/lib/components/apps/AppWidgetRenderer.tsx",
+        "apps/web/src/lib/components/apps/widgets/WorkshopMapWidget.tsx",
+        "apps/web/src/lib/components/apps/widgets/workshopMap.ts",
+        "apps/web/src/routes/apps/WorkshopEditorPage.tsx",
+        "apps/web/src/lib/components/apps/WidgetCatalog.tsx",
+        "apps/web/src/lib/components/MapLibreCanvas.tsx",
+        "apps/web/src/lib/api/geospatial.ts",
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/map_templates.go",
+        "services/ontology-exploratory-analysis-service/internal/repo/migrations/20260511003000_geospatial_map_templates.sql"
+      ],
+      "status": "partial",
+      "owner": "apps/web, ontology-exploratory-analysis-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/widgets-map/",
+        "https://www.palantir.com/docs/foundry/map/layer-editor",
+        "https://www.palantir.com/docs/foundry/map/core-concepts",
+        "https://www.palantir.com/docs/foundry/map/visualize-clusters",
+        "https://www.palantir.com/docs/foundry/map/objects-loading-methods/",
+        "https://www.palantir.com/docs/foundry/map/templates"
+      ],
+      "tests": [
+        "apps/web/src/lib/components/apps/widgets/workshopMap.test.ts",
+        "apps/web/e2e/workshop-map-widget.spec.ts",
+        "services/ontology-exploratory-analysis-service/internal/domain/spatial/tile_server_test.go",
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/tiles_test.go",
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/map_templates_test.go",
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "GEO.6/GEO.7/GEO.8/GEO.9/GEO.10/GEO.11/GEO.13 are implemented: MapLibre renders query-backed and object-set/object-type point/line/polygon layers, tooltips, legends, selectable objects, active-object and selected-object-set outputs, drawn rectangle GeoJSON shape output, shape-based object-set search output, clear/redraw shape controls, zoom-dependent point clusters with aggregate count labels, viewport-tile saved geospatial layers with bounded feature pages and simplified geometries, blank/raster base layers, saved/GeoJSON/MVT/raster overlay configs, runtime layer toggles, and saved map templates with constant layers, styling layers, object parameter mappings, overlays, viewport defaults, and interface options. Selected map objects can drive Property List, Object Table, Object Set Title, and Button Group action defaults; drawn shapes can drive Object Table search results. Advanced geospatial search remains a future row."
+    },
+    {
+      "foundry_feature": "Workshop: Metric Card and function-backed display values",
+      "openfoundry_surface": [
+        "apps/web/src/lib/components/apps/AppWidgetRenderer.tsx",
+        "apps/web/src/lib/api/ontology.ts",
+        "libs/ontology-kernel/handlers/functions/functions.go"
+      ],
+      "status": "partial",
+      "owner": "apps/web, ontology-actions-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/widgets-metric-card/",
+        "https://www.palantir.com/docs/foundry/workshop/functions-use/"
+      ],
+      "tests": [
+        "libs/ontology-kernel/handlers/functions/functions_test.go",
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "Metric-like rendering exists through widgets; first-class function-backed variables and caching/recompute semantics remain a gap."
+    },
+    {
+      "foundry_feature": "Geospatial: public API routing for layers, query, clusters, geocode, tiles, templates, and routes",
+      "openfoundry_surface": [
+        "services/ontology-exploratory-analysis-service/internal/server/server.go",
+        "services/ontology-exploratory-analysis-service/cmd/ontology-exploratory-analysis-service/main.go",
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial",
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/map_templates.go",
+        "services/edge-gateway-service/internal/proxy/router_table.go",
+        "services/edge-gateway-service/internal/config/config.go"
+      ],
+      "status": "done",
+      "owner": "ontology-exploratory-analysis-service, edge-gateway-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/map/core-concepts",
+        "https://www.palantir.com/docs/foundry/workshop/widgets-map/",
+        "https://www.palantir.com/docs/foundry/map/templates"
+      ],
+      "tests": [
+        "services/ontology-exploratory-analysis-service/internal/server/server_test.go",
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/features_test.go",
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/layers_test.go",
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/map_templates_test.go",
+        "services/edge-gateway-service/internal/proxy/proxy_test.go"
+      ],
+      "notes": "The normal exploratory-analysis binary now mounts /api/v1/geospatial/* with the production Postgres pool. The edge gateway routes /api/v1/geospatial to the consolidated service default on port 50131, and HTTP smoke covers overview, layers, query, clusters, tiles, and map templates."
+    },
+    {
+      "foundry_feature": "Geospatial: map layer storage and layer CRUD",
+      "openfoundry_surface": [
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/layers.go",
+        "services/ontology-exploratory-analysis-service/internal/repo/migrations/20260507000000_geospatial_layers.sql",
+        "services/ontology-exploratory-analysis-service/internal/models/geospatial.go"
+      ],
+      "status": "partial",
+      "owner": "ontology-exploratory-analysis-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/map/layer-editor",
+        "https://www.palantir.com/docs/foundry/map/core-concepts"
+      ],
+      "tests": [
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/layers_test.go",
+        "services/ontology-exploratory-analysis-service/internal/models/geospatial_test.go"
+      ],
+      "notes": "Layer models, migration, and handlers exist. Runtime availability depends on public route mounting."
+    },
+    {
+      "foundry_feature": "Geospatial: feature query, within/intersects/nearest/buffer, and clusters",
+      "openfoundry_surface": [
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/features.go",
+        "services/ontology-exploratory-analysis-service/internal/domain/spatial",
+        "services/ontology-exploratory-analysis-service/internal/models/geospatial.go"
+      ],
+      "status": "partial",
+      "owner": "ontology-exploratory-analysis-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/map/add-to-map",
+        "https://www.palantir.com/docs/foundry/map/visualize-clusters"
+      ],
+      "tests": [
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/features_test.go"
+      ],
+      "notes": "QueryFeatures and ClusterFeatures are implemented in the handler namespace; route_features/routing is explicitly not ported in that slice."
+    },
+    {
+      "foundry_feature": "Geospatial: Map application UI and MapLibre rendering",
+      "openfoundry_surface": [
+        "apps/web/src/routes/geospatial/GeospatialPage.tsx",
+        "apps/web/src/lib/components/MapLibreCanvas.tsx",
+        "apps/web/src/lib/components/map/LayerPanel.tsx",
+        "apps/web/src/lib/components/map/SpatialAnalysis.tsx",
+        "apps/web/src/lib/api/geospatial.ts"
+      ],
+      "status": "partial",
+      "owner": "apps/web, ontology-exploratory-analysis-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/map/core-concepts",
+        "https://www.palantir.com/docs/foundry/map/add-to-map",
+        "https://www.palantir.com/docs/foundry/map/visualize-objects/",
+        "https://www.palantir.com/docs/foundry/map/templates"
+      ],
+      "tests": [
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md",
+        "apps/web/e2e/workshop-map-widget.spec.ts",
+        "services/ontology-exploratory-analysis-service/internal/handlers/geospatial/map_templates_test.go"
+      ],
+      "notes": "The frontend has a dedicated geospatial page and shared MapLibre canvas. Workshop now covers object/overlay layer runtime toggles and saved map-template embedding. Full standalone Map app parity still needs richer saved-layer browsing and app-level drawing/search workflows."
+    },
+    {
+      "foundry_feature": "Geospatial: logical types, CRS policy, GeoJSON/GPX parsing, Haversine, and geo joins in Pipeline Builder",
+      "openfoundry_surface": [
+        "services/ontology-exploratory-analysis-service/internal/models/geospatial.go",
+        "services/media-transform-runtime-service/internal/handlers/geospatial.go",
+        "libs/geospatial-core/types.go",
+        "libs/geospatial-core/gpx.go",
+        "libs/geospatial-core/crs_policy.go",
+        "libs/geospatial-core/distance.go",
+        "libs/geospatial-core/join.go",
+        "libs/pipeline-expression/eval.go",
+        "services/pipeline-build-service/internal/handler/schema_validation.go",
+        "services/pipeline-build-service/internal/handler/haversine_schema.go",
+        "services/pipeline-build-service/internal/handler/haversine_runtime.go",
+        "services/pipeline-build-service/internal/handler/geo_join_runtime.go",
+        "services/pipeline-build-service/internal/handler/lightweight_runtime.go",
+        "services/pipeline-build-service/internal/handler/transform_catalog.go",
+        "apps/web/src/lib/components/pipeline/TransformStackEditor.tsx",
+        "services/pipeline-build-service/internal/handler/gpx_runtime.go",
+        "services/pipeline-build-service/internal/handler/gpx_upload.go",
+        "services/pipeline-build-service/internal/server/server.go",
+        "docs/reference/geospatial-crs-policy.md",
+        "libs/geospatial-tiles/tiles.go"
+      ],
+      "status": "done",
+      "owner": "pipeline-build-service, ontology-exploratory-analysis-service, geospatial libs",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/pipeline-builder/transforms-geospatial",
+        "https://www.palantir.com/docs/foundry/geospatial/coordinate_reference_systems_and_projections/",
+        "https://www.palantir.com/docs/foundry/code-examples/geospatial-computation-transforms/"
+      ],
+      "tests": [
+        "libs/geospatial-core/types_test.go",
+        "libs/geospatial-core/gpx_test.go",
+        "libs/geospatial-core/crs_policy_test.go",
+        "libs/geospatial-core/distance_test.go",
+        "libs/geospatial-core/join_test.go",
+        "libs/pipeline-expression/haversine_test.go",
+        "services/ontology-exploratory-analysis-service/internal/models/geospatial_test.go",
+        "services/pipeline-build-service/internal/handler/schema_validation_test.go",
+        "services/pipeline-build-service/internal/handler/haversine_runtime_test.go",
+        "services/pipeline-build-service/internal/handler/geo_join_runtime_test.go",
+        "services/pipeline-build-service/internal/handler/gpx_runtime_test.go",
+        "services/pipeline-build-service/internal/handler/gpx_upload_test.go",
+        "services/pipeline-build-service/internal/handler/transform_catalog_test.go",
+        "libs/geospatial-tiles/tiles_test.go",
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "GEO.2/GEO.3/GEO.4/GEO.5/GEO.12 are implemented with shared logical types, EPSG:4326 CRS policy, GeoJSON/bbox/H3 contracts, no-op EPSG:4326 reprojection, GPX track/route parsing, Pipeline Builder schema/CRS metadata checks, transform catalog gpx_parse plus geo_intersection_join/geo_distance_join/geo_nearest_neighbor_join, direct GPX upload parsing, unit-aware Haversine expression functions, nullable-coordinate distance propagation, a haversine_distance transform-stack block, Ontology property mappings, and lightweight _geo_join runtime support for intersection, distance-threshold, and KNN coffee recommendation joins with explicit scale limits."
+    },
+    {
+      "foundry_feature": "Data Connection: source catalog, source CRUD, credentials, agents, and egress policies",
+      "openfoundry_surface": [
+        "services/connector-management-service/internal/server/server.go",
+        "services/connector-management-service/internal/handlers/handlers.go",
+        "services/connector-management-service/internal/models/catalog.go",
+        "apps/web/src/lib/api/data-connection.ts",
+        "apps/web/src/lib/components/data-connection"
+      ],
+      "status": "partial",
+      "owner": "connector-management-service, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/data-connection/core-concepts/",
+        "https://www.palantir.com/docs/foundry/available-connectors/rest-apis/"
+      ],
+      "tests": [
+        "services/connector-management-service/internal/server/server_test.go",
+        "services/connector-management-service/internal/handlers/handlers_test.go",
+        "services/connector-management-service/internal/models/contract_fixtures_test.go"
+      ],
+      "notes": "The source/catalog/agent/credential/egress surfaces are mounted and tested. Individual connector runtime depth varies by adapter."
+    },
+    {
+      "foundry_feature": "Data Connection: REST API source and virtual table preview/query",
+      "openfoundry_surface": [
+        "services/connector-management-service/internal/adapters/rest_api/adapter.go",
+        "services/connector-management-service/internal/adapters/json/adapter.go",
+        "services/connector-management-service/internal/adapters/registry.go",
+        "services/connector-management-service/internal/handlers/registrations.go"
+      ],
+      "status": "partial",
+      "owner": "connector-management-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/available-connectors/rest-apis/",
+        "https://www.palantir.com/docs/foundry/data-connection/core-concepts/"
+      ],
+      "tests": [
+        "services/connector-management-service/internal/adapters/rest_api/adapter_test.go",
+        "services/connector-management-service/internal/adapters/json/adapter_test.go",
+        "services/connector-management-service/internal/adapters/registry_test.go"
+      ],
+      "notes": "REST/JSON adapters and virtual table query primitives exist; this is enough for many read-style external sources but not the full webhook builder UX."
+    },
+    {
+      "foundry_feature": "Data Connection: outbound webhooks with input/output parameters",
+      "openfoundry_surface": [
+        "services/connector-management-service/internal/server/server.go",
+        "services/connector-management-service/internal/handlers/registrations.go",
+        "services/connector-management-service/internal/models/models.go"
+      ],
+      "status": "partial",
+      "owner": "connector-management-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/data-connection/webhooks-overview",
+        "https://www.palantir.com/docs/foundry/data-connection/webhooks-reference"
+      ],
+      "tests": [
+        "services/connector-management-service/internal/handlers/handlers_test.go",
+        "services/connector-management-service/internal/models/contract_fixtures_test.go"
+      ],
+      "notes": "POST /api/v1/webhooks/{id}/invoke exists and extracts output parameters. Webhook authoring, chained calls, limits, and history need deeper parity."
+    },
+    {
+      "foundry_feature": "Data Connection: webhook integration with Action types",
+      "openfoundry_surface": [
+        "libs/ontology-kernel/handlers/actions/execute.go",
+        "libs/ontology-kernel/handlers/actions/side_effects.go",
+        "services/connector-management-service/internal/handlers/registrations.go"
+      ],
+      "status": "partial",
+      "owner": "ontology-actions-service, connector-management-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/action-types/webhooks",
+        "https://www.palantir.com/docs/foundry/action-types/set-up-webhook",
+        "https://www.palantir.com/docs/foundry/data-connection/webhooks-reference"
+      ],
+      "tests": [
+        "libs/ontology-kernel/handlers/actions/side_effects_test.go",
+        "libs/ontology-kernel/handlers/actions/execute_test.go",
+        "services/connector-management-service/internal/handlers/handlers_test.go"
+      ],
+      "notes": "Action execution has invoke_webhook planning and side-effect support; complete writeback/side-effect UX and end-to-end Workshop trigger remains to verify."
+    },
+    {
+      "foundry_feature": "Data Connection: inbound listeners",
+      "openfoundry_surface": [
+        "services/connector-management-service/internal/models/catalog.go",
+        "services/connector-management-service/internal/server/server.go"
+      ],
+      "status": "todo",
+      "owner": "connector-management-service",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/data-connection/listeners-overview"
+      ],
+      "tests": [
+        "docs/migration/foundry-workshop-pipeline-1to1-checklist.md"
+      ],
+      "notes": "Streaming/external source catalog entries exist, but a listener product surface equivalent to Foundry's inbound listeners was not found."
+    },
+    {
+      "foundry_feature": "Ontology Actions: action type CRUD, schema, rules, validation, and submission criteria",
+      "openfoundry_surface": [
+        "services/ontology-actions-service/internal/server/server.go",
+        "libs/ontology-kernel/handlers/actions/actions.go",
+        "libs/ontology-kernel/models/action_type.go",
+        "libs/ontology-kernel/domain/submission_eval.go"
+      ],
+      "status": "partial",
+      "owner": "ontology-actions-service, libs/ontology-kernel",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/action-types/overview",
+        "https://www.palantir.com/docs/foundry/action-types/rules"
+      ],
+      "tests": [
+        "libs/ontology-kernel/handlers/actions/actions_test.go",
+        "libs/ontology-kernel/handlers/actions/whatif_test.go",
+        "libs/ontology-kernel/domain/rules_test.go"
+      ],
+      "notes": "Action type CRUD/validation primitives exist and accept a broad operation-kind enum. Some rule effects remain gated or service-dependent."
+    },
+    {
+      "foundry_feature": "Ontology Actions: apply/execute actions for object edits, links, webhooks, and functions",
+      "openfoundry_surface": [
+        "libs/ontology-kernel/handlers/actions/execute.go",
+        "libs/ontology-kernel/handlers/actions/batch.go",
+        "libs/ontology-kernel/handlers/actions/inline_edit.go",
+        "libs/ontology-kernel/handlers/objects/crud.go"
+      ],
+      "status": "partial",
+      "owner": "ontology-actions-service, object-database-service, libs/ontology-kernel",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/actions/apply-action/",
+        "https://www.palantir.com/docs/foundry/action-types/rules",
+        "https://www.palantir.com/docs/foundry/action-types/use-actions/"
+      ],
+      "tests": [
+        "libs/ontology-kernel/handlers/actions/execute_test.go",
+        "libs/ontology-kernel/handlers/actions/batch_test.go",
+        "libs/ontology-kernel/handlers/actions/inline_edit_test.go",
+        "libs/ontology-kernel/handlers/objects/crud_test.go"
+      ],
+      "notes": "Execute, batch, and inline-edit paths exist. Workshop's Button Group still needs fully generic action form/apply integration."
+    },
+    {
+      "foundry_feature": "Ontology Actions: action log, audit publication, metrics, and revert",
+      "openfoundry_surface": [
+        "libs/ontology-kernel/handlers/actions/metrics.go",
+        "services/ontology-actions-service/cmd/ontology-actions-service/main.go",
+        "docs/architecture/legacy-migrations/ontology-actions-service/20260503000000_action_log.sql",
+        "docs/architecture/legacy-migrations/ontology-actions-service/20260504000000_action_executions_revert.sql"
+      ],
+      "status": "partial",
+      "owner": "ontology-actions-service, libs/ontology-kernel",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/action-types/action-log"
+      ],
+      "tests": [
+        "services/ontology-actions-service/internal/server/server_test.go",
+        "libs/ontology-kernel/handlers/actions/execute_test.go"
+      ],
+      "notes": "Action metrics/audit plumbing and migrations exist. The user-facing action log object model and revert UX should be verified before marking done."
+    },
+    {
+      "foundry_feature": "Functions: function package CRUD, templates, authoring metadata, and simulation",
+      "openfoundry_surface": [
+        "services/ontology-actions-service/internal/server/server.go",
+        "libs/ontology-kernel/handlers/functions/functions.go",
+        "libs/ontology-kernel/handlers/functions/templates.go",
+        "libs/ontology-kernel/models/function_package.go"
+      ],
+      "status": "partial",
+      "owner": "ontology-actions-service, libs/ontology-kernel",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/workshop/functions-use/",
+        "https://www.palantir.com/docs/foundry/action-types/function-actions-getting-started/"
+      ],
+      "tests": [
+        "libs/ontology-kernel/handlers/functions/functions_test.go",
+        "services/ontology-actions-service/cmd/ontology-actions-service/main_test.go"
+      ],
+      "notes": "Function handlers are mounted from ontology-actions-service and kernel tests cover function package behavior. Generated SDK-style Functions on Objects parity is still lighter than Foundry."
+    },
+    {
+      "foundry_feature": "Functions: inline Python and TypeScript runtime execution",
+      "openfoundry_surface": [
+        "libs/ontology-kernel/domain/function_runtime.go",
+        "libs/ontology-kernel/domain/embed/typescript_runner.mjs",
+        "libs/python-sidecar/manager.go",
+        "services/ontology-actions-service/cmd/ontology-actions-service/main.go"
+      ],
+      "status": "partial",
+      "owner": "ontology-actions-service, libs/ontology-kernel, libs/python-sidecar",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/transforms-python/lightweight-overview",
+        "https://www.palantir.com/docs/foundry/action-types/function-actions-getting-started/"
+      ],
+      "tests": [
+        "libs/ontology-kernel/domain/function_runtime_test.go",
+        "libs/ontology-kernel/domain/python_sidecar_integration_test.go",
+        "services/ontology-actions-service/cmd/ontology-actions-service/main_test.go",
+        "libs/python-sidecar/manager_test.go"
+      ],
+      "notes": "Inline runtime parsing/validation exists; Python execution depends on sidecar configuration and TypeScript execution uses an embedded runner."
+    },
+    {
+      "foundry_feature": "Functions: function-backed actions",
+      "openfoundry_surface": [
+        "libs/ontology-kernel/handlers/actions/execute.go",
+        "libs/ontology-kernel/domain/function_runtime.go",
+        "services/ontology-actions-service/internal/server/server.go"
+      ],
+      "status": "partial",
+      "owner": "ontology-actions-service, libs/ontology-kernel",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/action-types/function-actions-getting-started/",
+        "https://www.palantir.com/docs/foundry/workshop/functions-use/"
+      ],
+      "tests": [
+        "libs/ontology-kernel/handlers/actions/execute_test.go",
+        "libs/ontology-kernel/handlers/actions/python_sidecar_integration_test.go",
+        "libs/ontology-kernel/domain/function_runtime_test.go"
+      ],
+      "notes": "Action execution can invoke functions through the kernel runtime. Workshop exposure and stricter Foundry rule-combination semantics still need confirmation."
+    },
+    {
+      "foundry_feature": "Functions: object sets, filtering, search around, aggregations, and KNN-style retrieval",
+      "openfoundry_surface": [
+        "libs/ontology-kernel/handlers/objectsets/objectsets.go",
+        "libs/ontology-kernel/domain/object_sets.go",
+        "libs/ontology-kernel/domain/search/semantic.go",
+        "apps/web/src/lib/components/ontology/ObjectSetFilterBuilder.tsx"
+      ],
+      "status": "partial",
+      "owner": "ontology-query-service, object-database-service, libs/ontology-kernel, apps/web",
+      "doc_refs": [
+        "https://www.palantir.com/docs/foundry/functions/api-object-sets/"
+      ],
+      "tests": [
+        "libs/ontology-kernel/handlers/objectsets/objectsets_test.go",
+        "libs/ontology-kernel/domain/search/search_test.go",
+        "libs/ontology-kernel/domain/search/iter7d2_drift_test.go"
+      ],
+      "notes": "Object set and semantic search primitives exist. Need explicit Workshop/function consumption contract for Foundry-style Search Around, aggregations, and KNN in user apps."
+    }
+  ]
+}

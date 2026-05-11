@@ -15,6 +15,10 @@ COVERAGE_FILE  := coverage.out
 
 SERVICES       := $(notdir $(wildcard services/*))
 LIBS           := $(notdir $(wildcard libs/*))
+OPENAPI_SPEC   := apps/web/public/generated/openapi/openfoundry.json
+TS_SDK_DIR     := sdks/typescript/openfoundry-sdk
+PY_SDK_DIR     := sdks/python/openfoundry-sdk
+JAVA_SDK_DIR   := sdks/java/openfoundry-sdk
 
 # ---------------------------------------------------------------------------
 # Help
@@ -40,7 +44,7 @@ tools: ## Install pinned dev tools (buf, golangci-lint, sqlc, etc.) into ./bin.
 # Code generation
 # ---------------------------------------------------------------------------
 .PHONY: gen
-gen: gen-proto gen-sqlc ## Run all code generators.
+gen: gen-proto gen-sqlc contracts-gen ## Run all code generators.
 
 .PHONY: gen-proto
 gen-proto: ## Generate Go from .proto via buf.
@@ -51,6 +55,50 @@ gen-proto: ## Generate Go from .proto via buf.
 gen-sqlc: ## Generate type-safe DB code via sqlc.
 	@command -v sqlc >/dev/null 2>&1 || { echo "sqlc not found — run 'make tools'"; exit 1; }
 	sqlc generate
+
+.PHONY: contracts-gen
+contracts-gen: openapi-gen sdk-gen ## Regenerate OpenAPI and SDK contract artifacts.
+
+.PHONY: contracts-check
+contracts-check: openapi-check sdk-check ## Fail if generated OpenAPI or SDK artifacts are out of date.
+
+.PHONY: openapi-gen
+openapi-gen: ## Generate the committed OpenAPI JSON from proto contracts.
+	$(GO) run ./tools/of-cli docs generate-openapi --proto-dir proto --output $(OPENAPI_SPEC)
+
+.PHONY: openapi-check
+openapi-check: ## Fail if the committed OpenAPI JSON is out of date.
+	$(GO) run ./tools/of-cli docs validate-openapi --proto-dir proto --expected $(OPENAPI_SPEC)
+
+.PHONY: sdk-gen
+sdk-gen: sdk-typescript-gen sdk-python-gen sdk-java-gen ## Regenerate every generated SDK.
+
+.PHONY: sdk-check
+sdk-check: sdk-typescript-check sdk-python-check sdk-java-check ## Fail if any generated SDK is out of date.
+
+.PHONY: sdk-typescript-gen
+sdk-typescript-gen: ## Generate the TypeScript SDK from the committed OpenAPI JSON.
+	$(GO) run ./tools/of-cli docs generate-sdk-typescript --input $(OPENAPI_SPEC) --output $(TS_SDK_DIR)
+
+.PHONY: sdk-typescript-check
+sdk-typescript-check: ## Fail if the TypeScript SDK is out of date.
+	$(GO) run ./tools/of-cli docs validate-sdk-typescript --input $(OPENAPI_SPEC) --output $(TS_SDK_DIR)
+
+.PHONY: sdk-python-gen
+sdk-python-gen: ## Generate the Python SDK from the committed OpenAPI JSON.
+	$(GO) run ./tools/of-cli docs generate-sdk-python --input $(OPENAPI_SPEC) --output $(PY_SDK_DIR)
+
+.PHONY: sdk-python-check
+sdk-python-check: ## Fail if the Python SDK is out of date.
+	$(GO) run ./tools/of-cli docs validate-sdk-python --input $(OPENAPI_SPEC) --output $(PY_SDK_DIR)
+
+.PHONY: sdk-java-gen
+sdk-java-gen: ## Generate the Java SDK from the committed OpenAPI JSON.
+	$(GO) run ./tools/of-cli docs generate-sdk-java --input $(OPENAPI_SPEC) --output $(JAVA_SDK_DIR)
+
+.PHONY: sdk-java-check
+sdk-java-check: ## Fail if the Java SDK is out of date.
+	$(GO) run ./tools/of-cli docs validate-sdk-java --input $(OPENAPI_SPEC) --output $(JAVA_SDK_DIR)
 
 .PHONY: capabilities-snapshot
 capabilities-snapshot: ## Regenerate docs/agent-automation/stable-capabilities.json.
@@ -111,7 +159,7 @@ vet: ## Run `go vet`.
 # Composite gates
 # ---------------------------------------------------------------------------
 .PHONY: ci
-ci: tidy vet lint test ## Run the full CI gate locally.
+ci: tidy vet lint contracts-check test ## Run the full CI gate locally.
 
 .PHONY: clean
 clean: ## Remove build artifacts.

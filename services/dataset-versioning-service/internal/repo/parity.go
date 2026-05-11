@@ -811,6 +811,44 @@ func (r *Repo) StartTransaction(ctx context.Context, datasetID uuid.UUID, branch
 	return scanRuntimeTransaction(row)
 }
 
+func (r *Repo) StageTransactionFiles(ctx context.Context, datasetID uuid.UUID, transactionID uuid.UUID, files []models.StageTransactionFile) error {
+	var open bool
+	if err := r.Pool.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1 FROM dataset_transactions WHERE dataset_id = $1 AND id = $2 AND status = 'OPEN'
+	)`, datasetID, transactionID).Scan(&open); err != nil {
+		return err
+	}
+	if !open {
+		return ErrInvalidTransition
+	}
+	for _, file := range files {
+		op := file.Operation
+		if op == "" {
+			op = models.FileOperationAdd
+		}
+		_, err := r.Pool.Exec(ctx, `INSERT INTO dataset_transaction_files
+			(transaction_id, logical_path, physical_path, size_bytes, op)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (transaction_id, logical_path) DO UPDATE
+			SET physical_path = EXCLUDED.physical_path,
+			    size_bytes = EXCLUDED.size_bytes,
+			    op = EXCLUDED.op`,
+			transactionID, file.LogicalPath, file.PhysicalPath, file.SizeBytes, op)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repo) MergeTransactionMetadata(ctx context.Context, datasetID uuid.UUID, transactionID uuid.UUID, metadata models.JSONValue) error {
+	_, err := r.Pool.Exec(ctx, `UPDATE dataset_transactions
+		SET metadata = metadata || $3::jsonb
+		WHERE dataset_id = $1 AND id = $2 AND status = 'OPEN'`,
+		datasetID, transactionID, defaultRawObject(metadata))
+	return err
+}
+
 func (r *Repo) GetRuntimeTransaction(ctx context.Context, datasetID uuid.UUID, txnID uuid.UUID) (*models.RuntimeTransaction, error) {
 	row := r.Pool.QueryRow(ctx, runtimeTransactionSelect()+` WHERE dataset_id = $1 AND id = $2`, datasetID, txnID)
 	v, err := scanRuntimeTransaction(row)
@@ -1623,6 +1661,11 @@ func (r *Repo) PreviewData(ctx context.Context, datasetID uuid.UUID, viewID *uui
 			}
 		}
 	}
+	if preview, ok, err := r.previewRowsFromFileIndexMetadata(ctx, datasetID, columns, limit, offset, format); err != nil {
+		return nil, err
+	} else if ok {
+		return preview, nil
+	}
 	if len(columns) == 0 {
 		rows, err := r.Pool.Query(ctx, `SELECT logical_path FROM dataset_files WHERE dataset_id = $1 AND deleted_at IS NULL ORDER BY logical_path LIMIT $2 OFFSET $3`, datasetID, limit, offset)
 		if err != nil {
@@ -1642,6 +1685,50 @@ func (r *Repo) PreviewData(ctx context.Context, datasetID uuid.UUID, viewID *uui
 		return &models.PreviewDataResponse{Columns: columns, Rows: outRows, Format: format, Limit: limit, Offset: offset}, rows.Err()
 	}
 	return &models.PreviewDataResponse{Columns: columns, Rows: [][]models.JSONValue{}, Format: format, Limit: limit, Offset: offset}, nil
+}
+
+func (r *Repo) previewRowsFromFileIndexMetadata(ctx context.Context, datasetID uuid.UUID, schemaColumns []string, limit, offset int, format string) (*models.PreviewDataResponse, bool, error) {
+	rows, err := r.Pool.Query(ctx, `SELECT metadata FROM dataset_file_index
+		WHERE dataset_id = $1 AND metadata ? 'preview_rows'
+		ORDER BY updated_at DESC, created_at DESC LIMIT 1`, datasetID)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, false, rows.Err()
+	}
+	var raw models.JSONValue
+	if err := rows.Scan(&raw); err != nil {
+		return nil, false, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	var meta struct {
+		PreviewColumns []string             `json:"preview_columns"`
+		PreviewRows    [][]models.JSONValue `json:"preview_rows"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil || len(meta.PreviewRows) == 0 {
+		return nil, false, nil
+	}
+	columns := append([]string(nil), schemaColumns...)
+	if len(columns) == 0 {
+		columns = append([]string(nil), meta.PreviewColumns...)
+	}
+	start := offset
+	if start > len(meta.PreviewRows) {
+		start = len(meta.PreviewRows)
+	}
+	end := start + limit
+	if end > len(meta.PreviewRows) {
+		end = len(meta.PreviewRows)
+	}
+	out := make([][]models.JSONValue, end-start)
+	for i := range out {
+		out[i] = append([]models.JSONValue(nil), meta.PreviewRows[start+i]...)
+	}
+	return &models.PreviewDataResponse{Columns: columns, Rows: out, Format: format, Limit: limit, Offset: offset}, true, nil
 }
 
 func (r *Repo) ValidateSchema(ctx context.Context, datasetID uuid.UUID, schema models.DatasetSchema) (*models.ValidateResponse, error) {

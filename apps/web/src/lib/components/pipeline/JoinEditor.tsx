@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
 
+import type {
+  PipelineIRField,
+  PipelineJoinSchemaGuidance,
+  PipelineSchemaGuidanceDiagnostic,
+} from '@/lib/api/pipelines';
 import { Glyph } from '@/lib/components/ui/Glyph';
 import {
   JOIN_TYPES,
@@ -13,11 +18,12 @@ interface JoinEditorProps {
   draft: JoinDraft | null;
   leftSchema?: string[];
   rightSchema?: string[];
+  guidance?: PipelineJoinSchemaGuidance | null;
   onClose: () => void;
   onApply: (next: JoinDraft) => void;
 }
 
-export function JoinEditor({ open, draft, leftSchema = [], rightSchema = [], onClose, onApply }: JoinEditorProps) {
+export function JoinEditor({ open, draft, leftSchema = [], rightSchema = [], guidance = null, onClose, onApply }: JoinEditorProps) {
   const [working, setWorking] = useState<JoinDraft | null>(null);
 
   useEffect(() => {
@@ -26,6 +32,13 @@ export function JoinEditor({ open, draft, leftSchema = [], rightSchema = [], onC
   }, [open, draft]);
 
   if (!open || !working) return null;
+
+  const leftFields = guidance?.left_schema ?? fieldsFromNames(leftSchema);
+  const rightFields = guidance?.right_schema ?? fieldsFromNames(rightSchema);
+  const leftColumns = leftFields.map((field) => field.name);
+  const rightColumns = rightFields.map((field) => field.name);
+  const activeDiagnostics = joinDiagnosticsForWorking(working, leftFields, rightFields);
+  const compatibleCandidates = (guidance?.candidate_keys ?? []).filter((candidate) => candidate.compatible).slice(0, 6);
 
   function patch<K extends keyof JoinDraft>(key: K, value: JoinDraft[K]) {
     setWorking((current) => (current ? { ...current, [key]: value } : current));
@@ -227,6 +240,23 @@ export function JoinEditor({ open, draft, leftSchema = [], rightSchema = [], onC
 
           <Row label="Match condition">
             <div style={{ display: 'grid', gap: 6, flex: 1 }}>
+              {compatibleCandidates.length > 0 ? (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="of-text-muted" style={{ fontSize: 12 }}>Suggested keys</span>
+                  {compatibleCandidates.map((candidate) => (
+                    <button
+                      key={`${candidate.left_column}:${candidate.right_column}`}
+                      type="button"
+                      className="of-button"
+                      onClick={() => patchMatch(0, { left_column: candidate.left_column, right_column: candidate.right_column })}
+                      title={`${candidate.reason} · ${candidate.left_type} = ${candidate.right_type}`}
+                      style={{ fontSize: 11 }}
+                    >
+                      {candidate.left_column} = {candidate.right_column}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)' }}>
                 <span>rows that match</span>
                 <select disabled style={inputStyle()}>
@@ -240,13 +270,13 @@ export function JoinEditor({ open, draft, leftSchema = [], rightSchema = [], onC
               {working.matches.map((match, index) => (
                 <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <ColumnPicker
-                    schema={leftSchema}
+                    schema={leftColumns}
                     value={match.left_column}
                     onChange={(value) => patchMatch(index, { left_column: value })}
                   />
                   <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>is equal to</span>
                   <ColumnPicker
-                    schema={rightSchema}
+                    schema={rightColumns}
                     value={match.right_column}
                     onChange={(value) => patchMatch(index, { right_column: value })}
                   />
@@ -262,6 +292,7 @@ export function JoinEditor({ open, draft, leftSchema = [], rightSchema = [], onC
                   <Glyph name="plus" size={12} /> Add match condition
                 </button>
               </div>
+              <GuidanceDiagnostics diagnostics={activeDiagnostics} />
             </div>
           </Row>
 
@@ -269,22 +300,22 @@ export function JoinEditor({ open, draft, leftSchema = [], rightSchema = [], onC
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, flex: 1 }}>
               <ColumnSelector
                 title={`Left: ${working.left_node_label}`}
-                schema={leftSchema}
+                schema={leftColumns}
                 selected={working.left_columns}
                 autoSelectAll={working.auto_select_left}
                 onAutoToggle={(checked) => patch('auto_select_left', checked)}
                 onToggle={(column) => toggleColumn('left', column)}
-                onSelectAll={() => selectAll('left', leftSchema)}
+                onSelectAll={() => selectAll('left', leftColumns)}
                 onDeselectAll={() => deselectAll('left')}
               />
               <ColumnSelector
                 title={`Right: ${working.right_node_label}`}
-                schema={rightSchema}
+                schema={rightColumns}
                 selected={working.right_columns}
                 autoSelectAll={working.auto_select_right}
                 onAutoToggle={(checked) => patch('auto_select_right', checked)}
                 onToggle={(column) => toggleColumn('right', column)}
-                onSelectAll={() => selectAll('right', rightSchema)}
+                onSelectAll={() => selectAll('right', rightColumns)}
                 onDeselectAll={() => deselectAll('right')}
                 prefix={working.right_prefix ?? ''}
                 onPrefixChange={(value) => patch('right_prefix', value)}
@@ -438,6 +469,82 @@ function ColumnSelector({
       </div>
     </section>
   );
+}
+
+function GuidanceDiagnostics({ diagnostics }: { diagnostics: PipelineSchemaGuidanceDiagnostic[] }) {
+  if (diagnostics.length === 0) return null;
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      {diagnostics.map((diagnostic, index) => (
+        <div
+          key={`${diagnostic.code}:${index}`}
+          style={{
+            padding: '6px 8px',
+            borderRadius: 4,
+            fontSize: 12,
+            color: diagnostic.severity === 'error' ? '#7f1d1d' : '#713f12',
+            background: diagnostic.severity === 'error' ? '#fee2e2' : '#fef3c7',
+            border: `1px solid ${diagnostic.severity === 'error' ? '#fecaca' : '#fde68a'}`,
+          }}
+        >
+          <strong style={{ marginRight: 6 }}>{diagnostic.code}</strong>
+          {diagnostic.message}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function fieldsFromNames(names: string[]): PipelineIRField[] {
+  return names.map((name) => ({ name, field_type: 'STRING', nullable: true }));
+}
+
+function joinDiagnosticsForWorking(draft: JoinDraft, leftFields: PipelineIRField[], rightFields: PipelineIRField[]): PipelineSchemaGuidanceDiagnostic[] {
+  if (draft.join_type !== 'cross' && draft.matches.every((match) => !match.left_column || !match.right_column)) {
+    return [{ severity: 'error', code: 'join_missing_match_conditions', message: 'Join requires at least one match condition.' }];
+  }
+  const diagnostics: PipelineSchemaGuidanceDiagnostic[] = [];
+  for (const match of draft.matches) {
+    if (!match.left_column || !match.right_column) continue;
+    const left = leftFields.find((field) => field.name === match.left_column);
+    const right = rightFields.find((field) => field.name === match.right_column);
+    if (!left) {
+      diagnostics.push({ severity: 'error', code: 'missing_join_column', left_column: match.left_column, right_column: match.right_column, message: `Left column "${match.left_column}" is not available.` });
+      continue;
+    }
+    if (!right) {
+      diagnostics.push({ severity: 'error', code: 'missing_join_column', left_column: match.left_column, right_column: match.right_column, message: `Right column "${match.right_column}" is not available.` });
+      continue;
+    }
+    if (!compatibleJoinFieldTypes(left.field_type, right.field_type)) {
+      diagnostics.push({
+        severity: 'error',
+        code: 'incompatible_join_key_types',
+        left_column: match.left_column,
+        right_column: match.right_column,
+        left_type: left.field_type,
+        right_type: right.field_type,
+        message: `${match.left_column} (${left.field_type}) is not compatible with ${match.right_column} (${right.field_type}).`,
+      });
+    }
+  }
+  return diagnostics;
+}
+
+function compatibleJoinFieldTypes(leftRaw: string | undefined, rightRaw: string | undefined): boolean {
+  const left = normalizeType(leftRaw);
+  const right = normalizeType(rightRaw);
+  if (left === right || left === 'unknown' || right === 'unknown') return true;
+  const numeric = new Set(['integer', 'long', 'double', 'float', 'number']);
+  const textual = new Set(['string', 'varchar']);
+  const temporal = new Set(['date', 'timestamp']);
+  return (numeric.has(left) && numeric.has(right))
+    || (textual.has(left) && textual.has(right))
+    || (temporal.has(left) && temporal.has(right));
+}
+
+function normalizeType(raw: string | undefined): string {
+  return (raw ?? 'unknown').trim().toLowerCase();
 }
 
 function inputStyle(): React.CSSProperties {

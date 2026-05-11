@@ -16,7 +16,7 @@ proto/*
 
 ## Repository signals
 
-The CLI surface lives in `tools/of-cli/src/main.rs`, where the `Docs` command group exposes:
+The CLI surface lives in `tools/of-cli`, where the `docs` command group exposes:
 
 - `generate-openapi`
 - `validate-openapi`
@@ -29,7 +29,7 @@ The CLI surface lives in `tools/of-cli/src/main.rs`, where the `Docs` command gr
 
 ## Artifact destinations
 
-- `apps/web/static/generated/openapi/openfoundry.json`
+- `apps/web/public/generated/openapi/openfoundry.json`
 - `sdks/typescript/openfoundry-sdk`
 - `sdks/python/openfoundry-sdk`
 - `sdks/java/openfoundry-sdk`
@@ -37,3 +37,14 @@ The CLI surface lives in `tools/of-cli/src/main.rs`, where the `Docs` command gr
 ## Why this matters
 
 This flow is one of the cleanest anti-drift mechanisms in the repo. It makes contract changes visible in code review and allows CI to reject mismatches early.
+
+## Local commands
+
+Run from the repository root:
+
+```sh
+make openapi-check
+make sdk-check
+make contracts-check
+make contracts-gen
+```

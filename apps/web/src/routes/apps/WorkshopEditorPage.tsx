@@ -5,6 +5,15 @@ import { getApp, updateApp, type AppDefinition, type AppPage, type AppWidget, ty
 import { getActionType, listActionTypes, listObjectTypes, listObjects, listProperties, queryObjects, updateObject, type ActionInputField, type ActionType, type ObjectInstance, type ObjectType, type Property } from '@/lib/api/ontology';
 import { Glyph, type GlyphName } from '@/lib/components/ui/Glyph';
 import { EChartCanvas } from '@/lib/components/EChartCanvas';
+import { WorkshopMapWidget } from '@/lib/components/apps/widgets/WorkshopMapWidget';
+import { readMapLayerConfigs, readMapOverlayConfigs, type WorkshopMapFeatureCollection, type WorkshopMapLayerConfig, type WorkshopMapOverlayLayerConfig } from '@/lib/components/apps/widgets/workshopMap';
+import {
+  createWorkshopVariableEngine,
+  EMPTY_WORKSHOP_VARIABLE_ENGINE,
+  variableFiltersForObjectSet,
+  type WorkshopRuntimeFilterMetadata,
+  type WorkshopVariableEngineResult,
+} from '@/lib/components/apps/widgets/workshopVariables';
 
 type LeftTab = 'layout' | 'outline' | 'variables' | 'settings';
 
@@ -18,22 +27,44 @@ interface FilterRuntimeValue {
 interface RuntimeApi {
   preview: boolean;
   activeObjects: Record<string, ObjectInstance | null>;
+  selectedObjectSets: Record<string, ObjectInstance[]>;
+  shapeOutputs: Record<string, WorkshopMapFeatureCollection | null>;
   filterValues: Record<string, FilterRuntimeValue>;
+  filterMetadata: Record<string, WorkshopRuntimeFilterMetadata>;
+  primitiveValues: Record<string, unknown>;
+  runtimeParameters: Record<string, string>;
+  variableEngine: WorkshopVariableEngineResult;
   refreshKey: number;
   setActiveObject: (variableId: string, object: ObjectInstance | null) => void;
-  setFilterValue: (filterId: string, value: FilterRuntimeValue) => void;
+  setSelectedObjectSet: (variableId: string, objects: ObjectInstance[]) => void;
+  setShapeOutput: (variableId: string, shape: WorkshopMapFeatureCollection | null) => void;
+  setFilterValue: (filterId: string, value: FilterRuntimeValue, metadata?: WorkshopRuntimeFilterMetadata) => void;
+  setPrimitiveValue: (variableId: string, value: unknown) => void;
+  setRuntimeParameters: (parameters: Record<string, string>) => void;
   onButtonClick: (button: ButtonGroupButton) => void;
 }
 
 const NO_OP_RUNTIME: RuntimeApi = {
   preview: false,
   activeObjects: {},
+  selectedObjectSets: {},
+  shapeOutputs: {},
   filterValues: {},
+  filterMetadata: {},
+  primitiveValues: {},
+  runtimeParameters: {},
+  variableEngine: EMPTY_WORKSHOP_VARIABLE_ENGINE,
   refreshKey: 0,
   setActiveObject: () => undefined,
+  setSelectedObjectSet: () => undefined,
+  setShapeOutput: () => undefined,
   setFilterValue: () => undefined,
+  setPrimitiveValue: () => undefined,
+  setRuntimeParameters: () => undefined,
   onButtonClick: () => undefined,
 };
+
+const EMPTY_SELECTED_OBJECTS: ObjectInstance[] = [];
 
 export const WorkshopRuntimeContext = createContext<RuntimeApi>(NO_OP_RUNTIME);
 export type { RuntimeApi };
@@ -255,6 +286,54 @@ function makePropertyListWidget(): AppWidget {
   };
 }
 
+function makeMapWidget(): AppWidget {
+  return {
+    id: makeId('map'),
+    widget_type: 'map',
+    title: 'Map 1',
+    description: '',
+    position: { x: 0, y: 0, width: 1, height: 3 },
+    props: {
+      base_layer_kind: 'blank',
+      zoom: 11,
+      output_variable_id: '',
+      output_object_set_variable_id: '',
+      output_shape_variable_id: '',
+      shape_search_output_variable_id: '',
+      enable_shape_drawing: true,
+      layers: [
+        {
+          id: makeId('map_layer'),
+          title: 'Objects',
+          source: 'object_set',
+          loading_mode: 'eager',
+          source_variable_id: '',
+          object_type_id: '',
+          tile_layer_id: '',
+          tile_page_size: 500,
+          tile_simplify_tolerance: 0,
+          geometry_type: 'point',
+          latitude_field: 'lat',
+          longitude_field: 'lon',
+          geometry_field: '',
+          label_field: 'label',
+          color: '#2d72d2',
+          visible: true,
+          locked: false,
+          cluster_enabled: false,
+          cluster_radius: 64,
+          cluster_max_zoom: 10,
+          cluster_color: '#2d72d2',
+        },
+      ],
+      overlay_layers: [],
+    },
+    binding: null,
+    events: [],
+    children: [],
+  };
+}
+
 interface ChartXyLayer {
   id: string;
   title: string;
@@ -383,7 +462,25 @@ interface FilterEntry {
   range_max: string;
 }
 
-type VariableKind = 'object_set' | 'object_set_definition' | 'filter_output' | 'object_set_active_object';
+type VariableKind =
+  | 'primitive'
+  | 'string'
+  | 'numeric'
+  | 'boolean'
+  | 'array'
+  | 'struct'
+  | 'date'
+  | 'timestamp'
+  | 'url_parameter'
+  | 'runtime_parameter'
+  | 'object_set'
+  | 'object_set_definition'
+  | 'object_set_filter'
+  | 'filter_output'
+  | 'object_set_active_object'
+  | 'object_set_selection'
+  | 'aggregation'
+  | 'shape_output';
 
 interface VariableStaticFilter {
   property_name: string;
@@ -397,16 +494,33 @@ export interface WorkshopVariable {
   name: string;
   object_type_id: string;
   source_widget_id?: string;
+  source_variable_id?: string;
   filter_variable_id?: string;
   static_filter?: VariableStaticFilter;
   static_filters?: VariableStaticFilter[];
+  default_value?: unknown;
+  metadata?: Record<string, unknown>;
 }
 
-const VARIABLE_KIND_LABEL: Record<VariableKind, string> = {
+const VARIABLE_KIND_LABEL: Record<string, string> = {
+  primitive: 'Primitive',
+  string: 'String',
+  numeric: 'Numeric',
+  boolean: 'Boolean',
+  array: 'Array',
+  struct: 'Struct',
+  date: 'Date',
+  timestamp: 'Timestamp',
+  url_parameter: 'URL parameter',
+  runtime_parameter: 'Runtime parameter',
   object_set: 'Object set',
   object_set_definition: 'Object set definition',
+  object_set_filter: 'Object set filter',
   filter_output: 'Filter output',
   object_set_active_object: 'Active object',
+  object_set_selection: 'Selected object set',
+  aggregation: 'Aggregation',
+  shape_output: 'Shape output',
 };
 
 const SECTION_BG_COLORS: Array<{ id: string; label: string; hex: string }> = [
@@ -448,18 +562,21 @@ async function fetchObjectsForVariable(
   objectTypeId: string,
   variable: WorkshopVariable | null,
   perPage = 5000,
+  variableEngine: WorkshopVariableEngineResult | null = null,
 ): Promise<{ data: ObjectInstance[]; total: number }> {
-  const filters = variable
-    ? [
-        ...(variable.static_filter ? [variable.static_filter] : []),
-        ...(Array.isArray(variable.static_filters) ? variable.static_filters : []),
-      ].filter((entry) => entry && entry.property_name)
-    : [];
+  const filters = variableFiltersForObjectSet(variable, variableEngine);
   if (filters.length === 0) {
     const list = await listObjects(objectTypeId, { per_page: perPage });
     return { data: list.data, total: list.total };
   }
-  const result = await queryObjects(objectTypeId, { filters, per_page: perPage });
+  const result = await queryObjects(objectTypeId, {
+    filters: filters.map((filter) => ({
+      property_name: filter.property_name,
+      operator: filter.operator === 'contains' ? 'contains' : 'equals',
+      value: filter.value,
+    })),
+    per_page: perPage,
+  });
   return { data: result.data, total: result.total };
 }
 
@@ -679,6 +796,8 @@ export function WorkshopEditorPage() {
                           <ChartPieWidgetView widget={widget} variables={variables} />
                         ) : widget.widget_type === 'chart_xy' ? (
                           <ChartXyWidgetView widget={widget} variables={variables} />
+                        ) : widget.widget_type === 'map' ? (
+                          <MapWidgetView widget={widget} variables={variables} />
                         ) : null}
                       </div>
                     ))}
@@ -876,6 +995,8 @@ export function WorkshopEditorPage() {
                       <ChartPieWidgetView widget={widget} variables={variables} />
                     ) : widget.widget_type === 'chart_xy' ? (
                       <ChartXyWidgetView widget={widget} variables={variables} />
+                    ) : widget.widget_type === 'map' ? (
+                      <MapWidgetView widget={widget} variables={variables} />
                     ) : (
                       <p className="of-text-muted" style={{ padding: 12, margin: 0, fontSize: 12 }}>{widget.widget_type}</p>
                     )}
@@ -978,6 +1099,56 @@ export function WorkshopEditorPage() {
                           <ChartXyGlyph />
                         </span>
                         Chart: XY
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const widget = makeMapWidget();
+                          const activeId = makeId('var');
+                          const selectedSetId = makeId('var');
+                          const shapeId = makeId('var');
+                          const shapeSearchId = makeId('var');
+                          patchSection(section.id, (s) => ({
+                            ...s,
+                            children: [...s.children, { ...widget, props: { ...widget.props, output_variable_id: activeId, output_object_set_variable_id: selectedSetId, output_shape_variable_id: shapeId, shape_search_output_variable_id: shapeSearchId } }],
+                          }));
+                          setVariables((current) => [
+                            ...current,
+                            {
+                              id: activeId,
+                              kind: 'object_set_active_object',
+                              name: `${widget.title} Selected object`,
+                              object_type_id: '',
+                              source_widget_id: widget.id,
+                            },
+                            {
+                              id: selectedSetId,
+                              kind: 'object_set_selection',
+                              name: `${widget.title} Selected object set`,
+                              object_type_id: '',
+                              source_widget_id: widget.id,
+                            },
+                            {
+                              id: shapeId,
+                              kind: 'shape_output',
+                              name: `${widget.title} Drawn shape`,
+                              object_type_id: '',
+                              source_widget_id: widget.id,
+                            },
+                            {
+                              id: shapeSearchId,
+                              kind: 'object_set_selection',
+                              name: `${widget.title} Shape search results`,
+                              object_type_id: '',
+                              source_widget_id: widget.id,
+                            },
+                          ]);
+                          setSelection({ kind: 'widget', id: widget.id });
+                          setWidgetMenuSection(null);
+                        }}
+                        style={addWidgetItemStyle()}
+                      >
+                        <Glyph name="graph" size={13} tone="#15803d" /> Map
                       </button>
                       <button
                         type="button"
@@ -1094,6 +1265,30 @@ export function WorkshopEditorPage() {
               variables={variables}
               objectTypes={objectTypes}
               onChange={(next) => patchWidget(selectedWidget.section.id, selectedWidget.widget.id, () => next)}
+              onDelete={() => {
+                removeWidget(selectedWidget.section.id, selectedWidget.widget.id);
+                setSelection({ kind: 'page', id: activePage.id });
+              }}
+            />
+          ) : selectedWidget && selectedWidget.widget.widget_type === 'map' ? (
+            <MapWidgetInspector
+              widget={selectedWidget.widget}
+              variables={variables}
+              objectTypes={objectTypes}
+              onChange={(next) => patchWidget(selectedWidget.section.id, selectedWidget.widget.id, () => next)}
+              onRenameOutput={(name, objectTypeId) => {
+                const outputId = (selectedWidget.widget.props as { output_variable_id?: string })?.output_variable_id;
+                const outputSetId = (selectedWidget.widget.props as { output_object_set_variable_id?: string })?.output_object_set_variable_id;
+                const shapeSearchOutputId = (selectedWidget.widget.props as { shape_search_output_variable_id?: string })?.shape_search_output_variable_id;
+                if (outputId || outputSetId || shapeSearchOutputId) {
+                  setVariables((current) => current.map((v) => {
+                    if (v.id === outputId) return { ...v, name, object_type_id: objectTypeId || v.object_type_id };
+                    if (v.id === outputSetId) return { ...v, name: `${selectedWidget.widget.title} Selected object set`, object_type_id: objectTypeId || v.object_type_id };
+                    if (v.id === shapeSearchOutputId) return { ...v, name: `${selectedWidget.widget.title} Shape search results`, object_type_id: objectTypeId || v.object_type_id };
+                    return v;
+                  }));
+                }
+              }}
               onDelete={() => {
                 removeWidget(selectedWidget.section.id, selectedWidget.widget.id);
                 setSelection({ kind: 'page', id: activePage.id });
@@ -1855,7 +2050,7 @@ function WidgetInspector({
             >
               <option value="">Select object set variable…</option>
               {variables
-                .filter((v) => v.kind === 'object_set' || v.kind === 'object_set_definition')
+                .filter((v) => v.kind === 'object_set' || v.kind === 'object_set_definition' || v.kind === 'object_set_selection')
                 .map((variable) => (
                   <option key={variable.id} value={`var:${variable.id}`}>
                     {variable.name} ({VARIABLE_KIND_LABEL[variable.kind]})
@@ -2076,11 +2271,12 @@ export function ObjectTableWidgetView({ widget, variables }: { widget: AppWidget
   const [rows, setRows] = useState<ObjectInstance[]>([]);
   const [loading, setLoading] = useState(false);
   const runtime = useRuntime();
+  const selectedRows = sourceVariable?.kind === 'object_set_selection' ? runtime.variableEngine.getSelectedObjectSet(sourceVariableId) : null;
   const activeObjectVariable = useMemo(
     () => variables.find((v) => v.kind === 'object_set_active_object' && v.source_widget_id === widget.id) ?? null,
     [variables, widget.id],
   );
-  const activeObjectId = activeObjectVariable ? runtime.activeObjects[activeObjectVariable.id]?.id ?? null : null;
+  const activeObjectId = activeObjectVariable ? runtime.variableEngine.getActiveObject(activeObjectVariable.id)?.id ?? null : null;
 
   useEffect(() => {
     if (!objectTypeId) {
@@ -2090,7 +2286,10 @@ export function ObjectTableWidgetView({ widget, variables }: { widget: AppWidget
     }
     let cancelled = false;
     setLoading(true);
-    void Promise.all([listProperties(objectTypeId), fetchObjectsForVariable(objectTypeId, sourceVariable)])
+    const objectsPromise = selectedRows !== null
+      ? Promise.resolve({ data: selectedRows, total: selectedRows.length })
+      : fetchObjectsForVariable(objectTypeId, sourceVariable, 5000, runtime.variableEngine);
+    void Promise.all([listProperties(objectTypeId), objectsPromise])
       .then(([propResponse, fetchResponse]) => {
         if (cancelled) return;
         setProperties(propResponse);
@@ -2107,32 +2306,14 @@ export function ObjectTableWidgetView({ widget, variables }: { widget: AppWidget
     return () => {
       cancelled = true;
     };
-  }, [objectTypeId, runtime.refreshKey, sourceVariable]);
+  }, [objectTypeId, runtime.refreshKey, runtime.variableEngine, selectedRows, sourceVariable]);
 
   const visibleColumns = columns.length > 0 ? columns : properties.map((property) => property.name);
 
   const filteredRows = useMemo(() => {
     if (!runtime.preview) return rows;
-    return rows.filter((row) => {
-      const props = (row.properties as Record<string, unknown>) ?? {};
-      return Object.entries(runtime.filterValues).every(([, value]) => {
-        if (!value) return true;
-        const search = (value.search ?? '').trim();
-        if (search) {
-          const haystack = JSON.stringify(props).toLowerCase();
-          if (!haystack.includes(search.toLowerCase())) return false;
-        }
-        if (value.values && value.values.length > 0) {
-          const present = value.values.some((needle) => {
-            const lower = needle.toLowerCase();
-            return Object.values(props).some((entry) => String(entry ?? '').toLowerCase().includes(lower));
-          });
-          if (!present) return false;
-        }
-        return true;
-      });
-    });
-  }, [rows, runtime.filterValues, runtime.preview]);
+    return rows;
+  }, [rows, runtime.preview]);
 
   const sortedRows = useMemo(() => {
     if (!sortProperty) return filteredRows;
@@ -2196,6 +2377,409 @@ export function ObjectTableWidgetView({ widget, variables }: { widget: AppWidget
       </table>
     </div>
   );
+}
+
+export function MapWidgetView({ widget, variables }: { widget: AppWidget; variables: WorkshopVariable[] }) {
+  const runtime = useRuntime();
+  return (
+    <div style={{ padding: 12, minHeight: 320 }}>
+      <WorkshopMapWidget
+        widget={widget}
+        variables={variables}
+        variableEngine={runtime.variableEngine}
+        onSelectObject={(variableId, object) => runtime.setActiveObject(variableId, object)}
+        onSelectObjectSet={(variableId, objects) => runtime.setSelectedObjectSet(variableId, objects)}
+        onShapeChange={(variableId, shape) => runtime.setShapeOutput(variableId, shape)}
+      />
+    </div>
+  );
+}
+
+function MapWidgetInspector({
+  widget,
+  variables,
+  objectTypes,
+  onChange,
+  onRenameOutput,
+  onDelete,
+}: {
+  widget: AppWidget;
+  variables: WorkshopVariable[];
+  objectTypes: ObjectType[];
+  onChange: (next: AppWidget) => void;
+  onRenameOutput: (name: string, objectTypeId: string) => void;
+  onDelete: () => void;
+}) {
+  const [tab, setTab] = useState<'setup' | 'metadata' | 'display'>('setup');
+  const cfgLayers = readMapLayerConfigs(widget.props);
+  const cfgOverlays = readMapOverlayConfigs(widget.props);
+  const outputVariableId = (widget.props as { output_variable_id?: string })?.output_variable_id ?? '';
+  const outputObjectSetVariableId = (widget.props as { output_object_set_variable_id?: string })?.output_object_set_variable_id ?? '';
+  const outputShapeVariableId = (widget.props as { output_shape_variable_id?: string })?.output_shape_variable_id ?? '';
+  const shapeSearchOutputVariableId = (widget.props as { shape_search_output_variable_id?: string })?.shape_search_output_variable_id ?? '';
+  const outputVariable = variables.find((entry) => entry.id === outputVariableId) ?? null;
+
+  function patchProps(patch: Record<string, unknown>) {
+    onChange({ ...widget, props: { ...widget.props, ...patch } });
+  }
+
+  function patchLayers(layers: WorkshopMapLayerConfig[]) {
+    patchProps({ layers });
+  }
+
+  function patchLayer(layerId: string, patch: Partial<WorkshopMapLayerConfig>) {
+    const layers = cfgLayers.map((layer) => (layer.id === layerId ? { ...layer, ...patch } : layer));
+    patchLayers(layers);
+    const firstObjectTypeId = firstMapLayerObjectType(layers, variables);
+    if (firstObjectTypeId) onRenameOutput(outputVariable?.name ?? `${widget.title} Selected object`, firstObjectTypeId);
+  }
+
+  function addLayer() {
+    patchLayers([
+      ...cfgLayers,
+      {
+        id: makeId('map_layer'),
+        title: `Layer ${cfgLayers.length + 1}`,
+        source: 'object_set',
+        loading_mode: 'eager',
+        source_variable_id: '',
+        object_type_id: '',
+        tile_layer_id: '',
+        tile_page_size: 500,
+        tile_simplify_tolerance: 0,
+        geometry_type: 'point',
+        latitude_field: 'lat',
+        longitude_field: 'lon',
+        geometry_field: '',
+        label_field: 'label',
+        color: '#15803d',
+        visible: true,
+        locked: false,
+        filter_field: '',
+        filter_value: '',
+        radius: 6,
+        line_width: 3,
+        fill_opacity: 0.22,
+        cluster_enabled: false,
+        cluster_radius: 64,
+        cluster_max_zoom: 10,
+        cluster_color: '#15803d',
+      },
+    ]);
+  }
+
+  function removeLayer(layerId: string) {
+    patchLayers(cfgLayers.filter((layer) => layer.id !== layerId));
+  }
+
+  function patchOverlays(overlays: WorkshopMapOverlayLayerConfig[]) {
+    patchProps({ overlay_layers: overlays });
+  }
+
+  function patchOverlay(overlayId: string, patch: Partial<WorkshopMapOverlayLayerConfig>) {
+    patchOverlays(cfgOverlays.map((overlay) => (overlay.id === overlayId ? { ...overlay, ...patch } : overlay)));
+  }
+
+  function addOverlay() {
+    patchOverlays([
+      ...cfgOverlays,
+      {
+        id: makeId('map_overlay'),
+        title: `Overlay ${cfgOverlays.length + 1}`,
+        source: 'geojson_url',
+        url: '',
+        resource_id: '',
+        source_layer: '',
+        geometry_type: 'auto',
+        color: '#64748b',
+        visible: true,
+        opacity: 0.78,
+        radius: 5,
+        line_width: 2,
+        fill_opacity: 0.14,
+        min_zoom: 0,
+        max_zoom: 22,
+        attribution: '',
+      },
+    ]);
+  }
+
+  function removeOverlay(overlayId: string) {
+    patchOverlays(cfgOverlays.filter((overlay) => overlay.id !== overlayId));
+  }
+
+  return (
+    <div style={inspectorStyle()}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid var(--border-subtle)' }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{widget.title}</span>
+        <span className="of-text-muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em' }}>MAP</span>
+      </div>
+      <div style={{ display: 'flex', gap: 0, padding: '0 14px', borderBottom: '1px solid var(--border-subtle)' }}>
+        {(['setup', 'metadata', 'display'] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setTab(value)}
+            style={{ padding: '8px 6px', border: 0, background: 'transparent', borderBottom: tab === value ? '2px solid var(--status-info)' : '2px solid transparent', cursor: 'pointer', fontSize: 12, fontWeight: tab === value ? 600 : 500, color: tab === value ? 'var(--text-strong)' : 'var(--text-muted)', marginRight: 14 }}
+          >
+            {value === 'setup' ? 'Widget setup' : value === 'metadata' ? 'Metadata' : 'Display'}
+          </button>
+        ))}
+      </div>
+      {tab === 'setup' ? (
+        <div style={{ padding: 14, display: 'grid', gap: 14 }}>
+          <Section title="Base map" />
+          <Field label="Base layer">
+            <select value={((widget.props as { base_layer_kind?: string })?.base_layer_kind) ?? 'blank'} onChange={(event) => patchProps({ base_layer_kind: event.target.value })} style={inputStyle()}>
+              <option value="blank">OpenFoundry light background</option>
+              <option value="streets">OpenStreetMap raster tiles</option>
+            </select>
+          </Field>
+          <Field label="Zoom">
+            <input type="number" min={1} max={18} value={String((widget.props as { zoom?: number })?.zoom ?? 11)} onChange={(event) => patchProps({ zoom: Number(event.target.value) })} style={inputStyle()} />
+          </Field>
+
+          <Section title={`Object layers ${cfgLayers.length}`} />
+          <div style={{ display: 'grid', gap: 8 }}>
+            {cfgLayers.map((layer) => {
+              const variable = variables.find((entry) => entry.id === layer.source_variable_id) ?? null;
+              const objectTypeId = variable?.object_type_id || layer.object_type_id;
+              const objectType = objectTypes.find((entry) => entry.id === objectTypeId) ?? null;
+              return (
+                <div key={layer.id} style={{ display: 'grid', gap: 8, padding: 10, border: '1px solid var(--border-subtle)', borderRadius: 4, background: '#f7f9fa' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Glyph name="graph" size={13} tone={layer.color} />
+                    <input value={layer.title} onChange={(event) => patchLayer(layer.id, { title: event.target.value })} style={{ ...inputStyle(), flex: 1 }} />
+                    {cfgLayers.length > 1 ? (
+                      <button type="button" aria-label="Remove layer" onClick={() => removeLayer(layer.id)} style={{ border: 0, background: 'transparent', color: 'var(--status-danger)', cursor: 'pointer' }}>
+                        <Glyph name="trash" size={11} />
+                      </button>
+                    ) : null}
+                  </div>
+                  <Field label="Input object set">
+                    <select
+                      value={layer.source === 'geospatial_tile' ? 'tile' : layer.source_variable_id ? `var:${layer.source_variable_id}` : layer.object_type_id ? `type:${layer.object_type_id}` : ''}
+                      onChange={(event) => {
+                        const raw = event.target.value;
+                        if (raw === 'tile') patchLayer(layer.id, { source: 'geospatial_tile', loading_mode: 'viewport_tiles', source_variable_id: '', object_type_id: '' });
+                        else if (raw.startsWith('var:')) patchLayer(layer.id, { source: 'object_set', loading_mode: 'eager', source_variable_id: raw.slice(4), object_type_id: '', tile_layer_id: '' });
+                        else if (raw.startsWith('type:')) patchLayer(layer.id, { source: 'object_type', loading_mode: 'eager', source_variable_id: '', object_type_id: raw.slice(5), tile_layer_id: '' });
+                        else patchLayer(layer.id, { source: 'object_set', loading_mode: 'eager', source_variable_id: '', object_type_id: '', tile_layer_id: '' });
+                      }}
+                      style={inputStyle()}
+                    >
+                      <option value="">Select object set…</option>
+                      <option value="tile">Viewport tile layer</option>
+                      {variables
+                        .filter((entry) => entry.kind === 'object_set' || entry.kind === 'object_set_definition' || entry.kind === 'filter_output')
+                        .map((entry) => (
+                          <option key={entry.id} value={`var:${entry.id}`}>{entry.name} ({VARIABLE_KIND_LABEL[entry.kind]})</option>
+                        ))}
+                      {objectTypes.map((type) => (
+                        <option key={type.id} value={`type:${type.id}`}>{type.display_name || type.name}</option>
+                      ))}
+                    </select>
+                    <span className="of-text-muted" style={{ marginTop: 4, fontSize: 11 }}>
+                      Current value: {layer.source === 'geospatial_tile' ? (layer.tile_layer_id || 'tile layer not configured') : variable?.name ?? objectType?.display_name ?? objectType?.name ?? 'undefined'}
+                    </span>
+                  </Field>
+                  {layer.source === 'geospatial_tile' ? (
+                    <>
+                      <Field label="Geospatial layer ID">
+                        <input value={layer.tile_layer_id} onChange={(event) => patchLayer(layer.id, { tile_layer_id: event.target.value })} placeholder="geospatial layer UUID" style={inputStyle()} />
+                      </Field>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <Field label="Page size">
+                          <input type="number" min={1} max={5000} value={String(layer.tile_page_size)} onChange={(event) => patchLayer(layer.id, { tile_page_size: Number(event.target.value) })} style={inputStyle()} />
+                        </Field>
+                        <Field label="Simplify tolerance">
+                          <input type="number" min={0} step={0.0001} value={String(layer.tile_simplify_tolerance)} onChange={(event) => patchLayer(layer.id, { tile_simplify_tolerance: Number(event.target.value) })} style={inputStyle()} />
+                        </Field>
+                      </div>
+                    </>
+                  ) : null}
+                  <Field label="Geometry">
+                    <select value={layer.geometry_type} onChange={(event) => patchLayer(layer.id, { geometry_type: event.target.value as WorkshopMapLayerConfig['geometry_type'] })} style={inputStyle()}>
+                      <option value="point">Point</option>
+                      <option value="line">Line</option>
+                      <option value="polygon">Polygon</option>
+                      <option value="auto">Auto from GeoJSON</option>
+                    </select>
+                  </Field>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <Field label="Latitude">
+                      <input value={layer.latitude_field} onChange={(event) => patchLayer(layer.id, { latitude_field: event.target.value })} placeholder="lat" style={inputStyle()} />
+                    </Field>
+                    <Field label="Longitude">
+                      <input value={layer.longitude_field} onChange={(event) => patchLayer(layer.id, { longitude_field: event.target.value })} placeholder="lon" style={inputStyle()} />
+                    </Field>
+                  </div>
+                  <Field label="GeoJSON / geoshape">
+                    <input value={layer.geometry_field} onChange={(event) => patchLayer(layer.id, { geometry_field: event.target.value })} placeholder="geometry" style={inputStyle()} />
+                  </Field>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px', gap: 8 }}>
+                    <Field label="Label">
+                      <input value={layer.label_field} onChange={(event) => patchLayer(layer.id, { label_field: event.target.value })} placeholder="name" style={inputStyle()} />
+                    </Field>
+                    <Field label="Color">
+                      <input type="color" value={layer.color} onChange={(event) => patchLayer(layer.id, { color: event.target.value })} style={{ ...inputStyle(), padding: 2, height: 32 }} />
+                    </Field>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <Field label="Filter field">
+                      <input value={layer.filter_field} onChange={(event) => patchLayer(layer.id, { filter_field: event.target.value })} placeholder="kind" style={inputStyle()} />
+                    </Field>
+                    <Field label="Filter value">
+                      <input value={layer.filter_value} onChange={(event) => patchLayer(layer.id, { filter_value: event.target.value })} placeholder="trail_start" style={inputStyle()} />
+                    </Field>
+                  </div>
+                  <Toggle label="Selectable" value={!layer.locked} onChange={(checked) => patchLayer(layer.id, { locked: !checked })} />
+                  <Toggle label="Cluster points" value={layer.cluster_enabled} onChange={(checked) => patchLayer(layer.id, { cluster_enabled: checked })} />
+                  {layer.cluster_enabled ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 96px', gap: 8 }}>
+                      <Field label="Cluster radius">
+                        <input type="number" min={24} max={160} value={String(layer.cluster_radius)} onChange={(event) => patchLayer(layer.id, { cluster_radius: Number(event.target.value) })} style={inputStyle()} />
+                      </Field>
+                      <Field label="Max cluster zoom">
+                        <input type="number" min={1} max={18} value={String(layer.cluster_max_zoom)} onChange={(event) => patchLayer(layer.id, { cluster_max_zoom: Number(event.target.value) })} style={inputStyle()} />
+                      </Field>
+                      <Field label="Color">
+                        <input type="color" value={layer.cluster_color || layer.color} onChange={(event) => patchLayer(layer.id, { cluster_color: event.target.value })} style={{ ...inputStyle(), padding: 2, height: 32 }} />
+                      </Field>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            <button type="button" onClick={addLayer} className="of-button" style={{ fontSize: 12, justifyContent: 'center' }}>
+              <Glyph name="plus" size={11} /> Add object layer
+            </button>
+          </div>
+
+          <Section title={`Overlay layers ${cfgOverlays.length}`} />
+          <div style={{ display: 'grid', gap: 8 }}>
+            {cfgOverlays.map((overlay) => (
+              <div key={overlay.id} style={{ display: 'grid', gap: 8, padding: 10, border: '1px solid var(--border-subtle)', borderRadius: 4, background: '#f7f9fa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Glyph name="graph" size={13} tone={overlay.color} />
+                  <input value={overlay.title} onChange={(event) => patchOverlay(overlay.id, { title: event.target.value })} style={{ ...inputStyle(), flex: 1 }} />
+                  <button type="button" aria-label="Remove overlay" onClick={() => removeOverlay(overlay.id)} style={{ border: 0, background: 'transparent', color: 'var(--status-danger)', cursor: 'pointer' }}>
+                    <Glyph name="trash" size={11} />
+                  </button>
+                </div>
+                <Field label="Overlay source">
+                  <select value={overlay.source} onChange={(event) => patchOverlay(overlay.id, { source: event.target.value as WorkshopMapOverlayLayerConfig['source'] })} style={inputStyle()}>
+                    <option value="geojson_url">GeoJSON URL</option>
+                    <option value="mvt_url">MVT URL</option>
+                    <option value="saved_map_layer">Saved map layer resource</option>
+                    <option value="raster_url">Raster tile URL</option>
+                  </select>
+                </Field>
+                {overlay.source === 'saved_map_layer' ? (
+                  <Field label="Saved layer resource ID">
+                    <input value={overlay.resource_id} onChange={(event) => patchOverlay(overlay.id, { resource_id: event.target.value })} placeholder="geospatial layer id" style={inputStyle()} />
+                  </Field>
+                ) : (
+                  <Field label={overlay.source === 'mvt_url' || overlay.source === 'raster_url' ? 'Tile URL template' : 'GeoJSON URL'}>
+                    <input value={overlay.url} onChange={(event) => patchOverlay(overlay.id, { url: event.target.value })} placeholder={overlay.source === 'geojson_url' ? '/layers/trails.geojson' : 'https://tiles.example/{z}/{x}/{y}.pbf'} style={inputStyle()} />
+                  </Field>
+                )}
+                {overlay.source === 'mvt_url' ? (
+                  <Field label="MVT source layer">
+                    <input value={overlay.source_layer} onChange={(event) => patchOverlay(overlay.id, { source_layer: event.target.value })} placeholder="layer name inside tile" style={inputStyle()} />
+                  </Field>
+                ) : null}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px', gap: 8 }}>
+                  <Field label="Geometry">
+                    <select value={overlay.geometry_type} onChange={(event) => patchOverlay(overlay.id, { geometry_type: event.target.value as WorkshopMapOverlayLayerConfig['geometry_type'] })} style={inputStyle()}>
+                      <option value="auto">Auto</option>
+                      <option value="point">Point</option>
+                      <option value="line">Line</option>
+                      <option value="polygon">Polygon</option>
+                    </select>
+                  </Field>
+                  <Field label="Color">
+                    <input type="color" value={overlay.color} onChange={(event) => patchOverlay(overlay.id, { color: event.target.value })} style={{ ...inputStyle(), padding: 2, height: 32 }} />
+                  </Field>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <Field label="Opacity">
+                    <input type="number" min={0} max={1} step={0.05} value={String(overlay.opacity)} onChange={(event) => patchOverlay(overlay.id, { opacity: Number(event.target.value) })} style={inputStyle()} />
+                  </Field>
+                  <Field label="Line width">
+                    <input type="number" min={1} max={16} step={1} value={String(overlay.line_width)} onChange={(event) => patchOverlay(overlay.id, { line_width: Number(event.target.value) })} style={inputStyle()} />
+                  </Field>
+                </div>
+                <Toggle label="Visible by default" value={overlay.visible} onChange={(checked) => patchOverlay(overlay.id, { visible: checked })} />
+              </div>
+            ))}
+            <button type="button" onClick={addOverlay} className="of-button" style={{ fontSize: 12, justifyContent: 'center' }}>
+              <Glyph name="plus" size={11} /> Add overlay layer
+            </button>
+          </div>
+
+          <Section title="Selected objects" />
+          <Field label="Active object output">
+            <select value={outputVariableId} onChange={(event) => patchProps({ output_variable_id: event.target.value })} style={inputStyle()}>
+              <option value="">No selection output</option>
+              {variables
+                .filter((entry) => entry.kind === 'object_set_active_object')
+                .map((entry) => (
+                  <option key={entry.id} value={entry.id}>{entry.name}</option>
+                ))}
+            </select>
+          </Field>
+          <Field label="Selected object set output">
+            <select value={outputObjectSetVariableId} onChange={(event) => patchProps({ output_object_set_variable_id: event.target.value })} style={inputStyle()}>
+              <option value="">No object-set output</option>
+              {variables
+                .filter((entry) => entry.kind === 'object_set_selection')
+                .map((entry) => (
+                  <option key={entry.id} value={entry.id}>{entry.name}</option>
+                ))}
+            </select>
+          </Field>
+          <Toggle label="Shape drawing tools" value={((widget.props as { enable_shape_drawing?: boolean })?.enable_shape_drawing) ?? true} onChange={(checked) => patchProps({ enable_shape_drawing: checked })} />
+          <Field label="Drawn shape output">
+            <select value={outputShapeVariableId} onChange={(event) => patchProps({ output_shape_variable_id: event.target.value })} style={inputStyle()}>
+              <option value="">No shape output</option>
+              {variables
+                .filter((entry) => entry.kind === 'shape_output')
+                .map((entry) => (
+                  <option key={entry.id} value={entry.id}>{entry.name}</option>
+                ))}
+            </select>
+          </Field>
+          <Field label="Shape search output">
+            <select value={shapeSearchOutputVariableId} onChange={(event) => patchProps({ shape_search_output_variable_id: event.target.value })} style={inputStyle()}>
+              <option value="">No search output</option>
+              {variables
+                .filter((entry) => entry.kind === 'object_set_selection')
+                .map((entry) => (
+                  <option key={entry.id} value={entry.id}>{entry.name}</option>
+                ))}
+            </select>
+          </Field>
+          <button type="button" className="of-button" onClick={onDelete} style={{ color: 'var(--status-danger)', borderColor: '#fecaca' }}>
+            <Glyph name="trash" size={12} /> Delete widget
+          </button>
+        </div>
+      ) : tab === 'display' ? (
+        <DisplayTab widget={widget} onChange={onChange} />
+      ) : (
+        <div style={{ padding: 14 }}><p className="of-text-muted" style={{ fontSize: 12 }}>Widget metadata coming soon.</p></div>
+      )}
+    </div>
+  );
+}
+
+function firstMapLayerObjectType(layers: WorkshopMapLayerConfig[], variables: WorkshopVariable[]) {
+  for (const layer of layers) {
+    const variable = variables.find((entry) => entry.id === layer.source_variable_id);
+    if (variable?.object_type_id) return variable.object_type_id;
+    if (layer.object_type_id) return layer.object_type_id;
+  }
+  return '';
 }
 
 function ObjectSetPicker({ objectTypes, onClose, onSelect }: { objectTypes: ObjectType[]; onClose: () => void; onSelect: (typeId: string) => void }) {
@@ -2278,6 +2862,7 @@ function FilterListGlyph() {
 export function FilterListWidgetView({ widget }: { widget: AppWidget }) {
   const filters = ((widget.props as { filters?: FilterEntry[] })?.filters) ?? [];
   const layout = ((widget.props as { layout?: string })?.layout) ?? 'vertical';
+  const outputVariableId = (widget.props as { output_variable_id?: string })?.output_variable_id ?? '';
   const runtime = useRuntime();
   if (filters.length === 0) {
     return (
@@ -2301,7 +2886,12 @@ export function FilterListWidgetView({ widget }: { widget: AppWidget }) {
                 placeholder="Search…"
                 value={value.search ?? ''}
                 readOnly={!interactive}
-                onChange={(event) => runtime.setFilterValue(filter.id, { ...value, search: event.target.value })}
+                onChange={(event) => runtime.setFilterValue(filter.id, { ...value, search: event.target.value }, {
+                  outputVariableId,
+                  sourceWidgetId: widget.id,
+                  propertyName: filter.property_name,
+                  component: filter.component,
+                })}
                 style={{ padding: '6px 10px', border: '1px solid var(--border-default)', borderRadius: 4, fontSize: 12, background: '#fff' }}
               />
             ) : (
@@ -2310,14 +2900,24 @@ export function FilterListWidgetView({ widget }: { widget: AppWidget }) {
                   placeholder="Min"
                   value={value.range_min ?? ''}
                   readOnly={!interactive}
-                  onChange={(event) => runtime.setFilterValue(filter.id, { ...value, range_min: event.target.value })}
+                  onChange={(event) => runtime.setFilterValue(filter.id, { ...value, range_min: event.target.value }, {
+                    outputVariableId,
+                    sourceWidgetId: widget.id,
+                    propertyName: filter.property_name,
+                    component: filter.component,
+                  })}
                   style={{ padding: '6px 10px', border: '1px solid var(--border-default)', borderRadius: 4, fontSize: 12, background: '#fff', flex: 1 }}
                 />
                 <input
                   placeholder="Max"
                   value={value.range_max ?? ''}
                   readOnly={!interactive}
-                  onChange={(event) => runtime.setFilterValue(filter.id, { ...value, range_max: event.target.value })}
+                  onChange={(event) => runtime.setFilterValue(filter.id, { ...value, range_max: event.target.value }, {
+                    outputVariableId,
+                    sourceWidgetId: widget.id,
+                    propertyName: filter.property_name,
+                    component: filter.component,
+                  })}
                   style={{ padding: '6px 10px', border: '1px solid var(--border-default)', borderRadius: 4, fontSize: 12, background: '#fff', flex: 1 }}
                 />
               </div>
@@ -2576,6 +3176,51 @@ function VariablesPanel({
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Define an object set with filters and linked object traversals.</span>
               </span>
             </button>
+            <button
+              type="button"
+              onClick={() => onAdd({ id: makeId('var'), kind: 'object_set_filter', name: 'New object set filter', object_type_id: '', static_filters: [] })}
+              style={addWidgetItemStyle()}
+            >
+              <Glyph name="list" size={13} tone="#7c5dd6" />
+              <span style={{ display: 'grid', gap: 2 }}>
+                <strong style={{ fontSize: 13 }}>Object set filter</strong>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Store filter state that can be applied to object sets.</span>
+              </span>
+            </button>
+            <p className="of-text-muted" style={{ margin: '8px 6px 4px', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em' }}>VALUE</p>
+            <button
+              type="button"
+              onClick={() => onAdd({ id: makeId('var'), kind: 'string', name: 'New string', object_type_id: '', default_value: '' })}
+              style={addWidgetItemStyle()}
+            >
+              <Glyph name="tag" size={13} tone="#0891b2" />
+              <span style={{ display: 'grid', gap: 2 }}>
+                <strong style={{ fontSize: 13 }}>Primitive value</strong>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Text, numeric, boolean, date, array, or struct value.</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onAdd({ id: makeId('var'), kind: 'url_parameter', name: 'URL parameter', object_type_id: '', metadata: { parameter_name: 'param' } })}
+              style={addWidgetItemStyle()}
+            >
+              <Glyph name="external-link" size={13} tone="#15803d" />
+              <span style={{ display: 'grid', gap: 2 }}>
+                <strong style={{ fontSize: 13 }}>URL/runtime parameter</strong>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Read state from app URL or runtime parameters.</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onAdd({ id: makeId('var'), kind: 'aggregation', name: 'New aggregation', object_type_id: '', metadata: { metric: 'count', source_variable_id: '' } })}
+              style={addWidgetItemStyle()}
+            >
+              <Glyph name="graph" size={13} tone="#7c5dd6" />
+              <span style={{ display: 'grid', gap: 2 }}>
+                <strong style={{ fontSize: 13 }}>Aggregation</strong>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count or aggregate an object set variable.</span>
+              </span>
+            </button>
           </div>
         ) : null}
       </div>
@@ -2785,14 +3430,20 @@ export function ObjectSetTitleWidgetView({ widget, variables = [], objectTypes =
   const variable = variables.find((v) => v.id === sourceVariableId) ?? null;
   const objectTypeId = variable?.object_type_id ?? "";
   const objectType = objectTypes.find((t) => t.id === objectTypeId);
+  const runtime = useRuntime();
+  const selectedObjects = variable?.kind === "object_set_selection" ? runtime.selectedObjectSets[sourceVariableId] ?? EMPTY_SELECTED_OBJECTS : null;
   const [count, setCount] = useState<number | null>(null);
   useEffect(() => {
     if (!objectTypeId) {
       setCount(null);
       return;
     }
+    if (selectedObjects !== null) {
+      setCount(selectedObjects.length);
+      return;
+    }
     let cancelled = false;
-    void fetchObjectsForVariable(objectTypeId, variable)
+    void fetchObjectsForVariable(objectTypeId, variable, 5000, runtime.variableEngine)
       .then((response) => {
         if (!cancelled) setCount(response.total);
       })
@@ -2802,7 +3453,7 @@ export function ObjectSetTitleWidgetView({ widget, variables = [], objectTypes =
     return () => {
       cancelled = true;
     };
-  }, [objectTypeId, variable]);
+  }, [objectTypeId, runtime.variableEngine, selectedObjects, variable]);
   if (!variable) {
     return <div style={{ padding: 12 }}><p className="of-text-muted" style={{ margin: 0, fontSize: 12 }}>Select an object set in the inspector.</p></div>;
   }
@@ -2850,6 +3501,7 @@ export function PropertyListWidgetView({ widget, variables }: { widget: AppWidge
   const runtime = useRuntime();
   const [properties, setProperties] = useState<Property[]>([]);
   const [sample, setSample] = useState<ObjectInstance | null>(null);
+  const selectedObjects = variable?.kind === "object_set_selection" ? runtime.variableEngine.getSelectedObjectSet(sourceVariableId) : null;
   useEffect(() => {
     if (!objectTypeId) {
       setProperties([]);
@@ -2857,7 +3509,7 @@ export function PropertyListWidgetView({ widget, variables }: { widget: AppWidge
       return;
     }
     let cancelled = false;
-    void Promise.all([listProperties(objectTypeId), listObjects(objectTypeId, { per_page: 1 })])
+    void Promise.all([listProperties(objectTypeId), fetchObjectsForVariable(objectTypeId, variable, 1, runtime.variableEngine)])
       .then(([propResponse, listResponse]) => {
         if (cancelled) return;
         setProperties(propResponse);
@@ -2869,13 +3521,13 @@ export function PropertyListWidgetView({ widget, variables }: { widget: AppWidge
         setSample(null);
       });
     return () => { cancelled = true; };
-  }, [objectTypeId]);
+  }, [objectTypeId, runtime.variableEngine, variable]);
   if (!variable) {
     return <div style={{ padding: 12 }}><p className="of-text-muted" style={{ margin: 0, fontSize: 12 }}>Select an object set in the inspector.</p></div>;
   }
   const allNames = items.flatMap((item) => item.property_names);
-  const active = runtime.activeObjects[sourceVariableId] ?? null;
-  const object = variable.kind === "object_set_active_object" ? active : sample;
+  const active = runtime.variableEngine.getActiveObject(sourceVariableId);
+  const object = variable.kind === "object_set_active_object" ? active : variable.kind === "object_set_selection" ? selectedObjects?.[0] ?? null : sample;
   return (
     <div style={{ padding: 12 }}>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, numColumns)}, minmax(0, 1fr))`, gap: "6px 18px" }}>
@@ -3269,7 +3921,7 @@ function ButtonItemEditor({
                       {variables.filter((v) => v.kind === 'object_set_active_object').map((v) => (
                         <option key={v.id} value={`var:${v.id}`}>{v.name}</option>
                       ))}
-                      {variables.filter((v) => v.kind === 'object_set' || v.kind === 'object_set_definition' || v.kind === 'filter_output').map((v) => (
+                      {variables.filter((v) => v.kind === 'object_set' || v.kind === 'object_set_definition' || v.kind === 'filter_output' || v.kind === 'object_set_selection').map((v) => (
                         <option key={v.id} value={`var:${v.id}`}>{v.name}</option>
                       ))}
                     </select>
@@ -3553,6 +4205,7 @@ export function ChartPieWidgetView({ widget, variables }: { widget: AppWidget; v
   const objectTypeId = sourceVariable?.object_type_id ?? cfg.objectTypeId ?? '';
   const [rows, setRows] = useState<ObjectInstance[]>([]);
   const [loading, setLoading] = useState(false);
+  const runtime = useRuntime();
 
   useEffect(() => {
     if (!objectTypeId || !cfg.groupBy) {
@@ -3561,7 +4214,7 @@ export function ChartPieWidgetView({ widget, variables }: { widget: AppWidget; v
     }
     let cancelled = false;
     setLoading(true);
-    void fetchObjectsForVariable(objectTypeId, sourceVariable)
+    void fetchObjectsForVariable(objectTypeId, sourceVariable, 5000, runtime.variableEngine)
       .then((response) => {
         if (cancelled) return;
         setRows(response.data);
@@ -3576,7 +4229,7 @@ export function ChartPieWidgetView({ widget, variables }: { widget: AppWidget; v
     return () => {
       cancelled = true;
     };
-  }, [objectTypeId, cfg.groupBy, sourceVariable]);
+  }, [objectTypeId, cfg.groupBy, runtime.variableEngine, sourceVariable]);
 
   const data = useMemo(() => {
     if (!cfg.groupBy) return [] as Array<{ name: string; value: number }>;
@@ -3901,6 +4554,7 @@ export function ChartXyWidgetView({ widget, variables }: { widget: AppWidget; va
   const objectTypeId = sourceVariable?.object_type_id ?? layer?.object_type_id ?? '';
   const [rows, setRows] = useState<ObjectInstance[]>([]);
   const [loading, setLoading] = useState(false);
+  const runtime = useRuntime();
 
   useEffect(() => {
     if (!objectTypeId || !layer?.x_property) {
@@ -3909,7 +4563,7 @@ export function ChartXyWidgetView({ widget, variables }: { widget: AppWidget; va
     }
     let cancelled = false;
     setLoading(true);
-    void fetchObjectsForVariable(objectTypeId, sourceVariable)
+    void fetchObjectsForVariable(objectTypeId, sourceVariable, 5000, runtime.variableEngine)
       .then((response) => {
         if (cancelled) return;
         setRows(response.data);
@@ -3924,7 +4578,7 @@ export function ChartXyWidgetView({ widget, variables }: { widget: AppWidget; va
     return () => {
       cancelled = true;
     };
-  }, [objectTypeId, layer?.x_property, sourceVariable]);
+  }, [objectTypeId, layer?.x_property, runtime.variableEngine, sourceVariable]);
 
   const echartsOption = useMemo(() => {
     if (!layer || !layer.x_property) return null;
@@ -4230,7 +4884,12 @@ function PreviewRuntime({
   children: React.ReactNode;
 }) {
   const [activeObjects, setActiveObjects] = useState<Record<string, ObjectInstance | null>>({});
+  const [selectedObjectSets, setSelectedObjectSets] = useState<Record<string, ObjectInstance[]>>({});
+  const [shapeOutputs, setShapeOutputs] = useState<Record<string, WorkshopMapFeatureCollection | null>>({});
   const [filterValues, setFilterValues] = useState<Record<string, FilterRuntimeValue>>({});
+  const [filterMetadata, setFilterMetadata] = useState<Record<string, WorkshopRuntimeFilterMetadata>>({});
+  const [primitiveValues, setPrimitiveValues] = useState<Record<string, unknown>>({});
+  const [runtimeParameters, setRuntimeParametersState] = useState<Record<string, string>>({});
   const [refreshKey, setRefreshKey] = useState(0);
   const [actionModal, setActionModal] = useState<{ button: ButtonGroupButton } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -4238,24 +4897,65 @@ function PreviewRuntime({
   const setActiveObject = useCallback((variableId: string, object: ObjectInstance | null) => {
     setActiveObjects((current) => ({ ...current, [variableId]: object }));
   }, []);
-  const setFilterValue = useCallback((filterId: string, value: FilterRuntimeValue) => {
+  const setSelectedObjectSet = useCallback((variableId: string, objects: ObjectInstance[]) => {
+    setSelectedObjectSets((current) => {
+      const existing = current[variableId] ?? [];
+      if (sameRuntimeObjectSelection(existing, objects)) return current;
+      return { ...current, [variableId]: objects };
+    });
+  }, []);
+  const setShapeOutput = useCallback((variableId: string, shape: WorkshopMapFeatureCollection | null) => {
+    setShapeOutputs((current) => {
+      if (sameRuntimeShapeOutput(current[variableId] ?? null, shape)) return current;
+      return { ...current, [variableId]: shape };
+    });
+  }, []);
+  const setFilterValue = useCallback((filterId: string, value: FilterRuntimeValue, metadata?: WorkshopRuntimeFilterMetadata) => {
     setFilterValues((current) => ({ ...current, [filterId]: value }));
+    if (metadata) {
+      setFilterMetadata((current) => ({ ...current, [filterId]: { ...(current[filterId] ?? {}), ...metadata } }));
+    }
+  }, []);
+  const setPrimitiveValue = useCallback((variableId: string, value: unknown) => {
+    setPrimitiveValues((current) => (Object.is(current[variableId], value) ? current : { ...current, [variableId]: value }));
+  }, []);
+  const setRuntimeParameters = useCallback((parameters: Record<string, string>) => {
+    setRuntimeParametersState((current) => (sameStringRecord(current, parameters) ? current : { ...parameters }));
   }, []);
   const onButtonClick = useCallback((button: ButtonGroupButton) => {
     if (button.on_click_kind === 'action' && button.action_type_id) {
       setActionModal({ button });
     }
   }, []);
+  const variableEngine = useMemo(() => createWorkshopVariableEngine(variables, {
+    activeObjects,
+    selectedObjectSets,
+    shapeOutputs,
+    filterValues,
+    filterMetadata,
+    primitiveValues,
+    runtimeParameters,
+  }), [activeObjects, filterMetadata, filterValues, primitiveValues, runtimeParameters, selectedObjectSets, shapeOutputs, variables]);
 
   const runtime = useMemo<RuntimeApi>(() => ({
     preview: true,
     activeObjects,
+    selectedObjectSets,
+    shapeOutputs,
     filterValues,
+    filterMetadata,
+    primitiveValues,
+    runtimeParameters,
+    variableEngine,
     refreshKey,
     setActiveObject,
+    setSelectedObjectSet,
+    setShapeOutput,
     setFilterValue,
+    setPrimitiveValue,
+    setRuntimeParameters,
     onButtonClick,
-  }), [activeObjects, filterValues, refreshKey, setActiveObject, setFilterValue, onButtonClick]);
+  }), [activeObjects, filterMetadata, filterValues, primitiveValues, refreshKey, runtimeParameters, selectedObjectSets, setActiveObject, setFilterValue, setPrimitiveValue, setRuntimeParameters, setSelectedObjectSet, setShapeOutput, shapeOutputs, variableEngine, onButtonClick]);
 
   void pages;
   void activePage;
@@ -4281,6 +4981,7 @@ function PreviewRuntime({
           button={actionModal.button}
           variables={variables}
           activeObjects={activeObjects}
+          selectedObjectSets={selectedObjectSets}
           objectTypes={objectTypes}
           onClose={() => setActionModal(null)}
           onSuccess={() => {
@@ -4303,10 +5004,37 @@ function PreviewRuntime({
   );
 }
 
+function sameRuntimeObjectSelection(left: ObjectInstance[], right: ObjectInstance[]) {
+  if (left.length !== right.length) return false;
+  return left.every((entry, index) => entry.id === right[index]?.id);
+}
+
+function sameRuntimeShapeOutput(left: WorkshopMapFeatureCollection | null, right: WorkshopMapFeatureCollection | null) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sameStringRecord(left: Record<string, string>, right: Record<string, string>) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
+function resolveRuntimeObject(
+  variableId: string,
+  activeObjects: Record<string, ObjectInstance | null>,
+  selectedObjectSets: Record<string, ObjectInstance[]>,
+) {
+  return activeObjects[variableId] ?? selectedObjectSets[variableId]?.[0] ?? null;
+}
+
 export function ActionFormModal({
   button,
   variables = [],
   activeObjects = {},
+  selectedObjectSets = {},
   objectTypes = [],
   onClose,
   onSuccess,
@@ -4314,6 +5042,7 @@ export function ActionFormModal({
   button: ButtonGroupButton;
   variables?: WorkshopVariable[];
   activeObjects?: Record<string, ObjectInstance | null>;
+  selectedObjectSets?: Record<string, ObjectInstance[]>;
   objectTypes?: ObjectType[];
   onClose: () => void;
   onSuccess: () => void;
@@ -4341,7 +5070,7 @@ export function ActionFormModal({
             initialValues[field.name] = def.static_value;
           } else if (def?.kind === 'active_object' || def?.kind === 'variable') {
             const variable = def.variable_id ? variables.find((v) => v.id === def.variable_id) ?? null : null;
-            const obj = variable ? activeObjects[variable.id] ?? null : null;
+            const obj = variable ? resolveRuntimeObject(variable.id, activeObjects, selectedObjectSets) : null;
             initialValues[field.name] = obj?.id ?? '';
           } else {
             const mapping = mappings.find((m) => m.property_name === field.name);
@@ -4354,9 +5083,9 @@ export function ActionFormModal({
         }
         const orderField = (fetched.input_schema ?? []).find((field) => field.property_type === 'object_reference' || field.name.toLowerCase().includes('order') || field.name === 'object');
         if (orderField && !initialValues[orderField.name]) {
-          const objectVariable = variables.find((v) => v.kind === 'object_set_active_object');
+          const objectVariable = variables.find((v) => v.kind === 'object_set_active_object') ?? variables.find((v) => v.kind === 'object_set_selection') ?? null;
           if (objectVariable) {
-            const obj = activeObjects[objectVariable.id];
+            const obj = resolveRuntimeObject(objectVariable.id, activeObjects, selectedObjectSets);
             if (obj) initialValues[orderField.name] = obj.id;
           }
         }
@@ -4372,7 +5101,7 @@ export function ActionFormModal({
     return () => {
       cancelled = true;
     };
-  }, [button, variables, activeObjects]);
+  }, [button, variables, activeObjects, selectedObjectSets]);
 
   const orderField = (action?.input_schema ?? []).find((field) => field.property_type === 'object_reference' || field.name.toLowerCase().includes('order') || field.name === 'object');
   const orderId = orderField ? formValues[orderField.name] : '';
@@ -4381,11 +5110,13 @@ export function ActionFormModal({
       if ((def.kind === 'active_object' || def.kind === 'variable') && def.variable_id) {
         const object = activeObjects[def.variable_id];
         if (object) return object;
+        const selected = selectedObjectSets[def.variable_id]?.[0] ?? null;
+        if (selected) return selected;
       }
     }
-    const objectVariable = variables.find((v) => v.kind === 'object_set_active_object');
-    return objectVariable ? activeObjects[objectVariable.id] ?? null : null;
-  }, [activeObjects, button.parameter_defaults, variables]);
+    const objectVariable = variables.find((v) => v.kind === 'object_set_active_object') ?? variables.find((v) => v.kind === 'object_set_selection') ?? null;
+    return objectVariable ? resolveRuntimeObject(objectVariable.id, activeObjects, selectedObjectSets) : null;
+  }, [activeObjects, button.parameter_defaults, selectedObjectSets, variables]);
   const targetObjectId = orderId || defaultActiveObject?.id || '';
   const objectType = action ? objectTypes.find((entry) => entry.id === action.object_type_id) ?? null : null;
 

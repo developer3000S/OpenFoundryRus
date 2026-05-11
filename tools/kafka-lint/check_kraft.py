@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Kafka cluster contract lint.
 
-Validates ``infra/k8s/platform/manifests/strimzi/kafka-cluster.yaml`` against the durability and
-availability invariants the data plane depends on. Fails (exit code 1) on any
-drift. The intent is to make accidental regressions in PR review impossible:
-once the manifest meets the contract, nobody can flip it back without the CI
-job going red.
+Validates the rendered Strimzi Kafka manifest from
+``infra/helm/infra/kafka-cluster`` against the durability and availability
+invariants the data plane depends on. Fails (exit code 1) on any drift. The
+intent is to make accidental regressions in PR review impossible: once the
+manifest meets the contract, nobody can flip it back without the CI job going
+red.
 
 The contract checked here mirrors the four P0 requirements documented in the
 ROADMAP:
@@ -23,14 +24,16 @@ ROADMAP:
 Usage::
 
     python3 tools/kafka-lint/check_kraft.py
-    python3 tools/kafka-lint/check_kraft.py path/to/other-cluster.yaml
+    python3 tools/kafka-lint/check_kraft.py path/to/rendered-cluster.yaml
 
-Requires PyYAML. The CI workflow installs it; locally run
-``pip install pyyaml``.
+With no argument the script runs ``helm template`` against the current chart.
+Requires Helm and PyYAML. The CI workflow installs both; locally run
+``pip install pyyaml`` if PyYAML is missing.
 """
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -45,7 +48,7 @@ except ImportError:  # pragma: no cover - exercised only when PyYAML missing
     sys.exit(2)
 
 
-DEFAULT_MANIFEST = Path("infra/k8s/platform/manifests/strimzi/kafka-cluster.yaml")
+DEFAULT_CHART = Path("infra/helm/infra/kafka-cluster")
 
 # Broker config keys that MUST be present with these exact values.
 REQUIRED_BROKER_CONFIG: dict[str, Any] = {
@@ -78,12 +81,36 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
-def load_documents(path: Path) -> list[dict[str, Any]]:
-    text = path.read_text()
+def parse_documents(text: str, source: str) -> list[dict[str, Any]]:
     docs = [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
     if not docs:
-        raise ValueError(f"{path}: no YAML documents found")
+        raise ValueError(f"{source}: no YAML documents found")
     return docs
+
+
+def load_documents(path: Path) -> list[dict[str, Any]]:
+    return parse_documents(path.read_text(), str(path))
+
+
+def render_default_documents() -> list[dict[str, Any]]:
+    chart = repo_root() / DEFAULT_CHART
+    if not chart.is_dir():
+        raise ValueError(f"default chart not found at {chart}")
+
+    result = subprocess.run(
+        ["helm", "template", "kafka-cluster", str(chart)],
+        check=False,
+        cwd=repo_root(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise ValueError(
+            "helm template failed for "
+            f"{chart}: {result.stderr.strip() or result.stdout.strip()}"
+        )
+    return parse_documents(result.stdout, f"helm template {chart}")
 
 
 def find_kafka(docs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -217,12 +244,15 @@ def check_replicas(kafka: dict[str, Any], errors: list[str]) -> None:
 
 
 def lint(path: Path) -> list[str]:
-    errors: list[str] = []
     try:
         docs = load_documents(path)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         return [f"failed to load {path}: {exc}"]
+    return lint_documents(docs)
 
+
+def lint_documents(docs: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
     try:
         kafka = find_kafka(docs)
     except ValueError as exc:
@@ -249,21 +279,26 @@ def main(argv: list[str]) -> int:
 
     if len(argv) == 2:
         path = Path(argv[1]).resolve()
+        source = str(path)
+        if not path.is_file():
+            print(f"error: manifest not found at {path}", file=sys.stderr)
+            return 2
+        errors = lint(path)
     else:
-        path = (repo_root() / DEFAULT_MANIFEST).resolve()
+        source = f"helm template {repo_root() / DEFAULT_CHART}"
+        try:
+            errors = lint_documents(render_default_documents())
+        except (OSError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
-    if not path.is_file():
-        print(f"error: manifest not found at {path}", file=sys.stderr)
-        return 2
-
-    errors = lint(path)
     if errors:
-        print(f"Kafka KRaft contract lint FAILED for {path}:", file=sys.stderr)
+        print(f"Kafka KRaft contract lint FAILED for {source}:", file=sys.stderr)
         for err in errors:
             print(f"  - {err}", file=sys.stderr)
         return 1
 
-    print(f"Kafka KRaft contract lint OK: {path}")
+    print(f"Kafka KRaft contract lint OK: {source}")
     return 0
 
 

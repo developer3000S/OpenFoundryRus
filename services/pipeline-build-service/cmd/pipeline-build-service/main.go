@@ -95,8 +95,31 @@ func main() {
 			os.Exit(1)
 		}
 		repo := postgres.NewRepositoryFromPool(pool)
+		metadataCommitter := handler.DatasetServiceOutputCommitter{
+			BaseURL:     cfg.DatasetServiceURL,
+			BearerToken: cfg.DatasetServiceBearer,
+			Client:      &http.Client{Timeout: 30 * time.Second},
+		}
+		outputCommitter := handler.OntologyObjectOutputCommitter{
+			Dataset:                  metadataCommitter,
+			Metadata:                 repo,
+			OntologyDefinitionURL:    cfg.OntologyDefinitionServiceURL,
+			OntologyDefinitionBearer: cfg.OntologyDefinitionServiceBearer,
+			ObjectDatabaseURL:        cfg.ObjectDatabaseServiceURL,
+			ObjectDatabaseBearer:     cfg.ObjectDatabaseServiceBearer,
+			Client:                   &http.Client{Timeout: 30 * time.Second},
+		}
 		handler.SetBuildLifecyclePorts(handler.BuildLifecyclePorts{JobSpecs: repo, Versioning: repo, Locks: repo, Builds: repo})
-		handler.SetExecutionPorts(handler.ExecutionPorts{Plans: repo, Runs: repo, Python: pythonRuntime, Transactions: handler.ConfigGatedTransactionManager{Metadata: repo, CatalogConfigured: cfg.FoundryIcebergCatalogURL != ""}, Committer: handler.ConfigGatedOutputCommitter{Metadata: repo, CatalogConfigured: cfg.FoundryIcebergCatalogURL != ""}, Audit: repo, Parallelism: cfg.DistributedPipelineWorkers})
+		distributedRunner := handler.NewSparkFlinkDistributedRunner(handler.DistributedRuntimeConfig{
+			Namespace:    cfg.SparkNamespace,
+			RunnerImage:  cfg.PipelineRunnerImage,
+			PollInterval: time.Duration(cfg.DistributedComputePollIntervalMS) * time.Millisecond,
+			Timeout:      time.Duration(cfg.DistributedComputeTimeoutSecs) * time.Second,
+		})
+		aiClient := &http.Client{Timeout: 45 * time.Second}
+		llmRunner := handler.NewAIServiceLLMRunner(handler.AIServiceLLMConfig{BaseURL: cfg.AIServiceURL, BearerToken: cfg.AIServiceBearer, Client: aiClient})
+		aipGenerator := handler.NewAIServicePipelineAIPGenerator(handler.PipelineAIPGeneratorConfig{BaseURL: cfg.AIServiceURL, BearerToken: cfg.AIServiceBearer, Client: aiClient})
+		handler.SetExecutionPorts(handler.ExecutionPorts{Plans: repo, Runs: repo, Python: pythonRuntime, LLM: llmRunner, AIP: aipGenerator, Distributed: distributedRunner, Transactions: handler.ConfigGatedTransactionManager{Metadata: repo, CatalogConfigured: cfg.FoundryIcebergCatalogURL != ""}, Committer: handler.ConfigGatedOutputCommitter{Metadata: outputCommitter, CatalogConfigured: cfg.FoundryIcebergCatalogURL != ""}, Audit: repo, Parallelism: cfg.DistributedPipelineWorkers})
 		handler.SetBuildQueryRepository(repo)
 		handler.SetPipelineAuthoringRepository(repo)
 		handler.SetSparkSubmissionRepository(repo)

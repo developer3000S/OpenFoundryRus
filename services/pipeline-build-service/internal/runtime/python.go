@@ -115,6 +115,10 @@ func mapPipelineSidecarResult(out *pythonsidecar.PipelineTransformResult) (*Tran
 	if !json.Valid(output) {
 		return nil, errors.New("python transform returned malformed output_json")
 	}
+	stderr := out.Stderr
+	if stderr == "" {
+		stderr = stderrFromPipelineOutput(output)
+	}
 
 	var rowsAffected *uint64
 	if out.RowsAffectedSet {
@@ -140,8 +144,18 @@ func mapPipelineSidecarResult(out *pythonsidecar.PipelineTransformResult) (*Tran
 		ResultRows:     resultRows,
 		ResultRowsJSON: resultRowsJSON,
 		Stdout:         out.Stdout,
-		Stderr:         out.Stderr,
+		Stderr:         stderr,
 	}, nil
+}
+
+func stderrFromPipelineOutput(output json.RawMessage) string {
+	var payload struct {
+		Stderr string `json:"stderr"`
+	}
+	if err := json.Unmarshal(output, &payload); err != nil {
+		return ""
+	}
+	return payload.Stderr
 }
 
 func normalizeResultRows(raw []byte) ([]json.RawMessage, json.RawMessage, error) {

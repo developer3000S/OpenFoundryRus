@@ -46,8 +46,53 @@ func (s NodeState) terminal() bool {
 
 // OutputTransaction is the open write transaction for one output dataset.
 type OutputTransaction struct {
-	DatasetRID     string
-	TransactionRID string
+	DatasetRID             string
+	TransactionRID         string
+	DatasetName            string
+	Branch                 string
+	WriteMode              string
+	FileFormat             string
+	LogicalPath            string
+	OutputKind             string
+	OutputNodeID           string
+	SourceNodeID           string
+	PipelineRID            string
+	InputDatasetRIDs       []string
+	CreateIfMissing        bool
+	ObjectTypeID           string
+	ObjectTypeName         string
+	ObjectTypeDisplayName  string
+	ObjectTypePluralName   string
+	ObjectTypePrimaryKey   string
+	ObjectTypeIcon         string
+	ObjectTypeColor        string
+	ObjectTypeEditable     bool
+	ObjectPropertyMappings []OutputPropertyMapping
+	LinkTypeID             string
+	LinkTypeName           string
+	LinkTypeDisplayName    string
+	LinkTypeDescription    string
+	LinkTypeCardinality    string
+	LinkSourceObjectTypeID string
+	LinkTargetObjectTypeID string
+	LinkSourceObjectNodeID string
+	LinkTargetObjectNodeID string
+	LinkSourcePrimaryKey   string
+	LinkTargetPrimaryKey   string
+	LinkSourceKeyColumn    string
+	LinkTargetKeyColumn    string
+	LinkTenant             string
+}
+
+// OutputPropertyMapping describes how a table column becomes an Ontology
+// object property for Pipeline Builder object-type outputs.
+type OutputPropertyMapping struct {
+	SourceField      string
+	TargetProperty   string
+	PropertyType     string
+	DisplayName      string
+	Required         bool
+	UniqueConstraint bool
 }
 
 // Node is one executable JobSpec in the DAG.
@@ -99,7 +144,7 @@ type TransactionManager interface {
 
 // OutputCommitter commits output transactions once runner logic succeeds.
 type OutputCommitter interface {
-	Commit(ctx context.Context, tx OutputTransaction) error
+	Commit(ctx context.Context, tx OutputTransaction, result NodeResult) error
 }
 
 // AuditSink observes lifecycle transitions and transaction events. Adapters can
@@ -132,6 +177,7 @@ type Outcome struct {
 	Attempts   map[string]int
 	Nodes      map[string]NodeState
 	Reasons    map[string]string
+	Results    map[string]NodeResult
 }
 
 // Error contracts exposed by Execute.
@@ -196,6 +242,7 @@ func Execute(ctx context.Context, plan Plan, runner NodeRunner, txManager Transa
 	aborted := map[string]struct{}{}
 	reasons := map[string]string{}
 	inFlight := map[string]struct{}{}
+	collectedResults := []nodeRunResult{}
 	for _, node := range graph.nodes {
 		state[node.ID] = NodeWaiting
 		remaining[node.ID] = struct{}{}
@@ -245,6 +292,7 @@ func Execute(ctx context.Context, plan Plan, runner NodeRunner, txManager Transa
 			continue
 		}
 		result := <-results
+		collectedResults = append(collectedResults, result)
 		delete(inFlight, result.nodeID)
 		attempts[result.nodeID] = result.attempts
 		if result.reason != "" {
@@ -274,7 +322,10 @@ func Execute(ctx context.Context, plan Plan, runner NodeRunner, txManager Transa
 		}
 	}
 
-	out := Outcome{Attempts: attempts, Nodes: state, Reasons: reasons}
+	out := Outcome{Attempts: attempts, Nodes: state, Reasons: reasons, Results: map[string]NodeResult{}}
+	for _, result := range collectedResults {
+		out.Results[result.nodeID] = result.result
+	}
 	for _, s := range state {
 		switch s {
 		case NodeCompleted:
@@ -341,11 +392,12 @@ type nodeRunResult struct {
 	state    NodeState
 	attempts int
 	reason   string
+	result   NodeResult
 }
 
 func driveNode(ctx context.Context, plan Plan, node Node, defaultMaxAttempts int, runner NodeRunner, txManager TransactionManager, committer OutputCommitter, audit AuditSink) nodeRunResult {
-	_ = transition(ctx, audit, plan.BuildID, node.ID, NodeWaiting, NodeRunPending, 0, "dispatching")
-	_ = transition(ctx, audit, plan.BuildID, node.ID, NodeRunPending, NodeRunning, 0, "running")
+	_ = transition(ctx, audit, plan.BuildID, node.JobID, node.ID, NodeWaiting, NodeRunPending, 0, "dispatching")
+	_ = transition(ctx, audit, plan.BuildID, node.JobID, node.ID, NodeRunPending, NodeRunning, 0, "running")
 	maxAttempts := node.MaxAttempts
 	if maxAttempts < 1 {
 		maxAttempts = defaultMaxAttempts
@@ -356,23 +408,23 @@ func driveNode(ctx context.Context, plan Plan, node Node, defaultMaxAttempts int
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			abortOutputs(context.Background(), txManager, audit, plan.BuildID, node.ID, node.Outputs, "build cancelled")
-			_ = transition(context.Background(), audit, plan.BuildID, node.ID, NodeRunning, NodeAbortPending, attempt, "build cancelled")
-			_ = transition(context.Background(), audit, plan.BuildID, node.ID, NodeAbortPending, NodeAborted, attempt, "build cancelled")
+			abortOutputs(context.Background(), txManager, audit, plan.BuildID, node.JobID, node.ID, node.Outputs, "build cancelled")
+			_ = transition(context.Background(), audit, plan.BuildID, node.JobID, node.ID, NodeRunning, NodeAbortPending, attempt, "build cancelled")
+			_ = transition(context.Background(), audit, plan.BuildID, node.JobID, node.ID, NodeAbortPending, NodeAborted, attempt, "build cancelled")
 			return nodeRunResult{nodeID: node.ID, state: NodeAborted, attempts: attempt, reason: err.Error()}
 		}
-		_, err := runner.Run(ctx, NodeContext{BuildID: plan.BuildID, BuildBranch: plan.BuildBranch, Node: node, Attempt: attempt})
+		result, err := runner.Run(ctx, NodeContext{BuildID: plan.BuildID, BuildBranch: plan.BuildBranch, Node: node, Attempt: attempt})
 		if err == nil {
-			if err := commitAllOutputs(ctx, committer, txManager, audit, plan.BuildID, node.ID, node.Outputs); err != nil {
-				_ = transition(context.Background(), audit, plan.BuildID, node.ID, NodeRunning, NodeFailed, attempt, err.Error())
+			if err := commitAllOutputs(ctx, committer, txManager, audit, plan.BuildID, node.JobID, node.ID, node.Outputs, result); err != nil {
+				_ = transition(context.Background(), audit, plan.BuildID, node.JobID, node.ID, NodeRunning, NodeFailed, attempt, err.Error())
 				return nodeRunResult{nodeID: node.ID, state: NodeFailed, attempts: attempt, reason: err.Error()}
 			}
-			_ = transition(ctx, audit, plan.BuildID, node.ID, NodeRunning, NodeCompleted, attempt, "all outputs committed")
-			return nodeRunResult{nodeID: node.ID, state: NodeCompleted, attempts: attempt}
+			_ = transition(ctx, audit, plan.BuildID, node.JobID, node.ID, NodeRunning, NodeCompleted, attempt, "all outputs committed")
+			return nodeRunResult{nodeID: node.ID, state: NodeCompleted, attempts: attempt, result: result}
 		}
 		lastErr = err
 		if attempt < maxAttempts && ctx.Err() == nil {
-			_ = audit.Record(ctx, AuditEvent{At: time.Now().UTC(), BuildID: plan.BuildID, NodeID: node.ID, Attempt: attempt, Reason: "retry: " + err.Error()})
+			_ = audit.Record(ctx, AuditEvent{At: time.Now().UTC(), BuildID: plan.BuildID, JobID: node.JobID, NodeID: node.ID, Attempt: attempt, Reason: "retry: " + err.Error()})
 			continue
 		}
 	}
@@ -382,26 +434,26 @@ func driveNode(ctx context.Context, plan Plan, node Node, defaultMaxAttempts int
 	}
 	if ctx.Err() != nil {
 		reason = "build cancelled"
-		abortOutputs(context.Background(), txManager, audit, plan.BuildID, node.ID, node.Outputs, reason)
-		_ = transition(context.Background(), audit, plan.BuildID, node.ID, NodeRunning, NodeAbortPending, maxAttempts, reason)
-		_ = transition(context.Background(), audit, plan.BuildID, node.ID, NodeAbortPending, NodeAborted, maxAttempts, reason)
+		abortOutputs(context.Background(), txManager, audit, plan.BuildID, node.JobID, node.ID, node.Outputs, reason)
+		_ = transition(context.Background(), audit, plan.BuildID, node.JobID, node.ID, NodeRunning, NodeAbortPending, maxAttempts, reason)
+		_ = transition(context.Background(), audit, plan.BuildID, node.JobID, node.ID, NodeAbortPending, NodeAborted, maxAttempts, reason)
 		return nodeRunResult{nodeID: node.ID, state: NodeAborted, attempts: maxAttempts, reason: reason}
 	}
-	abortOutputs(context.Background(), txManager, audit, plan.BuildID, node.ID, node.Outputs, reason)
-	_ = transition(context.Background(), audit, plan.BuildID, node.ID, NodeRunning, NodeFailed, maxAttempts, reason)
+	abortOutputs(context.Background(), txManager, audit, plan.BuildID, node.JobID, node.ID, node.Outputs, reason)
+	_ = transition(context.Background(), audit, plan.BuildID, node.JobID, node.ID, NodeRunning, NodeFailed, maxAttempts, reason)
 	return nodeRunResult{nodeID: node.ID, state: NodeFailed, attempts: maxAttempts, reason: reason}
 }
 
-func commitAllOutputs(ctx context.Context, committer OutputCommitter, txManager TransactionManager, audit AuditSink, buildID uuid.UUID, nodeID string, outputs []OutputTransaction) error {
+func commitAllOutputs(ctx context.Context, committer OutputCommitter, txManager TransactionManager, audit AuditSink, buildID uuid.UUID, jobID uuid.UUID, nodeID string, outputs []OutputTransaction, result NodeResult) error {
 	committed := map[string]struct{}{}
 	var commitErrors []string
 	for _, output := range outputs {
-		if err := committer.Commit(ctx, output); err != nil {
+		if err := committer.Commit(ctx, output, result); err != nil {
 			commitErrors = append(commitErrors, fmt.Sprintf("%s: %s", output.DatasetRID, err.Error()))
 			break
 		}
 		committed[output.DatasetRID] = struct{}{}
-		_ = audit.Record(ctx, AuditEvent{At: time.Now().UTC(), BuildID: buildID, NodeID: nodeID, Reason: "output committed", DatasetRID: output.DatasetRID})
+		_ = audit.Record(ctx, AuditEvent{At: time.Now().UTC(), BuildID: buildID, JobID: jobID, NodeID: nodeID, Reason: "output committed", DatasetRID: output.DatasetRID})
 	}
 	if len(commitErrors) == 0 {
 		return nil
@@ -415,7 +467,7 @@ func commitAllOutputs(ctx context.Context, committer OutputCommitter, txManager 
 		if err := txManager.Abort(context.Background(), output); err != nil {
 			rollbackErrors = append(rollbackErrors, fmt.Sprintf("%s: %s", output.DatasetRID, err.Error()))
 		}
-		_ = audit.Record(context.Background(), AuditEvent{At: time.Now().UTC(), BuildID: buildID, NodeID: nodeID, Reason: reason, DatasetRID: output.DatasetRID})
+		_ = audit.Record(context.Background(), AuditEvent{At: time.Now().UTC(), BuildID: buildID, JobID: jobID, NodeID: nodeID, Reason: reason, DatasetRID: output.DatasetRID})
 	}
 	if len(rollbackErrors) > 0 {
 		return fmt.Errorf("multi-output commit failed: %s; rollback failed: %s", joinStrings(commitErrors, "; "), joinStrings(rollbackErrors, "; "))
@@ -423,10 +475,10 @@ func commitAllOutputs(ctx context.Context, committer OutputCommitter, txManager 
 	return fmt.Errorf("multi-output commit failed: %s", joinStrings(commitErrors, "; "))
 }
 
-func abortOutputs(ctx context.Context, txManager TransactionManager, audit AuditSink, buildID uuid.UUID, nodeID string, outputs []OutputTransaction, reason string) {
+func abortOutputs(ctx context.Context, txManager TransactionManager, audit AuditSink, buildID uuid.UUID, jobID uuid.UUID, nodeID string, outputs []OutputTransaction, reason string) {
 	for _, output := range outputs {
 		_ = txManager.Abort(ctx, output)
-		_ = audit.Record(ctx, AuditEvent{At: time.Now().UTC(), BuildID: buildID, NodeID: nodeID, Reason: "output aborted: " + reason, DatasetRID: output.DatasetRID})
+		_ = audit.Record(ctx, AuditEvent{At: time.Now().UTC(), BuildID: buildID, JobID: jobID, NodeID: nodeID, Reason: "output aborted: " + reason, DatasetRID: output.DatasetRID})
 	}
 }
 
@@ -436,18 +488,18 @@ func abortNode(ctx context.Context, buildID uuid.UUID, node Node, state map[stri
 		return
 	}
 	if from == NodeWaiting {
-		_ = transition(ctx, audit, buildID, node.ID, NodeWaiting, NodeAborted, 0, reason)
+		_ = transition(ctx, audit, buildID, node.JobID, node.ID, NodeWaiting, NodeAborted, 0, reason)
 	} else {
-		_ = transition(ctx, audit, buildID, node.ID, from, NodeAbortPending, 0, reason)
-		_ = transition(ctx, audit, buildID, node.ID, NodeAbortPending, NodeAborted, 0, reason)
+		_ = transition(ctx, audit, buildID, node.JobID, node.ID, from, NodeAbortPending, 0, reason)
+		_ = transition(ctx, audit, buildID, node.JobID, node.ID, NodeAbortPending, NodeAborted, 0, reason)
 	}
-	abortOutputs(ctx, txManager, audit, buildID, node.ID, node.Outputs, reason)
+	abortOutputs(ctx, txManager, audit, buildID, node.JobID, node.ID, node.Outputs, reason)
 	state[node.ID] = NodeAborted
 	aborted[node.ID] = struct{}{}
 }
 
-func transition(ctx context.Context, audit AuditSink, buildID uuid.UUID, nodeID string, from, to NodeState, attempt int, reason string) error {
-	return audit.Record(ctx, AuditEvent{At: time.Now().UTC(), BuildID: buildID, NodeID: nodeID, From: from, To: to, Attempt: attempt, Reason: reason})
+func transition(ctx context.Context, audit AuditSink, buildID uuid.UUID, jobID uuid.UUID, nodeID string, from, to NodeState, attempt int, reason string) error {
+	return audit.Record(ctx, AuditEvent{At: time.Now().UTC(), BuildID: buildID, JobID: jobID, NodeID: nodeID, From: from, To: to, Attempt: attempt, Reason: reason})
 }
 
 type cascadePlan struct {
@@ -589,7 +641,7 @@ func (noopTransactions) Abort(context.Context, OutputTransaction) error { return
 
 type noopCommitter struct{}
 
-func (noopCommitter) Commit(context.Context, OutputTransaction) error { return nil }
+func (noopCommitter) Commit(context.Context, OutputTransaction, NodeResult) error { return nil }
 
 type noopAudit struct{}
 

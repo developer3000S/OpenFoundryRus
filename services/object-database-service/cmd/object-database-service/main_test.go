@@ -15,18 +15,19 @@ import (
 func TestBuildStoresDevModeAllowsInMemoryFallback(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{DevMode: true, Backend: config.BackendCassandra}
-	objects, links, backend, cleanup, err := buildStores(context.Background(), cfg, slog.Default())
+	objects, links, backend, session, cleanup, err := buildStores(context.Background(), cfg, slog.Default())
 	require.NoError(t, err)
 	assert.NotNil(t, objects)
 	assert.NotNil(t, links)
 	assert.Equal(t, config.BackendInMemory, backend)
+	assert.Nil(t, session)
 	assert.Nil(t, cleanup)
 }
 
 func TestBuildStoresRejectsImplicitProductionFallback(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Backend: config.BackendCassandra}
-	_, _, _, _, err := buildStores(context.Background(), cfg, slog.Default())
+	_, _, _, _, _, err := buildStores(context.Background(), cfg, slog.Default())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "CASSANDRA_CONTACT_POINTS is required")
 }
@@ -34,7 +35,7 @@ func TestBuildStoresRejectsImplicitProductionFallback(t *testing.T) {
 func TestBuildStoresRejectsInMemoryWithoutDevMode(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Backend: config.BackendInMemory}
-	_, _, _, _, err := buildStores(context.Background(), cfg, slog.Default())
+	_, _, _, _, _, err := buildStores(context.Background(), cfg, slog.Default())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "OF_DEV_STUB_MODE=true")
 }

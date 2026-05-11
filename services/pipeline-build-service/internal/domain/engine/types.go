@@ -1,14 +1,10 @@
 // Package engine ports
 // `services/pipeline-build-service/src/domain/engine/*` — pipeline DAG
-// orchestration. Phase A delivers the topological-sort + execution-
-// stage planner + per-node dispatcher; the actual transform runtimes
-// (SQL via DataFusion-Go, Python via sidecar, LLM via HTTP, WASM via
-// wasmtime-go, distributed compute via spark-on-k8s) land in
-// follow-up phases — `runtime.go` exposes the surface those phases
-// will fill in. Until then every transform path returns a clear
-// `transform_runtime_not_wired:<kind>` failure so the
-// orchestration is testable end-to-end without paying for the
-// runtime wiring.
+// orchestration. The core package owns topological-sort, execution-stage
+// planning, fingerprints, skip-unchanged semantics, and per-node dispatch.
+// Runtime adapters live at the service edge: lightweight table transforms use
+// the existing OpenFoundry expression stack, Python uses the sidecar executor,
+// and distributed compute uses the Spark adapter when configured.
 package engine
 
 import (
@@ -79,11 +75,11 @@ type DatasetInputMetadata struct {
 
 // NodeExecutionMetadata mirrors `pub struct NodeExecutionMetadata`.
 type NodeExecutionMetadata struct {
-	Fingerprint           string                 `json:"fingerprint"`
-	Skipped               bool                   `json:"skipped"`
-	InputDatasets         []DatasetInputMetadata `json:"input_datasets"`
-	OutputDatasetID       *uuid.UUID             `json:"output_dataset_id"`
-	OutputDatasetVersion  *int32                 `json:"output_dataset_version"`
+	Fingerprint          string                 `json:"fingerprint"`
+	Skipped              bool                   `json:"skipped"`
+	InputDatasets        []DatasetInputMetadata `json:"input_datasets"`
+	OutputDatasetID      *uuid.UUID             `json:"output_dataset_id"`
+	OutputDatasetVersion *int32                 `json:"output_dataset_version"`
 }
 
 // LoadedDataset mirrors `pub struct LoadedDataset`. The byte payload

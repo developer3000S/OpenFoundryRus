@@ -33,6 +33,10 @@
       "description": "Operations generated for the `open_foundry.dataset` namespace."
     },
     {
+      "name": "open_foundry.media_set",
+      "description": "Operations generated for the `open_foundry.media_set` namespace."
+    },
+    {
       "name": "open_foundry.ontology",
       "description": "Operations generated for the `open_foundry.ontology` namespace."
     },
@@ -45,12 +49,20 @@
       "description": "Operations generated for the `open_foundry.query` namespace."
     },
     {
+      "name": "openfoundry.streaming.router.v1",
+      "description": "Operations generated for the `openfoundry.streaming.router.v1` namespace."
+    },
+    {
       "name": "rest.admin.v2",
       "description": "Operations generated for the `rest.admin.v2` namespace."
     },
     {
       "name": "rest.filesystem.v2",
       "description": "Operations generated for the `rest.filesystem.v2` namespace."
+    },
+    {
+      "name": "runtime",
+      "description": "Operations generated for the `runtime` namespace."
     }
   ],
   "security": [
@@ -396,6 +408,57 @@
         "x-openfoundry-stability": "beta"
       }
     },
+    "/api/v1/data-integration/cancel-ingest-job": {
+      "post": {
+        "summary": "IngestJobService CancelIngestJob",
+        "description": "Generated from `open_foundry.data_integration` RPC `CancelIngestJob` in service `IngestJobService`.",
+        "operationId": "open_foundry.data_integration.IngestJobService.CancelIngestJob",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelIngestJobRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelIngestJobResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "data_integration",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.dataIntegration.cancelingestjob",
+        "x-openfoundry-stability": "beta"
+      }
+    },
     "/api/v1/data-integration/create-connection": {
       "post": {
         "summary": "ConnectorService CreateConnection",
@@ -496,6 +559,58 @@
         "x-openfoundry-sdk-namespace": "data_integration",
         "x-openfoundry-api-version": "v1",
         "x-openfoundry-mcp-tool": "openfoundry.dataIntegration.deleteconnection",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/data-integration/get-ingest-job": {
+      "get": {
+        "summary": "IngestJobService GetIngestJob",
+        "description": "Generated from `open_foundry.data_integration` RPC `GetIngestJob` in service `IngestJobService`.",
+        "operationId": "open_foundry.data_integration.IngestJobService.GetIngestJob",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `GetIngestJobRequest.id`.",
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestJob"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "data_integration",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.dataIntegration.getingestjob",
         "x-openfoundry-stability": "beta"
       }
     },
@@ -602,6 +717,118 @@
         "x-openfoundry-stability": "beta"
       }
     },
+    "/api/v1/data-integration/list-ingest-jobs": {
+      "get": {
+        "summary": "IngestJobService ListIngestJobs",
+        "description": "Generated from `open_foundry.data_integration` RPC `ListIngestJobs` in service `IngestJobService`.",
+        "operationId": "open_foundry.data_integration.IngestJobService.ListIngestJobs",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListIngestJobsRequest.connection_id`.",
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          {
+            "name": "pagination",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListIngestJobsRequest.pagination`.",
+            "schema": {
+              "$ref": "#/components/schemas/PageRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListIngestJobsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "data_integration",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.dataIntegration.listingestjobs",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/data-integration/queue-ingest-job": {
+      "post": {
+        "summary": "IngestJobService QueueIngestJob",
+        "description": "Generated from `open_foundry.data_integration` RPC `QueueIngestJob` in service `IngestJobService`.",
+        "operationId": "open_foundry.data_integration.IngestJobService.QueueIngestJob",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueIngestJobRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestJob"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "data_integration",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.dataIntegration.queueingestjob",
+        "x-openfoundry-stability": "beta"
+      }
+    },
     "/api/v1/data-integration/sync-connection": {
       "post": {
         "summary": "ConnectorService SyncConnection",
@@ -701,6 +928,57 @@
         "x-openfoundry-sdk-namespace": "data_integration",
         "x-openfoundry-api-version": "v1",
         "x-openfoundry-mcp-tool": "openfoundry.dataIntegration.testconnection",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/data-integration/watch-ingest-job": {
+      "post": {
+        "summary": "IngestJobService WatchIngestJob",
+        "description": "Generated from `open_foundry.data_integration` RPC `WatchIngestJob` in service `IngestJobService`.",
+        "operationId": "open_foundry.data_integration.IngestJobService.WatchIngestJob",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchIngestJobRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestJob"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "data_integration",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.dataIntegration.watchingestjob",
         "x-openfoundry-stability": "beta"
       }
     },
@@ -1083,6 +1361,874 @@
         "x-openfoundry-sdk-namespace": "dataset",
         "x-openfoundry-api-version": "v1",
         "x-openfoundry-mcp-tool": "openfoundry.dataset.updatedataset",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/abort-transaction": {
+      "post": {
+        "summary": "MediaSetService AbortTransaction",
+        "description": "Generated from `open_foundry.media_set` RPC `AbortTransaction` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.AbortTransaction",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbortTransactionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transaction"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.aborttransaction",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/commit-transaction": {
+      "post": {
+        "summary": "MediaSetService CommitTransaction",
+        "description": "Generated from `open_foundry.media_set` RPC `CommitTransaction` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.CommitTransaction",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitTransactionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transaction"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.committransaction",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/create-media-set": {
+      "post": {
+        "summary": "MediaSetService CreateMediaSet",
+        "description": "Generated from `open_foundry.media_set` RPC `CreateMediaSet` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.CreateMediaSet",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMediaSetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaSet"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.createmediaset",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/delete-media-item": {
+      "delete": {
+        "summary": "MediaSetService DeleteMediaItem",
+        "description": "Generated from `open_foundry.media_set` RPC `DeleteMediaItem` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.DeleteMediaItem",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `DeleteMediaItemRequest.rid`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMediaItemResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.deletemediaitem",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/delete-media-set": {
+      "delete": {
+        "summary": "MediaSetService DeleteMediaSet",
+        "description": "Generated from `open_foundry.media_set` RPC `DeleteMediaSet` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.DeleteMediaSet",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `DeleteMediaSetRequest.rid`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMediaSetResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.deletemediaset",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/generate-presigned-download-url": {
+      "post": {
+        "summary": "MediaSetService GeneratePresignedDownloadUrl",
+        "description": "Generated from `open_foundry.media_set` RPC `GeneratePresignedDownloadUrl` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.GeneratePresignedDownloadUrl",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeneratePresignedDownloadUrlRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresignedUrlResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.generatepresigneddownloadurl",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/generate-presigned-upload-url": {
+      "post": {
+        "summary": "MediaSetService GeneratePresignedUploadUrl",
+        "description": "Generated from `open_foundry.media_set` RPC `GeneratePresignedUploadUrl` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.GeneratePresignedUploadUrl",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeneratePresignedUploadUrlRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresignedUrlResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.generatepresigneduploadurl",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/get-media-item": {
+      "get": {
+        "summary": "MediaSetService GetMediaItem",
+        "description": "Generated from `open_foundry.media_set` RPC `GetMediaItem` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.GetMediaItem",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `GetMediaItemRequest.rid`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaItem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.getmediaitem",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/get-media-set": {
+      "get": {
+        "summary": "MediaSetService GetMediaSet",
+        "description": "Generated from `open_foundry.media_set` RPC `GetMediaSet` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.GetMediaSet",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `GetMediaSetRequest.rid`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaSet"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.getmediaset",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/list-access-patterns": {
+      "get": {
+        "summary": "AccessPatternService ListAccessPatterns",
+        "description": "Generated from `open_foundry.media_set` RPC `ListAccessPatterns` in service `AccessPatternService`.",
+        "operationId": "open_foundry.media_set.AccessPatternService.ListAccessPatterns",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "parameters": [
+          {
+            "name": "media_set_rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListAccessPatternsRequest.media_set_rid`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pagination",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListAccessPatternsRequest.pagination`.",
+            "schema": {
+              "$ref": "#/components/schemas/PageRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAccessPatternsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.listaccesspatterns",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/list-media-items": {
+      "get": {
+        "summary": "MediaSetService ListMediaItems",
+        "description": "Generated from `open_foundry.media_set` RPC `ListMediaItems` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.ListMediaItems",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "parameters": [
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListMediaItemsRequest.branch`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "media_set_rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListMediaItemsRequest.media_set_rid`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pagination",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListMediaItemsRequest.pagination`.",
+            "schema": {
+              "$ref": "#/components/schemas/PageRequest"
+            }
+          },
+          {
+            "name": "path_prefix",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListMediaItemsRequest.path_prefix`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMediaItemsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.listmediaitems",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/list-media-sets": {
+      "get": {
+        "summary": "MediaSetService ListMediaSets",
+        "description": "Generated from `open_foundry.media_set` RPC `ListMediaSets` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.ListMediaSets",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "parameters": [
+          {
+            "name": "pagination",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListMediaSetsRequest.pagination`.",
+            "schema": {
+              "$ref": "#/components/schemas/PageRequest"
+            }
+          },
+          {
+            "name": "project_rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListMediaSetsRequest.project_rid`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMediaSetsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.listmediasets",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/open-transaction": {
+      "post": {
+        "summary": "MediaSetService OpenTransaction",
+        "description": "Generated from `open_foundry.media_set` RPC `OpenTransaction` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.OpenTransaction",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenTransactionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transaction"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.opentransaction",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/register-access-pattern": {
+      "post": {
+        "summary": "AccessPatternService RegisterAccessPattern",
+        "description": "Generated from `open_foundry.media_set` RPC `RegisterAccessPattern` in service `AccessPatternService`.",
+        "operationId": "open_foundry.media_set.AccessPatternService.RegisterAccessPattern",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterAccessPatternRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessPattern"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.registeraccesspattern",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/register-virtual-media-item": {
+      "post": {
+        "summary": "MediaSetService RegisterVirtualMediaItem",
+        "description": "Generated from `open_foundry.media_set` RPC `RegisterVirtualMediaItem` in service `MediaSetService`.",
+        "operationId": "open_foundry.media_set.MediaSetService.RegisterVirtualMediaItem",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterVirtualMediaItemRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaItem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.registervirtualmediaitem",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/media-set/run-access-pattern": {
+      "post": {
+        "summary": "AccessPatternService RunAccessPattern",
+        "description": "Generated from `open_foundry.media_set` RPC `RunAccessPattern` in service `AccessPatternService`.",
+        "operationId": "open_foundry.media_set.AccessPatternService.RunAccessPattern",
+        "tags": [
+          "open_foundry.media_set"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunAccessPatternRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunAccessPatternResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "media_set",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.mediaSet.runaccesspattern",
         "x-openfoundry-stability": "beta"
       }
     },
@@ -1515,6 +2661,57 @@
         "x-openfoundry-sdk-namespace": "notebook",
         "x-openfoundry-api-version": "v1",
         "x-openfoundry-mcp-tool": "openfoundry.notebook.updatenotebook",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/ontology/bind-dataset": {
+      "post": {
+        "summary": "OntologyService BindDataset",
+        "description": "Generated from `open_foundry.ontology` RPC `BindDataset` in service `OntologyService`.",
+        "operationId": "open_foundry.ontology.OntologyService.BindDataset",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindDatasetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectTypeBinding"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "ontology",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.ontology.binddataset",
         "x-openfoundry-stability": "beta"
       }
     },
@@ -2001,6 +3198,108 @@
         "x-openfoundry-stability": "beta"
       }
     },
+    "/api/v1/ontology/materialize-binding": {
+      "post": {
+        "summary": "OntologyService MaterializeBinding",
+        "description": "Generated from `open_foundry.ontology` RPC `MaterializeBinding` in service `OntologyService`.",
+        "operationId": "open_foundry.ontology.OntologyService.MaterializeBinding",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterializeBindingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterializeBindingResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "ontology",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.ontology.materializebinding",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/ontology/unbind-dataset": {
+      "post": {
+        "summary": "OntologyService UnbindDataset",
+        "description": "Generated from `open_foundry.ontology` RPC `UnbindDataset` in service `OntologyService`.",
+        "operationId": "open_foundry.ontology.OntologyService.UnbindDataset",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnbindDatasetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnbindDatasetResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "ontology",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.ontology.unbinddataset",
+        "x-openfoundry-stability": "beta"
+      }
+    },
     "/api/v1/ontology/update-object-type": {
       "patch": {
         "summary": "OntologyService UpdateObjectType",
@@ -2103,6 +3402,57 @@
         "x-openfoundry-stability": "beta"
       }
     },
+    "/api/v1/pipelines/create-schedule": {
+      "post": {
+        "summary": "ScheduleService CreateSchedule",
+        "description": "Generated from `open_foundry.pipeline` RPC `CreateSchedule` in service `ScheduleService`.",
+        "operationId": "open_foundry.pipeline.ScheduleService.CreateSchedule",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateScheduleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "pipeline",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.pipeline.createschedule",
+        "x-openfoundry-stability": "beta"
+      }
+    },
     "/api/v1/pipelines/delete-pipeline": {
       "delete": {
         "summary": "PipelineService DeletePipeline",
@@ -2152,6 +3502,58 @@
         "x-openfoundry-sdk-namespace": "pipeline",
         "x-openfoundry-api-version": "v1",
         "x-openfoundry-mcp-tool": "openfoundry.pipeline.deletepipeline",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/pipelines/delete-schedule": {
+      "delete": {
+        "summary": "ScheduleService DeleteSchedule",
+        "description": "Generated from `open_foundry.pipeline` RPC `DeleteSchedule` in service `ScheduleService`.",
+        "operationId": "open_foundry.pipeline.ScheduleService.DeleteSchedule",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `DeleteScheduleRequest.rid`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteScheduleResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "pipeline",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.pipeline.deleteschedule",
         "x-openfoundry-stability": "beta"
       }
     },
@@ -2302,20 +3704,20 @@
     },
     "/api/v1/pipelines/get-run": {
       "get": {
-        "summary": "PipelineService GetRun",
-        "description": "Generated from `open_foundry.pipeline` RPC `GetRun` in service `PipelineService`.",
-        "operationId": "open_foundry.pipeline.PipelineService.GetRun",
+        "summary": "ScheduleRunsService GetRun",
+        "description": "Generated from `open_foundry.pipeline` RPC `GetRun` in service `ScheduleRunsService`.",
+        "operationId": "open_foundry.pipeline.ScheduleRunsService.GetRun",
         "tags": [
           "open_foundry.pipeline"
         ],
         "parameters": [
           {
-            "name": "id",
+            "name": "rid",
             "in": "query",
             "required": false,
-            "description": "Query parameter derived from `GetRunRequest.id`.",
+            "description": "Query parameter derived from `GetScheduleRunRequest.rid`.",
             "schema": {
-              "$ref": "#/components/schemas/Uuid"
+              "type": "string"
             }
           }
         ],
@@ -2325,7 +3727,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PipelineRun"
+                  "$ref": "#/components/schemas/ScheduleRun"
                 }
               }
             }
@@ -2349,6 +3751,58 @@
         "x-openfoundry-sdk-namespace": "pipeline",
         "x-openfoundry-api-version": "v1",
         "x-openfoundry-mcp-tool": "openfoundry.pipeline.getrun",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/pipelines/get-schedule": {
+      "get": {
+        "summary": "ScheduleService GetSchedule",
+        "description": "Generated from `open_foundry.pipeline` RPC `GetSchedule` in service `ScheduleService`.",
+        "operationId": "open_foundry.pipeline.ScheduleService.GetSchedule",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `GetScheduleRequest.rid`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "pipeline",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.pipeline.getschedule",
         "x-openfoundry-stability": "beta"
       }
     },
@@ -2415,29 +3869,49 @@
     },
     "/api/v1/pipelines/list-runs": {
       "get": {
-        "summary": "PipelineService ListRuns",
-        "description": "Generated from `open_foundry.pipeline` RPC `ListRuns` in service `PipelineService`.",
-        "operationId": "open_foundry.pipeline.PipelineService.ListRuns",
+        "summary": "ScheduleRunsService ListRuns",
+        "description": "Generated from `open_foundry.pipeline` RPC `ListRuns` in service `ScheduleRunsService`.",
+        "operationId": "open_foundry.pipeline.ScheduleRunsService.ListRuns",
         "tags": [
           "open_foundry.pipeline"
         ],
         "parameters": [
           {
-            "name": "pagination",
+            "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Query parameter derived from `ListRunsRequest.pagination`.",
+            "description": "Query parameter derived from `ListScheduleRunsRequest.limit`.",
             "schema": {
-              "$ref": "#/components/schemas/PageRequest"
+              "type": "integer",
+              "format": "int32"
             }
           },
           {
-            "name": "pipeline_id",
+            "name": "offset",
             "in": "query",
             "required": false,
-            "description": "Query parameter derived from `ListRunsRequest.pipeline_id`.",
+            "description": "Query parameter derived from `ListScheduleRunsRequest.offset`.",
             "schema": {
-              "$ref": "#/components/schemas/Uuid"
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListScheduleRunsRequest.outcome`.",
+            "schema": {
+              "$ref": "#/components/schemas/RunOutcome"
+            }
+          },
+          {
+            "name": "schedule_rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListScheduleRunsRequest.schedule_rid`.",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -2447,7 +3921,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListRunsResponse"
+                  "$ref": "#/components/schemas/ListScheduleRunsResponse"
                 }
               }
             }
@@ -2471,6 +3945,145 @@
         "x-openfoundry-sdk-namespace": "pipeline",
         "x-openfoundry-api-version": "v1",
         "x-openfoundry-mcp-tool": "openfoundry.pipeline.listruns",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/pipelines/list-schedules": {
+      "get": {
+        "summary": "ScheduleService ListSchedules",
+        "description": "Generated from `open_foundry.pipeline` RPC `ListSchedules` in service `ScheduleService`.",
+        "operationId": "open_foundry.pipeline.ScheduleService.ListSchedules",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "parameters": [
+          {
+            "name": "include_paused",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListSchedulesRequest.include_paused`.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListSchedulesRequest.owner`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pagination",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListSchedulesRequest.pagination`.",
+            "schema": {
+              "$ref": "#/components/schemas/PageRequest"
+            }
+          },
+          {
+            "name": "project_rid",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListSchedulesRequest.project_rid`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "description": "Query parameter derived from `ListSchedulesRequest.query`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSchedulesResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "pipeline",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.pipeline.listschedules",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/pipelines/preview-next-fires": {
+      "post": {
+        "summary": "ScheduleService PreviewNextFires",
+        "description": "Generated from `open_foundry.pipeline` RPC `PreviewNextFires` in service `ScheduleService`.",
+        "operationId": "open_foundry.pipeline.ScheduleService.PreviewNextFires",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewNextFiresRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewNextFiresResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "pipeline",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.pipeline.previewnextfires",
         "x-openfoundry-stability": "beta"
       }
     },
@@ -2522,6 +4135,57 @@
         "x-openfoundry-sdk-namespace": "pipeline",
         "x-openfoundry-api-version": "v1",
         "x-openfoundry-mcp-tool": "openfoundry.pipeline.recordlineage",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/pipelines/run-schedule-now": {
+      "post": {
+        "summary": "ScheduleService RunScheduleNow",
+        "description": "Generated from `open_foundry.pipeline` RPC `RunScheduleNow` in service `ScheduleService`.",
+        "operationId": "open_foundry.pipeline.ScheduleService.RunScheduleNow",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunScheduleNowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunScheduleNowResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "pipeline",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.pipeline.runschedulenow",
         "x-openfoundry-stability": "beta"
       }
     },
@@ -2624,6 +4288,57 @@
         "x-openfoundry-sdk-namespace": "pipeline",
         "x-openfoundry-api-version": "v1",
         "x-openfoundry-mcp-tool": "openfoundry.pipeline.updatepipeline",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/pipelines/update-schedule": {
+      "patch": {
+        "summary": "ScheduleService UpdateSchedule",
+        "description": "Generated from `open_foundry.pipeline` RPC `UpdateSchedule` in service `ScheduleService`.",
+        "operationId": "open_foundry.pipeline.ScheduleService.UpdateSchedule",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateScheduleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "pipeline",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.pipeline.updateschedule",
         "x-openfoundry-stability": "beta"
       }
     },
@@ -2890,6 +4605,363 @@
         "x-openfoundry-sdk-namespace": "query",
         "x-openfoundry-api-version": "v1",
         "x-openfoundry-mcp-tool": "openfoundry.query.savequery",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/runtime/drop-session": {
+      "post": {
+        "summary": "PythonRuntimeService DropSession",
+        "description": "Generated from `runtime` RPC `DropSession` in service `PythonRuntimeService`.",
+        "operationId": "runtime.PythonRuntimeService.DropSession",
+        "tags": [
+          "runtime"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DropSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DropSessionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "runtime",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.runtime.dropsession",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/runtime/ensure-session": {
+      "post": {
+        "summary": "PythonRuntimeService EnsureSession",
+        "description": "Generated from `runtime` RPC `EnsureSession` in service `PythonRuntimeService`.",
+        "operationId": "runtime.PythonRuntimeService.EnsureSession",
+        "tags": [
+          "runtime"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnsureSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnsureSessionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "runtime",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.runtime.ensuresession",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/runtime/execute-inline-function": {
+      "post": {
+        "summary": "PythonRuntimeService ExecuteInlineFunction",
+        "description": "Generated from `runtime` RPC `ExecuteInlineFunction` in service `PythonRuntimeService`.",
+        "operationId": "runtime.PythonRuntimeService.ExecuteInlineFunction",
+        "tags": [
+          "runtime"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteInlineFunctionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecuteInlineFunctionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "runtime",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.runtime.executeinlinefunction",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/runtime/execute-notebook-cell": {
+      "post": {
+        "summary": "PythonRuntimeService ExecuteNotebookCell",
+        "description": "Generated from `runtime` RPC `ExecuteNotebookCell` in service `PythonRuntimeService`.",
+        "operationId": "runtime.PythonRuntimeService.ExecuteNotebookCell",
+        "tags": [
+          "runtime"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteNotebookCellRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecuteNotebookCellResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "runtime",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.runtime.executenotebookcell",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/runtime/execute-pipeline-transform": {
+      "post": {
+        "summary": "PythonRuntimeService ExecutePipelineTransform",
+        "description": "Generated from `runtime` RPC `ExecutePipelineTransform` in service `PythonRuntimeService`.",
+        "operationId": "runtime.PythonRuntimeService.ExecutePipelineTransform",
+        "tags": [
+          "runtime"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutePipelineTransformRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutePipelineTransformResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "runtime",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.runtime.executepipelinetransform",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/v1/publish": {
+      "post": {
+        "summary": "EventRouter Publish",
+        "description": "Generated from `openfoundry.streaming.router.v1` RPC `Publish` in service `EventRouter`.",
+        "operationId": "openfoundry.streaming.router.v1.EventRouter.Publish",
+        "tags": [
+          "openfoundry.streaming.router.v1"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "openfoundry_streaming_router_v1",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.openfoundryStreamingRouterV1.publish",
+        "x-openfoundry-stability": "beta"
+      }
+    },
+    "/api/v1/v1/subscribe": {
+      "post": {
+        "summary": "EventRouter Subscribe",
+        "description": "Generated from `openfoundry.streaming.router.v1` RPC `Subscribe` in service `EventRouter`.",
+        "operationId": "openfoundry.streaming.router.v1.EventRouter.Subscribe",
+        "tags": [
+          "openfoundry.streaming.router.v1"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscribeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventMessage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-openfoundry-sdk-namespace": "openfoundry_streaming_router_v1",
+        "x-openfoundry-api-version": "v1",
+        "x-openfoundry-mcp-tool": "openfoundry.openfoundryStreamingRouterV1.subscribe",
         "x-openfoundry-stability": "beta"
       }
     },
@@ -3788,6 +5860,38 @@
   },
   "components": {
     "schemas": {
+      "AbortTransactionRequest": {
+        "type": "object",
+        "properties": {
+          "transaction_rid": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessPattern": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "media_set_rid": {
+            "type": "string"
+          },
+          "params": {
+            "type": "string"
+          },
+          "persistence": {
+            "$ref": "#/components/schemas/PersistencePolicy"
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "AdminGroupsListResponse": {
         "type": "object",
         "properties": {
@@ -3908,6 +6012,14 @@
           }
         }
       },
+      "ArrayParams": {
+        "type": "object",
+        "properties": {
+          "array_sub_type": {
+            "$ref": "#/components/schemas/Field"
+          }
+        }
+      },
       "AssignRoleRequest": {
         "type": "object",
         "properties": {
@@ -3920,6 +6032,151 @@
         }
       },
       "AssignRoleResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "BindDatasetRequest": {
+        "type": "object",
+        "properties": {
+          "dataset_branch": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "dataset_version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "default_marking": {
+            "type": "string"
+          },
+          "object_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "preview_limit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "primary_key_column": {
+            "type": "string"
+          },
+          "property_mapping": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectTypeBindingPropertyMapping"
+            }
+          },
+          "sync_mode": {
+            "$ref": "#/components/schemas/ObjectTypeBindingSyncMode"
+          }
+        }
+      },
+      "Branch": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_from_transaction_rid": {
+            "type": "string"
+          },
+          "dataset_rid": {
+            "type": "string"
+          },
+          "fallback_chain": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "has_open_transaction": {
+            "type": "boolean"
+          },
+          "head_transaction_rid": {
+            "type": "string"
+          },
+          "is_root": {
+            "type": "boolean"
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "last_activity_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent_branch_rid": {
+            "type": "string"
+          },
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "Build": {
+        "type": "object",
+        "properties": {
+          "build_branch": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "force_build": {
+            "type": "boolean"
+          },
+          "job_spec_fallback": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pipeline_rid": {
+            "type": "string"
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "rid": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BuildState"
+          },
+          "trigger_kind": {
+            "type": "string"
+          }
+        }
+      },
+      "CancelIngestJobRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "CancelIngestJobResponse": {
         "type": "object",
         "properties": {}
       },
@@ -3998,6 +6255,18 @@
             "type": "string"
           }
         }
+      },
+      "CommitTransactionRequest": {
+        "type": "object",
+        "properties": {
+          "transaction_rid": {
+            "type": "string"
+          }
+        }
+      },
+      "CompoundTrigger": {
+        "type": "object",
+        "properties": {}
       },
       "Connection": {
         "type": "object",
@@ -4085,6 +6354,26 @@
           "updated_by": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "CreateBranchRequest": {
+        "type": "object",
+        "properties": {
+          "as_root": {
+            "$ref": "#/components/schemas/Empty"
+          },
+          "dataset_rid": {
+            "type": "string"
+          },
+          "from_branch": {
+            "type": "string"
+          },
+          "from_transaction_rid": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -4184,6 +6473,45 @@
           },
           "target_type_id": {
             "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "CreateMediaSetRequest": {
+        "type": "object",
+        "properties": {
+          "allowed_mime_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "markings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_rid": {
+            "type": "string"
+          },
+          "retention_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/MediaSetSchema"
+          },
+          "source_rid": {
+            "type": "string"
+          },
+          "transaction_policy": {
+            "$ref": "#/components/schemas/TransactionPolicy"
+          },
+          "virtual": {
+            "type": "boolean"
           }
         }
       },
@@ -4305,6 +6633,29 @@
           }
         }
       },
+      "CreateScheduleRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "project_rid": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ScheduleTarget"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/Trigger"
+          }
+        }
+      },
       "CreateSessionRequest": {
         "type": "object",
         "properties": {
@@ -4313,6 +6664,43 @@
           },
           "notebook_id": {
             "type": "string"
+          }
+        }
+      },
+      "CsvOptions": {
+        "type": "object",
+        "properties": {
+          "charset": {
+            "type": "string"
+          },
+          "date_format": {
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "escape": {
+            "type": "string"
+          },
+          "header": {
+            "type": "boolean"
+          },
+          "null_value": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "timestamp_format": {
+            "type": "string"
+          }
+        }
+      },
+      "CustomMetadata": {
+        "type": "object",
+        "properties": {
+          "csv": {
+            "$ref": "#/components/schemas/CsvOptions"
           }
         }
       },
@@ -4368,6 +6756,20 @@
           }
         }
       },
+      "DatasetBuildTarget": {
+        "type": "object",
+        "properties": {
+          "build_branch": {
+            "type": "string"
+          },
+          "dataset_rid": {
+            "type": "string"
+          },
+          "force_build": {
+            "type": "boolean"
+          }
+        }
+      },
       "DatasetVersion": {
         "type": "object",
         "properties": {
@@ -4387,6 +6789,19 @@
             "format": "int64"
           },
           "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "DecimalParams": {
+        "type": "object",
+        "properties": {
+          "precision": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "scale": {
             "type": "integer",
             "format": "int32"
           }
@@ -4425,6 +6840,30 @@
         }
       },
       "DeleteLinkTypeResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "DeleteMediaItemRequest": {
+        "type": "object",
+        "properties": {
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteMediaItemResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "DeleteMediaSetRequest": {
+        "type": "object",
+        "properties": {
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteMediaSetResponse": {
         "type": "object",
         "properties": {}
       },
@@ -4472,6 +6911,42 @@
         "type": "object",
         "properties": {}
       },
+      "DeleteScheduleRequest": {
+        "type": "object",
+        "properties": {
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteScheduleResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "DropSessionRequest": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "DropSessionResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "EnsureSessionRequest": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "EnsureSessionResponse": {
+        "type": "object",
+        "properties": {}
+      },
       "ErrorDetail": {
         "type": "object",
         "properties": {
@@ -4504,11 +6979,157 @@
           }
         }
       },
+      "EventMessage": {
+        "type": "object",
+        "properties": {
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "payload": {
+            "type": "string"
+          },
+          "schema_id": {
+            "type": "string"
+          },
+          "topic": {
+            "type": "string"
+          }
+        }
+      },
+      "EventTrigger": {
+        "type": "object",
+        "properties": {
+          "branch_filter": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "target_rid": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/EventType"
+          }
+        }
+      },
       "ExecuteCellRequest": {
         "type": "object",
         "properties": {
           "cell_id": {
             "type": "string"
+          }
+        }
+      },
+      "ExecuteInlineFunctionRequest": {
+        "type": "object",
+        "properties": {
+          "input_json": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ExecuteInlineFunctionResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "result_json": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "stdout": {
+            "type": "string"
+          }
+        }
+      },
+      "ExecuteNotebookCellRequest": {
+        "type": "object",
+        "properties": {
+          "notebook_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "workspace_dir": {
+            "type": "string"
+          }
+        }
+      },
+      "ExecuteNotebookCellResponse": {
+        "type": "object",
+        "properties": {
+          "content_json": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "output_type": {
+            "type": "string"
+          },
+          "stdout": {
+            "type": "string"
+          }
+        }
+      },
+      "ExecutePipelineTransformRequest": {
+        "type": "object",
+        "properties": {
+          "config_json": {
+            "type": "string"
+          },
+          "input_dataset_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "output_dataset_id": {
+            "type": "string"
+          },
+          "prepared_inputs_json": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ExecutePipelineTransformResponse": {
+        "type": "object",
+        "properties": {
+          "rows_affected": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rows_affected_set": {
+            "type": "boolean"
           }
         }
       },
@@ -4553,11 +7174,34 @@
           }
         }
       },
+      "ExternalConfig": {
+        "type": "object",
+        "properties": {
+          "compute_profile_id": {
+            "type": "string"
+          },
+          "source_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "source_system": {
+            "type": "string"
+          }
+        }
+      },
       "Field": {
         "type": "object",
         "properties": {
+          "array": {
+            "$ref": "#/components/schemas/ArrayParams"
+          },
+          "decimal": {
+            "$ref": "#/components/schemas/DecimalParams"
+          },
           "field_type": {
             "$ref": "#/components/schemas/FieldType"
+          },
+          "map": {
+            "$ref": "#/components/schemas/MapParams"
           },
           "metadata": {
             "type": "object",
@@ -4570,6 +7214,9 @@
           },
           "nullable": {
             "type": "boolean"
+          },
+          "struct": {
+            "$ref": "#/components/schemas/StructParams"
           }
         }
       },
@@ -4676,6 +7323,42 @@
           }
         }
       },
+      "GeneratePresignedDownloadUrlRequest": {
+        "type": "object",
+        "properties": {
+          "expires_in_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "media_item_rid": {
+            "type": "string"
+          }
+        }
+      },
+      "GeneratePresignedUploadUrlRequest": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "expires_in_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "media_set_rid": {
+            "type": "string"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "transaction_rid": {
+            "type": "string"
+          }
+        }
+      },
       "GetDatasetLineageRequest": {
         "type": "object",
         "properties": {
@@ -4696,9 +7379,33 @@
         "type": "object",
         "properties": {}
       },
+      "GetIngestJobRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
       "GetMeRequest": {
         "type": "object",
         "properties": {}
+      },
+      "GetMediaItemRequest": {
+        "type": "object",
+        "properties": {
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "GetMediaSetRequest": {
+        "type": "object",
+        "properties": {
+          "rid": {
+            "type": "string"
+          }
+        }
       },
       "GetNotebookRequest": {
         "type": "object",
@@ -4729,6 +7436,22 @@
         "properties": {
           "id": {
             "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "GetScheduleRequest": {
+        "type": "object",
+        "properties": {
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "GetScheduleRunRequest": {
+        "type": "object",
+        "properties": {
+          "rid": {
+            "type": "string"
           }
         }
       },
@@ -4799,6 +7522,31 @@
         "type": "object",
         "properties": {}
       },
+      "HealthCheckTarget": {
+        "type": "object",
+        "properties": {
+          "check_rid": {
+            "type": "string"
+          }
+        }
+      },
+      "IncrementalConfig": {
+        "type": "object",
+        "properties": {
+          "allowed_transaction_types": {
+            "type": "string"
+          },
+          "replay_on_deploy": {
+            "type": "boolean"
+          },
+          "watermark_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "InferSchemaRequest": {
         "type": "object",
         "properties": {
@@ -4834,6 +7582,159 @@
             "type": "boolean"
           },
           "source_type": {
+            "type": "string"
+          }
+        }
+      },
+      "IngestJob": {
+        "type": "object",
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "connection_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "next_retry_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "rows_synced": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scheduled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/IngestJobStatus"
+          },
+          "table_name": {
+            "type": "string"
+          },
+          "target_dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "InputSpec": {
+        "type": "object",
+        "properties": {
+          "dataset_rid": {
+            "type": "string"
+          },
+          "fallback_chain": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "require_fresh": {
+            "type": "boolean"
+          },
+          "view_filter": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "build_rid": {
+            "type": "string"
+          },
+          "failure_reason": {
+            "type": "string"
+          },
+          "job_spec_rid": {
+            "type": "string"
+          },
+          "output_content_hash": {
+            "type": "string"
+          },
+          "output_transaction_rids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rid": {
+            "type": "string"
+          },
+          "stale_skipped": {
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "state_changed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "JobSpec": {
+        "type": "object",
+        "properties": {
+          "branch_name": {
+            "type": "string"
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InputSpec"
+            }
+          },
+          "logic_kind": {
+            "type": "string"
+          },
+          "logic_payload": {
+            "$ref": "#/components/schemas/Struct"
+          },
+          "output_dataset_rids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pipeline_rid": {
+            "type": "string"
+          },
+          "rid": {
             "type": "string"
           }
         }
@@ -4917,6 +7818,31 @@
           }
         }
       },
+      "ListAccessPatternsRequest": {
+        "type": "object",
+        "properties": {
+          "media_set_rid": {
+            "type": "string"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          }
+        }
+      },
+      "ListAccessPatternsResponse": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccessPattern"
+            }
+          }
+        }
+      },
       "ListConnectionsRequest": {
         "type": "object",
         "properties": {
@@ -4970,6 +7896,31 @@
           }
         }
       },
+      "ListIngestJobsRequest": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          }
+        }
+      },
+      "ListIngestJobsResponse": {
+        "type": "object",
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestJob"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          }
+        }
+      },
       "ListLinkTypesRequest": {
         "type": "object",
         "properties": {
@@ -4988,6 +7939,62 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/LinkType"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          }
+        }
+      },
+      "ListMediaItemsRequest": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "media_set_rid": {
+            "type": "string"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          },
+          "path_prefix": {
+            "type": "string"
+          }
+        }
+      },
+      "ListMediaItemsResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItem"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          }
+        }
+      },
+      "ListMediaSetsRequest": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          },
+          "project_rid": {
+            "type": "string"
+          }
+        }
+      },
+      "ListMediaSetsResponse": {
+        "type": "object",
+        "properties": {
+          "media_sets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaSet"
             }
           },
           "pagination": {
@@ -5168,6 +8175,74 @@
           }
         }
       },
+      "ListScheduleRunsRequest": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RunOutcome"
+          },
+          "schedule_rid": {
+            "type": "string"
+          }
+        }
+      },
+      "ListScheduleRunsResponse": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRun"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ListSchedulesRequest": {
+        "type": "object",
+        "properties": {
+          "include_paused": {
+            "type": "boolean"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          },
+          "project_rid": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "ListSchedulesResponse": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Schedule"
+            }
+          }
+        }
+      },
       "ListSessionsRequest": {
         "type": "object",
         "properties": {
@@ -5195,6 +8270,171 @@
           },
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "MapParams": {
+        "type": "object",
+        "properties": {
+          "map_key_type": {
+            "$ref": "#/components/schemas/Field"
+          },
+          "map_value_type": {
+            "$ref": "#/components/schemas/Field"
+          }
+        }
+      },
+      "MaterializeBindingRequest": {
+        "type": "object",
+        "properties": {
+          "binding_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "dataset_branch": {
+            "type": "string"
+          },
+          "dataset_version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "object_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "MaterializeBindingResponse": {
+        "type": "object",
+        "properties": {
+          "binding_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "error_details_json": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "errors": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "inserted": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rows_read": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "skipped": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "MediaItem": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deduplicated_from": {
+            "type": "string"
+          },
+          "media_set_rid": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "string"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "rid": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "transaction_rid": {
+            "type": "string"
+          }
+        }
+      },
+      "MediaSet": {
+        "type": "object",
+        "properties": {
+          "allowed_mime_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "markings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_rid": {
+            "type": "string"
+          },
+          "retention_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rid": {
+            "type": "string"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/MediaSetSchema"
+          },
+          "source_rid": {
+            "type": "string"
+          },
+          "transaction_policy": {
+            "$ref": "#/components/schemas/TransactionPolicy"
+          },
+          "virtual": {
+            "type": "boolean"
           }
         }
       },
@@ -5263,6 +8503,89 @@
           }
         }
       },
+      "ObjectTypeBinding": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dataset_branch": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "dataset_version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "default_marking": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "last_materialized_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_run_status": {
+            "type": "string"
+          },
+          "last_run_summary_json": {
+            "type": "string"
+          },
+          "object_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "owner_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "preview_limit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "primary_key_column": {
+            "type": "string"
+          },
+          "property_mapping": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectTypeBindingPropertyMapping"
+            }
+          },
+          "sync_mode": {
+            "$ref": "#/components/schemas/ObjectTypeBindingSyncMode"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ObjectTypeBindingPropertyMapping": {
+        "type": "object",
+        "properties": {
+          "source_field": {
+            "type": "string"
+          },
+          "target_property": {
+            "type": "string"
+          }
+        }
+      },
+      "OpenTransactionRequest": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "media_set_rid": {
+            "type": "string"
+          }
+        }
+      },
       "PageRequest": {
         "type": "object",
         "properties": {
@@ -5322,6 +8645,9 @@
       "Pipeline": {
         "type": "object",
         "properties": {
+          "compute_profile_id": {
+            "type": "string"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -5329,8 +8655,17 @@
           "description": {
             "type": "string"
           },
+          "external": {
+            "$ref": "#/components/schemas/ExternalConfig"
+          },
           "id": {
             "$ref": "#/components/schemas/Uuid"
+          },
+          "incremental": {
+            "$ref": "#/components/schemas/IncrementalConfig"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/PipelineLifecycle"
           },
           "name": {
             "type": "string"
@@ -5344,12 +8679,44 @@
           "owner_id": {
             "$ref": "#/components/schemas/Uuid"
           },
+          "project_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
           "status": {
             "type": "string"
+          },
+          "streaming": {
+            "$ref": "#/components/schemas/StreamingConfig"
+          },
+          "type": {
+            "$ref": "#/components/schemas/PipelineType"
           },
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "PipelineBuildTarget": {
+        "type": "object",
+        "properties": {
+          "abort_policy": {
+            "type": "string"
+          },
+          "build_branch": {
+            "type": "string"
+          },
+          "force_build": {
+            "type": "boolean"
+          },
+          "job_spec_fallback": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pipeline_rid": {
+            "type": "string"
           }
         }
       },
@@ -5368,6 +8735,9 @@
           "id": {
             "type": "string"
           },
+          "incremental_input": {
+            "type": "boolean"
+          },
           "input_dataset_ids": {
             "type": "array",
             "items": {
@@ -5380,7 +8750,19 @@
           "output_dataset_id": {
             "$ref": "#/components/schemas/Uuid"
           },
+          "preview_status": {
+            "type": "string"
+          },
           "transform_type": {
+            "type": "string"
+          },
+          "validation_errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "validation_status": {
             "type": "string"
           }
         }
@@ -5487,6 +8869,24 @@
           }
         }
       },
+      "PresignedUrlResponse": {
+        "type": "object",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "PreviewDataRequest": {
         "type": "object",
         "properties": {
@@ -5521,6 +8921,30 @@
           "total_rows": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "PreviewNextFiresRequest": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "PreviewNextFiresResponse": {
+        "type": "object",
+        "properties": {
+          "fires": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            }
           }
         }
       },
@@ -5567,6 +8991,37 @@
           }
         }
       },
+      "PublishRequest": {
+        "type": "object",
+        "properties": {
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "payload": {
+            "type": "string"
+          },
+          "schema_id": {
+            "type": "string"
+          },
+          "topic": {
+            "type": "string"
+          }
+        }
+      },
+      "PublishResponse": {
+        "type": "object",
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "matched_pattern": {
+            "type": "string"
+          }
+        }
+      },
       "QueryResult": {
         "type": "object",
         "properties": {
@@ -5593,6 +9048,28 @@
           "total_rows": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "QueueIngestJobRequest": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "schedule_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "table_name": {
+            "type": "string"
+          },
+          "target_dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
           }
         }
       },
@@ -5625,6 +9102,27 @@
           }
         }
       },
+      "RegisterAccessPatternRequest": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "media_set_rid": {
+            "type": "string"
+          },
+          "params": {
+            "type": "string"
+          },
+          "persistence": {
+            "$ref": "#/components/schemas/PersistencePolicy"
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "RegisterRequest": {
         "type": "object",
         "properties": {
@@ -5644,6 +9142,33 @@
         "properties": {
           "user_id": {
             "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "RegisterVirtualMediaItemRequest": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "item_path": {
+            "type": "string"
+          },
+          "media_set_rid": {
+            "type": "string"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "physical_path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -5715,6 +9240,57 @@
           }
         }
       },
+      "RunAccessPatternRequest": {
+        "type": "object",
+        "properties": {
+          "access_pattern_id": {
+            "type": "string"
+          },
+          "media_item_rid": {
+            "type": "string"
+          },
+          "params_override": {
+            "type": "string"
+          }
+        }
+      },
+      "RunAccessPatternResponse": {
+        "type": "object",
+        "properties": {
+          "cached": {
+            "type": "boolean"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "result_url": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "RunScheduleNowRequest": {
+        "type": "object",
+        "properties": {
+          "requested_by": {
+            "type": "string"
+          },
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "RunScheduleNowResponse": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string"
+          }
+        }
+      },
       "SaveQueryRequest": {
         "type": "object",
         "properties": {
@@ -5757,14 +9333,117 @@
           }
         }
       },
+      "Schedule": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "last_run_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "project_rid": {
+            "type": "string"
+          },
+          "rid": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ScheduleTarget"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/Trigger"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ScheduleRun": {
+        "type": "object",
+        "properties": {
+          "build_rid": {
+            "type": "string"
+          },
+          "failure_reason": {
+            "type": "string"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RunOutcome"
+          },
+          "rid": {
+            "type": "string"
+          },
+          "schedule_rid": {
+            "type": "string"
+          },
+          "schedule_version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "trigger_snapshot": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "triggered_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ScheduleTarget": {
+        "type": "object",
+        "properties": {
+          "dataset_build": {
+            "$ref": "#/components/schemas/DatasetBuildTarget"
+          },
+          "health_check": {
+            "$ref": "#/components/schemas/HealthCheckTarget"
+          },
+          "pipeline_build": {
+            "$ref": "#/components/schemas/PipelineBuildTarget"
+          },
+          "sync_run": {
+            "$ref": "#/components/schemas/SyncRunTarget"
+          }
+        }
+      },
       "Schema": {
         "type": "object",
         "properties": {
+          "custom_metadata": {
+            "$ref": "#/components/schemas/CustomMetadata"
+          },
           "fields": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Field"
             }
+          },
+          "file_format": {
+            "$ref": "#/components/schemas/FileFormat"
           }
         }
       },
@@ -5804,6 +9483,72 @@
           }
         }
       },
+      "StreamConfig": {
+        "type": "object",
+        "properties": {
+          "checkpoint_interval_ms": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "compression": {
+            "type": "boolean"
+          },
+          "ingest_consistency": {
+            "$ref": "#/components/schemas/StreamConsistency"
+          },
+          "partitions": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pipeline_consistency": {
+            "$ref": "#/components/schemas/StreamConsistency"
+          },
+          "retention_ms": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "type": {
+            "$ref": "#/components/schemas/StreamType"
+          }
+        }
+      },
+      "StreamingConfig": {
+        "type": "object",
+        "properties": {
+          "input_stream_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "output_stream_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "parallelism": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "streaming_profile_id": {
+            "type": "string"
+          }
+        }
+      },
+      "StructParams": {
+        "type": "object",
+        "properties": {
+          "sub_schemas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Field"
+            }
+          }
+        }
+      },
+      "SubscribeRequest": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string"
+          }
+        }
+      },
       "SyncConnectionRequest": {
         "type": "object",
         "properties": {
@@ -5815,6 +9560,17 @@
           },
           "target_dataset_id": {
             "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "SyncRunTarget": {
+        "type": "object",
+        "properties": {
+          "source_rid": {
+            "type": "string"
+          },
+          "sync_rid": {
+            "type": "string"
           }
         }
       },
@@ -5852,6 +9608,20 @@
           }
         }
       },
+      "TimeTrigger": {
+        "type": "object",
+        "properties": {
+          "cron": {
+            "type": "string"
+          },
+          "flavor": {
+            "$ref": "#/components/schemas/CronFlavor"
+          },
+          "time_zone": {
+            "type": "string"
+          }
+        }
+      },
       "Timestamps": {
         "type": "object",
         "properties": {
@@ -5880,11 +9650,72 @@
           }
         }
       },
+      "Transaction": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "closed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "media_set_rid": {
+            "type": "string"
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "opened_by": {
+            "type": "string"
+          },
+          "rid": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TransactionState"
+          }
+        }
+      },
+      "Trigger": {
+        "type": "object",
+        "properties": {
+          "compound": {
+            "$ref": "#/components/schemas/CompoundTrigger"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventTrigger"
+          },
+          "time": {
+            "$ref": "#/components/schemas/TimeTrigger"
+          }
+        }
+      },
       "TriggerRunRequest": {
         "type": "object",
         "properties": {
           "pipeline_id": {
             "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "UnbindDatasetRequest": {
+        "type": "object",
+        "properties": {
+          "binding_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "object_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "UnbindDatasetResponse": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean"
           }
         }
       },
@@ -6069,6 +9900,35 @@
           }
         }
       },
+      "UpdateScheduleRequest": {
+        "type": "object",
+        "properties": {
+          "change_comment": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "edited_by": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "rid": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ScheduleTarget"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/Trigger"
+          }
+        }
+      },
       "UpdateUserRequest": {
         "type": "object",
         "properties": {
@@ -6203,6 +10063,18 @@
         "properties": {
           "value": {
             "type": "string"
+          }
+        }
+      },
+      "WatchIngestJobRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "poll_interval_ms": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       }

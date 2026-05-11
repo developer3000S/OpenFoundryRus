@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { executeAgent, type AgentExecutionResponse } from '@/lib/api/ai';
 import type { AppWidget, WidgetEvent } from '@/lib/api/apps';
@@ -9,7 +9,9 @@ import { MediaPreviewWidget } from '@/lib/components/app-builder/MediaPreviewWid
 import { MediaUploaderWidget } from '@/lib/components/app-builder/MediaUploaderWidget';
 import { ChartWidget } from '@/lib/components/dashboard/ChartWidget';
 import { TableWidget } from '@/lib/components/dashboard/TableWidget';
-import { getWidget } from '@/lib/components/apps/widgets';
+import { getWidget, useWorkshopData } from '@/lib/components/apps/widgets';
+import { WorkshopMapWidget } from '@/lib/components/apps/widgets/WorkshopMapWidget';
+import { WorkshopRuntimeContext } from '@/routes/apps/WorkshopEditorPage';
 
 interface Props {
   widget: AppWidget;
@@ -123,6 +125,8 @@ export function AppWidgetRenderer({
   const [agentBusy, setAgentBusy] = useState(false);
   const [agentError, setAgentError] = useState('');
   const [agentResponse, setAgentResponse] = useState<AgentExecutionResponse | null>(null);
+  const workshopData = useWorkshopData();
+  const workshopRuntime = useContext(WorkshopRuntimeContext);
 
   const initialScenarioFiredRef = useRef<string | null>(null);
   const props = widget.props ?? {};
@@ -154,6 +158,10 @@ export function AppWidgetRenderer({
   const imageUrl = interpolate(stringProp('url', ''), runtimeParameters);
   const imageAlt = stringProp('alt', widget.title);
 
+  useEffect(() => {
+    workshopRuntime.setRuntimeParameters(runtimeParameters);
+  }, [runtimeParameters, workshopRuntime]);
+
   // Initialize form state from first row
   useEffect(() => {
     const firstRow = result?.rows[0] ?? [];
@@ -181,6 +189,12 @@ export function AppWidgetRenderer({
       return changed ? next : prev;
     });
   }, [widget.widget_type, scenarioParameters, runtimeParameters]);
+
+  useEffect(() => {
+    if (widget.widget_type !== 'scenario') return;
+    const outputVariableId = stringProp('output_variable_id', '');
+    if (outputVariableId) workshopRuntime.setPrimitiveValue(outputVariableId, scenarioState);
+  }, [scenarioState, stringProp, widget.widget_type, workshopRuntime]);
 
   // Seed agent prompt
   useEffect(() => {
@@ -326,29 +340,6 @@ export function AppWidgetRenderer({
     defaultSortColumn: stringProp('default_sort_column', (arrayProp('columns').find((c): c is Record<string, unknown> => Boolean(c && typeof c === 'object' && typeof c.key === 'string'))?.key as string | undefined) ?? result?.columns[0]?.name ?? ''),
     defaultSortDirection: stringProp('default_sort_direction', 'asc') === 'desc' ? 'desc' as const : 'asc' as const,
   };
-
-  // Map points
-  const mapPoints = useMemo(() => {
-    if (!result) return [] as Array<{ x: number; y: number; label: string }>;
-    const latField = typeof props.latitude_field === 'string' ? props.latitude_field : 'lat';
-    const lonField = typeof props.longitude_field === 'string' ? props.longitude_field : 'lon';
-    const labelField = typeof props.label_field === 'string' ? props.label_field : result.columns[0]?.name;
-    const li = result.columns.findIndex((c) => c.name === latField);
-    const oi = result.columns.findIndex((c) => c.name === lonField);
-    const lbi = result.columns.findIndex((c) => c.name === labelField);
-    if (li < 0 || oi < 0) return [];
-    return result.rows
-      .map((row) => {
-        const lat = Number(row[li]); const lon = Number(row[oi]);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        return {
-          x: ((lon + 180) / 360) * 100,
-          y: ((90 - lat) / 180) * 100,
-          label: lbi >= 0 ? String(row[lbi]) : `${lat.toFixed(2)}, ${lon.toFixed(2)}`,
-        };
-      })
-      .filter((p): p is { x: number; y: number; label: string } => Boolean(p));
-  }, [result, props]);
 
   const contentLines = content.split('\n');
 
@@ -503,17 +494,17 @@ export function AppWidgetRenderer({
           <ChartWidget widget={chartWidget} result={result} />
         </div>
       ) : widget.widget_type === 'map' ? (
-        <div className="relative flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(15,118,110,0.18),_transparent_40%),linear-gradient(135deg,_#e0f2fe,_#f8fafc)]">
-          <div className="absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.05)_1px,transparent_1px)] bg-[size:48px_48px]" />
-          {mapPoints.map((point, i) => (
-            <div key={i} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${point.x}%`, top: `${point.y}%` }}>
-              <div className="flex flex-col items-center gap-1">
-                <span className="h-3 w-3 rounded-full border-2 border-white bg-[var(--app-primary,#0f766e)] shadow" />
-                <span className="rounded-full bg-white/90 px-2 py-1 text-[11px] font-medium text-slate-700 shadow">{point.label}</span>
-              </div>
-            </div>
-          ))}
-          {mapPoints.length === 0 && <div className="flex h-full items-center justify-center text-sm text-slate-500">Map bindings need `lat` and `lon` columns.</div>}
+        <div className="min-h-0 flex-1">
+          <WorkshopMapWidget
+            widget={widget}
+            result={result}
+            variables={workshopData.variables}
+            variableEngine={workshopRuntime.variableEngine}
+            onSelectObject={(variableId, object) => workshopRuntime.setActiveObject(variableId, object)}
+            onSelectObjectSet={(variableId, objects) => workshopRuntime.setSelectedObjectSet(variableId, objects)}
+            onShapeChange={(variableId, shape) => workshopRuntime.setShapeOutput(variableId, shape)}
+            onSelectRecord={(payload) => triggerEvents('select', payload)}
+          />
         </div>
       ) : widget.widget_type === 'media_preview' ? (
         <div className="min-h-0 flex-1"><MediaPreviewWidget widget={widget} runtimeParameters={runtimeParameters} /></div>

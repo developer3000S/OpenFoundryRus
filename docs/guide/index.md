@@ -4,9 +4,9 @@ This section is the onboarding path for contributors who need to understand how 
 
 ## At A Glance
 
-- `apps/web` is the SvelteKit control-plane frontend.
-- `services/*` contains the Rust microservices that implement bounded domains.
-- `libs/*` contains shared Rust crates reused by multiple services.
+- `apps/web` is the React + Vite control-plane frontend.
+- `services/*` contains the Go HTTP services that implement bounded domains.
+- `libs/*` contains shared Go libraries reused by multiple services.
 - `proto/*` defines cross-service contracts and feeds generated artifacts.
 - `tools/of-cli` is the operational CLI used for docs, smoke tests, benchmarks, and schema generation.
 - `infra/*` contains local Compose files, Helm charts, Terraform assets, scripts, and runbooks.

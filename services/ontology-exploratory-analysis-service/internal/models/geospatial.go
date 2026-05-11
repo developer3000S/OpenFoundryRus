@@ -1,8 +1,7 @@
 // Geospatial models — ported 1:1 from
 // services/ontology-exploratory-analysis-service/src/geospatial/geospatial_base/models/
-// (S8 / ADR-0030 — geospatial-intelligence-service absorbed). Held as a typed
-// library namespace; the binary does not mount the geospatial routes yet
-// (matches Rust `#[allow(dead_code)]`).
+// (S8 / ADR-0030 — geospatial-intelligence-service absorbed). These models
+// back the mounted `/api/v1/geospatial/*` surface.
 package models
 
 import (
@@ -13,12 +12,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	geospatialcore "github.com/openfoundry/openfoundry-go/libs/geospatial-core"
 )
 
 // Coordinate is a (lat, lon) pair in WGS84 degrees.
 type Coordinate struct {
 	Lat float64 `json:"lat"`
 	Lon float64 `json:"lon"`
+}
+
+func (c Coordinate) Validate() error {
+	return geospatialcore.ValidateLatitudeLongitude(c.Lat, c.Lon)
+}
+
+func (c Coordinate) GeoPoint() geospatialcore.GeoPoint {
+	return geospatialcore.GeoPoint{Lat: c.Lat, Lon: c.Lon}
 }
 
 // DistanceKm mirrors `Coordinate::distance_km` in feature.rs — a cheap
@@ -40,6 +48,15 @@ type Bounds struct {
 	MinLon float64 `json:"min_lon"`
 	MaxLat float64 `json:"max_lat"`
 	MaxLon float64 `json:"max_lon"`
+}
+
+func (b Bounds) Validate() error {
+	return geospatialcore.BoundingBox{
+		MinLat: b.MinLat,
+		MinLon: b.MinLon,
+		MaxLat: b.MaxLat,
+		MaxLon: b.MaxLon,
+	}.Validate()
 }
 
 func (b Bounds) Contains(p Coordinate) bool {
@@ -100,10 +117,10 @@ func (g *GeometryType) UnmarshalJSON(data []byte) error {
 // Wire form: `{"type":"point","coordinates":{lat,lon}}` for points,
 // or `{"type":"line_string","coordinates":[{lat,lon},...]}` for lines/polygons.
 type Geometry struct {
-	Type        GeometryType
-	Point       *Coordinate
-	LineString  []Coordinate
-	Polygon     []Coordinate
+	Type       GeometryType
+	Point      *Coordinate
+	LineString []Coordinate
+	Polygon    []Coordinate
 }
 
 func (g Geometry) MarshalJSON() ([]byte, error) {
@@ -598,13 +615,198 @@ type TileHexBin struct {
 // `tile_server::vector_tile`. ZoomRange uses [2]uint8 — Rust emits
 // `[u8; 2]` and clients rely on the array shape.
 type VectorTileResponse struct {
-	LayerID          uuid.UUID    `json:"layer_id"`
-	LayerName        string       `json:"layer_name"`
-	TileURLTemplate  string       `json:"tile_url_template"`
-	Format           string       `json:"format"`
-	ZoomRange        [2]uint8     `json:"zoom_range"`
-	H3Bins           []TileHexBin `json:"h3_bins"`
-	FeatureCount     int          `json:"feature_count"`
+	LayerID         uuid.UUID    `json:"layer_id"`
+	LayerName       string       `json:"layer_name"`
+	TileURLTemplate string       `json:"tile_url_template"`
+	Format          string       `json:"format"`
+	ZoomRange       [2]uint8     `json:"zoom_range"`
+	H3Bins          []TileHexBin `json:"h3_bins"`
+	FeatureCount    int          `json:"feature_count"`
+}
+
+// ViewportTileFeaturePage is the JSON tile-loading mode used by Workshop for
+// large saved map layers. It intentionally returns viewport-bounded feature
+// pages instead of requiring the browser to pull the entire layer into memory.
+type ViewportTileFeaturePage struct {
+	LayerID            uuid.UUID    `json:"layer_id"`
+	LayerName          string       `json:"layer_name"`
+	Bounds             Bounds       `json:"bounds"`
+	Zoom               float64      `json:"zoom"`
+	SimplifyTolerance  float64      `json:"simplify_tolerance"`
+	Limit              int          `json:"limit"`
+	Offset             int          `json:"offset"`
+	NextOffset         *int         `json:"next_offset,omitempty"`
+	TotalMatchingCount int          `json:"total_matching_count"`
+	ReturnedCount      int          `json:"returned_count"`
+	Features           []MapFeature `json:"features"`
+}
+
+// MapTemplateParameter mirrors Foundry Map template parameters at the public
+// contract level: object/object-set parameters select geospatial objects, while
+// primitive parameters can be substituted into layer and overlay config.
+type MapTemplateParameter struct {
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	Label        string          `json:"label,omitempty"`
+	Kind         string          `json:"kind"`
+	ObjectTypeID string          `json:"object_type_id,omitempty"`
+	Required     bool            `json:"required,omitempty"`
+	DefaultValue json.RawMessage `json:"default_value,omitempty"`
+}
+
+// MapTemplateLayerMode controls how an object layer is materialized from a
+// template. "constant" keeps the configured layer as-is; "styling" keeps style
+// and binds objects from a provided object/object-set parameter.
+type MapTemplateLayerMode string
+
+const (
+	MapTemplateLayerModeConstant MapTemplateLayerMode = "constant"
+	MapTemplateLayerModeStyling  MapTemplateLayerMode = "styling"
+	MapTemplateLayerModeRemove   MapTemplateLayerMode = "remove"
+)
+
+func (m MapTemplateLayerMode) Valid() bool {
+	switch m {
+	case "", MapTemplateLayerModeConstant, MapTemplateLayerModeStyling, MapTemplateLayerModeRemove:
+		return true
+	default:
+		return false
+	}
+}
+
+// MapTemplateLayer is intentionally close to the Workshop Map layer config so
+// render can produce widget props without an intermediate translation language.
+type MapTemplateLayer struct {
+	ID                string                     `json:"id"`
+	Title             string                     `json:"title"`
+	Mode              MapTemplateLayerMode       `json:"mode"`
+	ObjectParameterID string                     `json:"object_parameter_id,omitempty"`
+	Source            string                     `json:"source,omitempty"`
+	SourceVariableID  string                     `json:"source_variable_id,omitempty"`
+	ObjectTypeID      string                     `json:"object_type_id,omitempty"`
+	TileLayerID       string                     `json:"tile_layer_id,omitempty"`
+	GeometryType      string                     `json:"geometry_type,omitempty"`
+	Config            map[string]json.RawMessage `json:"config,omitempty"`
+	Style             map[string]json.RawMessage `json:"style,omitempty"`
+	Features          []MapFeature               `json:"features,omitempty"`
+	Metadata          map[string]json.RawMessage `json:"metadata,omitempty"`
+}
+
+// MapTemplateOverlayLayer is the template-side form of Workshop overlay layers.
+// Overlays can be included as GeoJSON/MVT/raster resources or omitted.
+type MapTemplateOverlayLayer struct {
+	ID         string                     `json:"id"`
+	Title      string                     `json:"title"`
+	Mode       string                     `json:"mode,omitempty"`
+	Source     string                     `json:"source,omitempty"`
+	URL        string                     `json:"url,omitempty"`
+	ResourceID string                     `json:"resource_id,omitempty"`
+	Config     map[string]json.RawMessage `json:"config,omitempty"`
+}
+
+type MapTemplateViewport struct {
+	CenterLat *float64 `json:"center_lat,omitempty"`
+	CenterLon *float64 `json:"center_lon,omitempty"`
+	Zoom      *float64 `json:"zoom,omitempty"`
+	BaseLayer string   `json:"base_layer_kind,omitempty"`
+}
+
+type MapTemplateInterfaceOptions struct {
+	WorkshopModuleLink bool  `json:"workshop_module_link,omitempty"`
+	SeriesPanelOpen    bool  `json:"series_panel_open,omitempty"`
+	FlyToObjects       bool  `json:"fly_to_objects,omitempty"`
+	ShowLegend         *bool `json:"show_legend,omitempty"`
+}
+
+type MapTemplateDefinition struct {
+	ID               uuid.UUID                   `json:"id"`
+	Name             string                      `json:"name"`
+	Description      string                      `json:"description"`
+	Parameters       []MapTemplateParameter      `json:"parameters"`
+	Layers           []MapTemplateLayer          `json:"layers"`
+	OverlayLayers    []MapTemplateOverlayLayer   `json:"overlay_layers"`
+	Viewport         MapTemplateViewport         `json:"viewport"`
+	InterfaceOptions MapTemplateInterfaceOptions `json:"interface_options"`
+	Tags             []string                    `json:"tags"`
+	CreatedAt        time.Time                   `json:"created_at"`
+	UpdatedAt        time.Time                   `json:"updated_at"`
+}
+
+type CreateMapTemplateRequest struct {
+	Name             string                      `json:"name"`
+	Description      string                      `json:"description,omitempty"`
+	Parameters       []MapTemplateParameter      `json:"parameters,omitempty"`
+	Layers           []MapTemplateLayer          `json:"layers,omitempty"`
+	OverlayLayers    []MapTemplateOverlayLayer   `json:"overlay_layers,omitempty"`
+	Viewport         MapTemplateViewport         `json:"viewport,omitempty"`
+	InterfaceOptions MapTemplateInterfaceOptions `json:"interface_options,omitempty"`
+	Tags             []string                    `json:"tags,omitempty"`
+}
+
+type RenderMapTemplateRequest struct {
+	ParameterValues  map[string]json.RawMessage `json:"parameter_values,omitempty"`
+	VariableMappings map[string]string          `json:"variable_mappings,omitempty"`
+}
+
+type RenderMapTemplateResponse struct {
+	TemplateID   uuid.UUID              `json:"template_id"`
+	TemplateName string                 `json:"template_name"`
+	Parameters   []MapTemplateParameter `json:"parameters"`
+	WidgetProps  map[string]any         `json:"widget_props"`
+}
+
+type MapTemplateRow struct {
+	ID               uuid.UUID
+	Name             string
+	Description      string
+	Parameters       []byte
+	Layers           []byte
+	OverlayLayers    []byte
+	Viewport         []byte
+	InterfaceOptions []byte
+	Tags             []byte
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+func (r MapTemplateRow) ToDefinition() (MapTemplateDefinition, error) {
+	var parameters []MapTemplateParameter
+	if err := decodeJSONField(r.Parameters, "parameters", &parameters); err != nil {
+		return MapTemplateDefinition{}, err
+	}
+	var layers []MapTemplateLayer
+	if err := decodeJSONField(r.Layers, "layers", &layers); err != nil {
+		return MapTemplateDefinition{}, err
+	}
+	var overlayLayers []MapTemplateOverlayLayer
+	if err := decodeJSONField(r.OverlayLayers, "overlay_layers", &overlayLayers); err != nil {
+		return MapTemplateDefinition{}, err
+	}
+	var viewport MapTemplateViewport
+	if err := decodeJSONField(r.Viewport, "viewport", &viewport); err != nil {
+		return MapTemplateDefinition{}, err
+	}
+	var interfaceOptions MapTemplateInterfaceOptions
+	if err := decodeJSONField(r.InterfaceOptions, "interface_options", &interfaceOptions); err != nil {
+		return MapTemplateDefinition{}, err
+	}
+	var tags []string
+	if err := decodeJSONField(r.Tags, "tags", &tags); err != nil {
+		return MapTemplateDefinition{}, err
+	}
+	return MapTemplateDefinition{
+		ID:               r.ID,
+		Name:             r.Name,
+		Description:      r.Description,
+		Parameters:       parameters,
+		Layers:           layers,
+		OverlayLayers:    overlayLayers,
+		Viewport:         viewport,
+		InterfaceOptions: interfaceOptions,
+		Tags:             tags,
+		CreatedAt:        r.CreatedAt,
+		UpdatedAt:        r.UpdatedAt,
+	}, nil
 }
 
 // GeocodeRequest mirrors the Rust DTO.
@@ -685,9 +887,9 @@ type IsochronePoint struct {
 
 // RouteResponse mirrors the Rust struct.
 type RouteResponse struct {
-	Mode       RouteMode        `json:"mode"`
-	DistanceKm float64          `json:"distance_km"`
-	DurationMin uint32          `json:"duration_min"`
-	Polyline   []Coordinate     `json:"polyline"`
-	Isochrone  []IsochronePoint `json:"isochrone"`
+	Mode        RouteMode        `json:"mode"`
+	DistanceKm  float64          `json:"distance_km"`
+	DurationMin uint32           `json:"duration_min"`
+	Polyline    []Coordinate     `json:"polyline"`
+	Isochrone   []IsochronePoint `json:"isochrone"`
 }

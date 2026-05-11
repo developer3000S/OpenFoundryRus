@@ -76,7 +76,7 @@ func (h *Handlers) CreateApp(w http.ResponseWriter, r *http.Request) {
 	creator := claims.Sub
 	app, err := h.Repo.CreateApp(r.Context(), &body, &creator)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeAppMutationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, app)
@@ -99,7 +99,7 @@ func (h *Handlers) UpdateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	app, err := h.Repo.UpdateApp(r.Context(), id, &body)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeAppMutationError(w, err)
 		return
 	}
 	if app == nil {
@@ -147,7 +147,7 @@ func (h *Handlers) PublishApp(w http.ResponseWriter, r *http.Request) {
 	publisher := claims.Sub
 	v, err := h.Repo.PublishApp(r.Context(), id, body.Notes, &publisher)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeAppMutationError(w, err)
 		return
 	}
 	if v == nil {
@@ -173,6 +173,41 @@ func (h *Handlers) ListAppVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": rows})
+}
+
+func (h *Handlers) PreviewApp(w http.ResponseWriter, r *http.Request) {
+	if _, ok := authmw.FromContext(r.Context()); !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id must be a uuid")
+		return
+	}
+	app, err := h.Repo.GetApp(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if app == nil {
+		writeError(w, http.StatusNotFound, "app not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"app":            app,
+		"widget_catalog": []any{},
+		"embed":          embedInfo(app.Slug),
+	})
+}
+
+func (h *Handlers) GetAppEmbedInfo(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	if slug == "" {
+		writeError(w, http.StatusBadRequest, "slug is required")
+		return
+	}
+	writeJSON(w, http.StatusOK, embedInfo(slug))
 }
 
 // GetPublishedApp serves the public-facing read endpoint used by embedded /
@@ -208,8 +243,16 @@ func (h *Handlers) GetPublishedApp(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"app":                      app,
-		"embed":                    map[string]any{"url": "/apps/embed/" + slug, "iframe_html": ""},
+		"embed":                    embedInfo(slug),
 		"published_version_number": v.VersionNumber,
 		"published_at":             publishedAt,
 	})
+}
+
+func embedInfo(slug string) map[string]any {
+	url := "/apps/runtime/" + slug
+	return map[string]any{
+		"url":         url,
+		"iframe_html": `<iframe src="` + url + `" loading="lazy" style="width:100%;height:720px;border:0;"></iframe>`,
+	}
 }

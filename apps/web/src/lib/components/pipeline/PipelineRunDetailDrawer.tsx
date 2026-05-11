@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { Tabs } from '@/lib/components/Tabs';
-import { getRun, type Pipeline, type PipelineRun } from '@/lib/api/pipelines';
+import { getRun, pipelineNodeResultsFromRun, pipelineNodesFromDAG, type Pipeline, type PipelineRun } from '@/lib/api/pipelines';
 import { LineageView } from './LineageView';
 import { LiveLogViewer } from './LiveLogViewer';
 import { RunLogs } from './RunLogs';
@@ -27,15 +27,22 @@ interface DatasetOption {
 }
 
 const STATUS_STYLE: Record<string, { background: string; color: string }> = {
+  queued: { background: '#334155', color: '#cbd5e1' },
   running: { background: '#1d4ed8', color: '#dbeafe' },
   pending: { background: '#1d4ed8', color: '#dbeafe' },
+  succeeded: { background: '#166534', color: '#d1fae5' },
   completed: { background: '#166534', color: '#d1fae5' },
   failed: { background: '#991b1b', color: '#fee2e2' },
+  cancelled: { background: '#92400e', color: '#fde68a' },
   aborted: { background: '#92400e', color: '#fde68a' },
 };
 
 function normalizedStatus(status: string) {
-  return status.toLowerCase().replace(/^build_/, '');
+  const value = status.toLowerCase().replace(/^build_/, '');
+  if (value === 'completed' || value === 'success') return 'succeeded';
+  if (value === 'aborted' || value === 'canceled') return 'cancelled';
+  if (value === 'pending' || value === 'resolution') return 'queued';
+  return value;
 }
 
 function statusStyle(status: string) {
@@ -55,7 +62,7 @@ function isLiveStatus(status: string) {
 
 function isRetryableStatus(status: string) {
   const value = normalizedStatus(status);
-  return value.includes('failed') || value.includes('aborted');
+  return value.includes('failed') || value.includes('cancelled');
 }
 
 function isFailureStatus(status: string) {
@@ -82,7 +89,7 @@ function formatDuration(run: PipelineRun) {
 }
 
 function nodeStatusCounts(run: PipelineRun) {
-  return (run.node_results ?? []).reduce<Record<string, number>>((counts, result) => {
+  return pipelineNodeResultsFromRun(run).reduce<Record<string, number>>((counts, result) => {
     counts[result.status] = (counts[result.status] ?? 0) + 1;
     return counts;
   }, {});
@@ -95,10 +102,11 @@ function addDatasetOption(options: Map<string, DatasetOption>, option: DatasetOp
 
 function buildDatasetOptions(pipeline: Pipeline, run: PipelineRun | null) {
   const options = new Map<string, DatasetOption>();
-  const nodesById = new Map(pipeline.dag.map((node) => [node.id, node]));
+  const nodes = pipelineNodesFromDAG(pipeline.dag);
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const orderedNodeIds = new Set([
-    ...(run?.node_results ?? []).map((result) => result.node_id),
-    ...pipeline.dag.map((node) => node.id),
+    ...pipelineNodeResultsFromRun(run).map((result) => result.node_id),
+    ...nodes.map((node) => node.id),
   ]);
 
   orderedNodeIds.forEach((nodeId) => {
@@ -129,7 +137,7 @@ function buildDatasetOptions(pipeline: Pipeline, run: PipelineRun | null) {
 
 function preferredDatasetId(options: DatasetOption[], run: PipelineRun | null) {
   if (options.length === 0) return '';
-  const failedNodeId = run?.node_results?.find((result) => isFailureStatus(result.status))?.node_id;
+  const failedNodeId = pipelineNodeResultsFromRun(run).find((result) => isFailureStatus(result.status))?.node_id;
   if (failedNodeId) {
     return (
       options.find((option) => option.nodeId === failedNodeId && option.role === 'Output')?.id ??
@@ -188,9 +196,13 @@ export function PipelineRunDetailDrawer({
   }, [onClose]);
 
   const datasetOptions = useMemo(() => buildDatasetOptions(pipeline, run), [pipeline, run]);
+  const nodeResults = useMemo(() => pipelineNodeResultsFromRun(run), [run]);
   const statusCounts = useMemo(() => (run ? nodeStatusCounts(run) : {}), [run]);
   const logMode = run && isLiveStatus(run.status) ? 'live' : 'historical';
-  const jobRid = `ri.foundry.main.job.${run?.id ?? runId}`;
+  const jobRid =
+    nodeResults.find((result) => isFailureStatus(result.status) && result.log_rid)?.log_rid ??
+    nodeResults.find((result) => result.log_rid)?.log_rid ??
+    `ri.foundry.main.job.${run?.id ?? runId}`;
 
   useEffect(() => {
     setSelectedDatasetId((current) => {
@@ -316,7 +328,7 @@ export function PipelineRunDetailDrawer({
             <section style={{ display: 'grid', gap: 12 }}>
               <div className="of-panel-muted" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: 10 }}>
                 <span className="of-chip">Trigger {run.trigger_type}</span>
-                <span className="of-chip">Nodes {(run.node_results ?? []).length}</span>
+                <span className="of-chip">Nodes {nodeResults.length}</span>
                 {Object.entries(statusCounts).map(([status, count]) => (
                   <span key={status} className="of-chip">{status} {count}</span>
                 ))}

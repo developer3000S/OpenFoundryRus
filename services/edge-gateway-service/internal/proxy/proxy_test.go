@@ -66,10 +66,37 @@ func TestProxyRoutesDatasetsToVersioning(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "ok", resp.Header.Get("X-Upstream"))
 
-	var envelope struct{ UpstreamPath string `json:"upstream_path"` }
+	var envelope struct {
+		UpstreamPath string `json:"upstream_path"`
+	}
 	require.NoError(t, json.Unmarshal(body, &envelope))
 	assert.Equal(t, "/v1/datasets/123/files", envelope.UpstreamPath,
 		"path rewriting must strip /api prefix")
+}
+
+func TestProxyRoutesGeospatialToExploratoryAnalysis(t *testing.T) {
+	t.Parallel()
+	upstream, _ := fakeUpstream(t)
+	cfg := &config.Config{}
+	cfg.Service.Name = "edge-gateway-service"
+	cfg.JWT.Secret = "test-secret-32bytes-test-secret-3"
+	cfg.Upstream = config.UpstreamURLs{GeospatialIntelligence: upstream.URL}
+	jwt := authmw.NewJWTConfig(cfg.JWT.Secret)
+	gw := httptest.NewServer(proxy.NewHandler(cfg, jwt))
+	defer gw.Close()
+
+	resp, err := http.Get(gw.URL + "/api/v1/geospatial/overview")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "ok", resp.Header.Get("X-Upstream"))
+	var envelope struct {
+		UpstreamPath string `json:"upstream_path"`
+	}
+	require.NoError(t, json.Unmarshal(body, &envelope))
+	assert.Equal(t, "/api/v1/geospatial/overview", envelope.UpstreamPath)
 }
 
 func TestProxyFilesystemAlias(t *testing.T) {
@@ -82,7 +109,9 @@ func TestProxyFilesystemAlias(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	var envelope struct{ UpstreamPath string `json:"upstream_path"` }
+	var envelope struct {
+		UpstreamPath string `json:"upstream_path"`
+	}
 	body, _ := io.ReadAll(resp.Body)
 	require.NoError(t, json.Unmarshal(body, &envelope))
 	assert.Equal(t, "/v1/datasets/abc/files", envelope.UpstreamPath)

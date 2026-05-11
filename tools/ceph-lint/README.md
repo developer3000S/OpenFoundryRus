@@ -1,7 +1,8 @@
 # `tools/ceph-lint`
 
-Static contract lint for the Rook-Ceph manifests under
-`infra/k8s/platform/manifests/rook/` (`cluster.yaml`, `objectstore.yaml`).
+Static contract lint for the rendered Rook-Ceph manifest. The live source is
+the Helm chart under `infra/helm/infra/ceph-cluster/`; the linter renders that
+chart before checking the contract.
 
 ## Why
 
@@ -25,12 +26,13 @@ This linter encodes the contract once so a regression cannot reach `main`:
 - **Disruption management**: `disruptionManagement.managePodBudgets:
   true` so a `kubectl drain` cannot evict more mons or OSDs than the
   quorum / CRUSH map tolerates.
-- **Pool failure domain**: every `CephBlockPool` and `CephObjectStore`
-  pool uses `failureDomain` ∈ {`zone`, `rack`, `region`, `datacenter`,
-  `room`}. `host` is rejected by default; documented legacy resources
-  kept for backwards-compatibility live in an explicit allowlist
-  (`LEGACY_HOST_FAILURE_DOMAIN_ALLOWLIST`) inside the script and are
-  cross-referenced in `infra/k8s/platform/manifests/rook/README.md`.
+- **Pool failure domain**: every `CephBlockPool`, direct-pool
+  `CephObjectStore`, and `CephObjectZone` pool uses `failureDomain` ∈
+  {`zone`, `rack`, `region`, `datacenter`, `room`}. `host` is rejected by
+  default; documented legacy resources kept for backwards-compatibility live
+  in an explicit allowlist (`LEGACY_HOST_FAILURE_DOMAIN_ALLOWLIST`) inside the
+  script and are cross-referenced in
+  `infra/helm/infra/ceph-cluster/README.md`.
 
 The `CephFilesystem` data/metadata pools are checked too if any are added
 in the future, even though none is shipped today.
@@ -42,10 +44,13 @@ pip install pyyaml
 python3 tools/ceph-lint/check_topology.py
 ```
 
-Or via `just`:
+With no path argument, the script runs `helm template ceph-cluster
+infra/helm/infra/ceph-cluster` internally. You can also pass an already
+rendered manifest path:
 
 ```
-just ceph-topology-lint
+helm template ceph-cluster infra/helm/infra/ceph-cluster > /tmp/ceph-cluster.yaml
+python3 tools/ceph-lint/check_topology.py /tmp/ceph-cluster.yaml
 ```
 
 The script exits 0 on success and 1 on any contract violation, printing
@@ -53,5 +58,5 @@ each violated invariant.
 
 ## CI
 
-Runs on every push and pull request that touches `infra/k8s/platform/manifests/rook/**` or
+Runs on every push and pull request that touches `infra/helm/infra/ceph-cluster/**` or
 this tool — see `.github/workflows/ceph-lint.yml`.

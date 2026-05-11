@@ -62,6 +62,7 @@ upstream:
   llm_catalog_service_url: "http://localhost:50095"
   retrieval_context_service_url: "http://localhost:50098"
   ai_evaluation_service_url: "http://localhost:50075"
+  geospatial_intelligence_service_url: "http://localhost:50131"
   audit_compliance_service_url: "http://localhost:50115"
   telemetry_governance_service_url: "http://localhost:50153"
   federation_product_exchange_service_url: "http://localhost:50120"

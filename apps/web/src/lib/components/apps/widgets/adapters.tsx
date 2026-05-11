@@ -12,6 +12,7 @@ import {
   ChartPieWidgetView,
   ChartXyWidgetView,
   FilterListWidgetView,
+  MapWidgetView,
   ObjectSetTitleWidgetView,
   ObjectTableWidgetView,
   PropertyListWidgetView,
@@ -53,6 +54,11 @@ function ChartXyAdapter({ widget }: WidgetRenderProps) {
   return <ChartXyWidgetView widget={widget} variables={variables} />;
 }
 
+function MapAdapter({ widget }: WidgetRenderProps) {
+  const { variables } = useWorkshopData();
+  return <MapWidgetView widget={widget} variables={variables} />;
+}
+
 let registered = false;
 
 export function registerWorkshopWidgets(): void {
@@ -65,4 +71,5 @@ export function registerWorkshopWidgets(): void {
   registerWidget({ type: 'property_list', Component: PropertyListAdapter, label: 'Property list', version: '1.0.0' });
   registerWidget({ type: 'chart_pie', Component: ChartPieAdapter, label: 'Pie chart', version: '1.0.0' });
   registerWidget({ type: 'chart_xy', Component: ChartXyAdapter, label: 'XY chart', version: '1.0.0' });
+  registerWidget({ type: 'map', Component: MapAdapter, label: 'Map', version: '1.0.0' });
 }

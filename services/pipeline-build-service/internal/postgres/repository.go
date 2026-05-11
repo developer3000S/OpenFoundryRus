@@ -541,7 +541,7 @@ func (r *Repository) outputsForJob(ctx context.Context, jobID uuid.UUID) ([]exec
 
 func (r *Repository) LoadPipeline(ctx context.Context, pipelineID uuid.UUID) (*models.Pipeline, error) {
 	var p models.Pipeline
-	err := r.db.QueryRow(ctx, `SELECT id, name, description, owner_id, dag, status, schedule_config, retry_policy, next_run_at, created_at, updated_at FROM pipelines WHERE id=$1`, pipelineID).Scan(&p.ID, &p.Name, &p.Description, &p.OwnerID, &p.DAG, &p.Status, &p.ScheduleConfig, &p.RetryPolicy, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt)
+	err := r.db.QueryRow(ctx, `SELECT `+pipelineSelectColumns+` FROM pipelines WHERE id=$1`, pipelineID).Scan(pipelineScanDest(&p)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -562,13 +562,18 @@ func (r *Repository) OpenPipelineRunWithOptions(ctx context.Context, pipeline *m
 	}
 	var run models.PipelineRun
 	err := r.db.QueryRow(ctx, `INSERT INTO pipeline_runs (id, pipeline_id, status, started_by, trigger_type, attempt_number, started_from_node_id, retry_of_run_id, execution_context)
-VALUES ($1,$2,'running',$3,$4,$5,$6,$7,$8)
+VALUES ($1,$2,'queued',$3,$4,$5,$6,$7,$8)
 RETURNING id, pipeline_id, status, trigger_type, started_by, attempt_number, started_from_node_id, retry_of_run_id, execution_context, node_results, error_message, started_at, finished_at`, id, pipeline.ID, startedBy, triggerType, attemptNumber, fromNodeID, retryOfRunID, contextJSON).Scan(&run.ID, &run.PipelineID, &run.Status, &run.TriggerType, &run.StartedBy, &run.AttemptNumber, &run.StartedFromNodeID, &run.RetryOfRunID, &run.ExecutionContext, &run.NodeResults, &run.ErrorMessage, &run.StartedAt, &run.FinishedAt)
 	if err != nil {
 		return nil, err
 	}
 	_ = req
 	return &run, nil
+}
+
+func (r *Repository) MarkPipelineRunRunning(ctx context.Context, runID uuid.UUID) error {
+	_, err := r.db.Exec(ctx, `UPDATE pipeline_runs SET status='running' WHERE id=$1 AND status IN ('queued','pending','BUILD_QUEUED')`, runID)
+	return err
 }
 
 func (r *Repository) ListPipelineRuns(ctx context.Context, pipelineID uuid.UUID, page, perPage int64) ([]models.PipelineRun, error) {
@@ -608,7 +613,7 @@ func (r *Repository) ListBuildQueue(ctx context.Context, query handler.BuildQueu
 
 func (r *Repository) AbortPipelineRun(ctx context.Context, runID uuid.UUID) (*models.PipelineRun, bool, error) {
 	var run models.PipelineRun
-	err := r.db.QueryRow(ctx, `UPDATE pipeline_runs SET status='aborted', error_message=COALESCE(error_message, 'aborted by user'), finished_at=NOW() WHERE id=$1 AND status='running' RETURNING id, pipeline_id, status, trigger_type, started_by, attempt_number, started_from_node_id, retry_of_run_id, execution_context, node_results, error_message, started_at, finished_at`, runID).Scan(&run.ID, &run.PipelineID, &run.Status, &run.TriggerType, &run.StartedBy, &run.AttemptNumber, &run.StartedFromNodeID, &run.RetryOfRunID, &run.ExecutionContext, &run.NodeResults, &run.ErrorMessage, &run.StartedAt, &run.FinishedAt)
+	err := r.db.QueryRow(ctx, `UPDATE pipeline_runs SET status='cancelled', error_message=COALESCE(error_message, 'cancelled by user'), finished_at=NOW() WHERE id=$1 AND status IN ('queued','pending','running','BUILD_QUEUED','BUILD_RUNNING') RETURNING id, pipeline_id, status, trigger_type, started_by, attempt_number, started_from_node_id, retry_of_run_id, execution_context, node_results, error_message, started_at, finished_at`, runID).Scan(&run.ID, &run.PipelineID, &run.Status, &run.TriggerType, &run.StartedBy, &run.AttemptNumber, &run.StartedFromNodeID, &run.RetryOfRunID, &run.ExecutionContext, &run.NodeResults, &run.ErrorMessage, &run.StartedAt, &run.FinishedAt)
 	if err == nil {
 		return &run, true, nil
 	}
@@ -639,7 +644,7 @@ func (r *Repository) QueueSummary(ctx context.Context) (map[string]int64, error)
 }
 
 func (r *Repository) ListDuePipelines(ctx context.Context) ([]models.Pipeline, error) {
-	rows, err := r.db.Query(ctx, `SELECT id, name, description, owner_id, dag, status, schedule_config, retry_policy, next_run_at, created_at, updated_at FROM pipelines WHERE status='active' AND next_run_at IS NOT NULL AND next_run_at <= NOW() ORDER BY next_run_at ASC`)
+	rows, err := r.db.Query(ctx, `SELECT `+pipelineSelectColumns+` FROM pipelines WHERE status='active' AND next_run_at IS NOT NULL AND next_run_at <= NOW() ORDER BY next_run_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -647,7 +652,7 @@ func (r *Repository) ListDuePipelines(ctx context.Context) ([]models.Pipeline, e
 	out := []models.Pipeline{}
 	for rows.Next() {
 		var p models.Pipeline
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.OwnerID, &p.DAG, &p.Status, &p.ScheduleConfig, &p.RetryPolicy, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(pipelineScanDest(&p)...); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -808,7 +813,7 @@ func (r *Repository) Abort(ctx context.Context, tx executor.OutputTransaction) e
 }
 
 // Commit implements executor.OutputCommitter for already-opened output rows.
-func (r *Repository) Commit(ctx context.Context, tx executor.OutputTransaction) error {
+func (r *Repository) Commit(ctx context.Context, tx executor.OutputTransaction, _ executor.NodeResult) error {
 	_, err := r.db.Exec(ctx, `UPDATE job_outputs SET committed=TRUE WHERE output_dataset_rid=$1 AND transaction_rid=$2`, tx.DatasetRID, tx.TransactionRID)
 	return err
 }

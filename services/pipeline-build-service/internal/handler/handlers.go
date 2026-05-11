@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -106,6 +107,10 @@ type PipelineAuthoringRepository interface {
 	GetPipeline(ctx context.Context, id uuid.UUID) (*models.Pipeline, error)
 	UpdatePipeline(ctx context.Context, id uuid.UUID, req models.UpdatePipelineRequest) (*models.Pipeline, error)
 	DeletePipeline(ctx context.Context, id uuid.UUID) (bool, error)
+	ListPipelineVersions(ctx context.Context, pipelineID uuid.UUID) ([]models.PipelineVersion, error)
+	PublishPipeline(ctx context.Context, id uuid.UUID, req models.PublishPipelineRequest, actorID *uuid.UUID) (*models.PipelinePublishResponse, error)
+	CreatePipelineProposal(ctx context.Context, id uuid.UUID, req models.CreatePipelineProposalRequest, actorID *uuid.UUID) (*models.PipelinePublishResponse, error)
+	RestorePipelineVersion(ctx context.Context, pipelineID, versionID uuid.UUID, req models.RestorePipelineVersionRequest, actorID *uuid.UUID) (*models.PipelinePublishResponse, error)
 }
 
 type pipelineAuthoringSlot struct {
@@ -552,6 +557,25 @@ func GetPipeline(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, pipeline)
 }
+
+func ListPipelineVersions(w http.ResponseWriter, r *http.Request) {
+	repo, ok := requirePipelineAuthoringRepository(w, "ListPipelineVersions requires DATABASE_URL-backed pipeline authoring repository wiring")
+	if !ok {
+		return
+	}
+	id, err := pipelineIDFromRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_pipeline_id", "detail": err.Error()})
+		return
+	}
+	versions, err := repo.ListPipelineVersions(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list_pipeline_versions_failed", "detail": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, models.ListPipelineVersionsResponse{Data: versions})
+}
+
 func UpdatePipeline(w http.ResponseWriter, r *http.Request) {
 	repo, ok := requirePipelineAuthoringRepository(w, "UpdatePipeline requires DATABASE_URL-backed pipeline authoring repository wiring")
 	if !ok {
@@ -578,6 +602,95 @@ func UpdatePipeline(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, pipeline)
 }
+
+func PublishPipeline(w http.ResponseWriter, r *http.Request) {
+	repo, ok := requirePipelineAuthoringRepository(w, "PublishPipeline requires DATABASE_URL-backed pipeline authoring repository wiring")
+	if !ok {
+		return
+	}
+	id, err := pipelineIDFromRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_pipeline_id", "detail": err.Error()})
+		return
+	}
+	var req models.PublishPipelineRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json", "detail": err.Error()})
+		return
+	}
+	response, err := repo.PublishPipeline(r.Context(), id, req, actorIDFromRequest(r))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "publish_pipeline_failed", "detail": err.Error()})
+		return
+	}
+	if response == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func CreatePipelineProposal(w http.ResponseWriter, r *http.Request) {
+	repo, ok := requirePipelineAuthoringRepository(w, "CreatePipelineProposal requires DATABASE_URL-backed pipeline authoring repository wiring")
+	if !ok {
+		return
+	}
+	id, err := pipelineIDFromRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_pipeline_id", "detail": err.Error()})
+		return
+	}
+	var req models.CreatePipelineProposalRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json", "detail": err.Error()})
+		return
+	}
+	response, err := repo.CreatePipelineProposal(r.Context(), id, req, actorIDFromRequest(r))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "create_pipeline_proposal_failed", "detail": err.Error()})
+		return
+	}
+	if response == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusCreated, response)
+}
+
+func RestorePipelineVersion(w http.ResponseWriter, r *http.Request) {
+	repo, ok := requirePipelineAuthoringRepository(w, "RestorePipelineVersion requires DATABASE_URL-backed pipeline authoring repository wiring")
+	if !ok {
+		return
+	}
+	pipelineID, err := pipelineIDFromRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_pipeline_id", "detail": err.Error()})
+		return
+	}
+	versionID, err := uuid.Parse(chi.URLParam(r, "version_id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_version_id", "detail": err.Error()})
+		return
+	}
+	req := models.RestorePipelineVersionRequest{AsDraft: true}
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json", "detail": err.Error()})
+			return
+		}
+	}
+	response, err := repo.RestorePipelineVersion(r.Context(), pipelineID, versionID, req, actorIDFromRequest(r))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "restore_pipeline_version_failed", "detail": err.Error()})
+		return
+	}
+	if response == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func DeletePipeline(w http.ResponseWriter, r *http.Request) {
 	repo, ok := requirePipelineAuthoringRepository(w, "DeletePipeline requires DATABASE_URL-backed pipeline authoring repository wiring")
 	if !ok {
@@ -598,6 +711,18 @@ func DeletePipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func actorIDFromRequest(r *http.Request) *uuid.UUID {
+	if claims, ok := authmw.FromContext(r.Context()); ok {
+		id := claims.Sub
+		return &id
+	}
+	if user, ok := authmw.AuthUserFromContext(r.Context()); ok && user.Claims != nil {
+		id := user.Claims.Sub
+		return &id
+	}
+	return nil
 }
 
 // Pipeline runs (legacy run table; coexists with the new builds table).

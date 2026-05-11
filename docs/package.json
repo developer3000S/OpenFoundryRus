@@ -4,6 +4,7 @@
   "scripts": {
     "docs:dev": "vitepress dev .",
     "docs:build": "vitepress build .",
+    "docs:check-foundry-links": "python3 ../tools/check_foundry_doc_links.py migration/foundry-workshop-pipeline-1to1-checklist.md",
     "docs:preview": "vitepress preview ."
   },
   "devDependencies": {

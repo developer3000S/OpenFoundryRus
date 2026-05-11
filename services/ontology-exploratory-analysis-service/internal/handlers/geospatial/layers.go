@@ -2,8 +2,8 @@
 // ported 1:1 from
 // services/ontology-exploratory-analysis-service/src/geospatial/geospatial_base/handlers/layers.rs
 // (S8 / ADR-0030 — geospatial-intelligence-service absorbed). The
-// handlers live as a typed library namespace; the Go binary does not
-// mount them yet, mirroring the Rust `#[allow(dead_code)] mod geospatial`.
+// handlers are mounted by the consolidated exploratory-analysis binary under
+// `/api/v1/geospatial`.
 package geospatial
 
 import (
@@ -19,17 +19,25 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/openfoundry/openfoundry-go/services/ontology-exploratory-analysis-service/internal/models"
 )
+
+// DB is the pgx/pgxmock surface used by the geospatial handlers.
+// *pgxpool.Pool and pgxmock.PgxPoolIface both satisfy it.
+type DB interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 // AppState carries the dependencies needed by every geospatial handler.
 // Mirrors `crate::geospatial::AppState { db, jwt_config }` — the
 // jwt_config field is intentionally omitted until OEA-3+ wires auth
 // (matches Rust where the field is held but unused on these handlers).
 type AppState struct {
-	DB *pgxpool.Pool
+	DB DB
 }
 
 // ErrorResponse is the `{ "error": "..." }` envelope every handler in the
@@ -82,7 +90,7 @@ func BuildOverview(layers []models.LayerDefinition) models.GeospatialOverview {
 const layerSelectColumns = `id, name, description, source_kind, source_dataset, geometry_type, style, features, tags, indexed, created_at, updated_at`
 
 // LoadAllLayers mirrors `load_all_layers` in handlers/mod.rs.
-func LoadAllLayers(ctx context.Context, db *pgxpool.Pool) ([]models.LayerDefinition, error) {
+func LoadAllLayers(ctx context.Context, db DB) ([]models.LayerDefinition, error) {
 	rows, err := db.Query(ctx, `SELECT `+layerSelectColumns+` FROM geospatial_layers ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -109,7 +117,7 @@ func LoadAllLayers(ctx context.Context, db *pgxpool.Pool) ([]models.LayerDefinit
 
 // LoadLayerRow mirrors `load_layer_row` in handlers/mod.rs.
 // Returns (definition, true, nil) on hit, (zero, false, nil) on miss.
-func LoadLayerRow(ctx context.Context, db *pgxpool.Pool, id uuid.UUID) (models.LayerDefinition, bool, error) {
+func LoadLayerRow(ctx context.Context, db DB, id uuid.UUID) (models.LayerDefinition, bool, error) {
 	row := db.QueryRow(ctx, `SELECT `+layerSelectColumns+` FROM geospatial_layers WHERE id = $1`, id)
 	r, err := scanLayerRow(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -390,18 +398,25 @@ func (s *AppState) UpdateLayer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
-// Routes returns a chi sub-router with the layer endpoints. Not yet
-// mounted by the binary — exposed for the upcoming consolidation main.
+// Routes returns a chi sub-router with the layer endpoints mounted by the
+// consolidated exploratory-analysis binary.
 func (s *AppState) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/overview", s.GetOverview)
 	r.Get("/layers", s.ListLayers)
 	r.Post("/layers", s.CreateLayer)
 	r.Put("/layers/{id}", s.UpdateLayer)
+	r.Get("/templates", s.ListMapTemplates)
+	r.Post("/templates", s.CreateMapTemplate)
+	r.Get("/templates/{id}", s.GetMapTemplate)
+	r.Post("/templates/{id}/render", s.RenderMapTemplate)
 	r.Post("/query", s.QueryFeatures)
+	r.Post("/clusters", s.ClusterFeatures)
 	r.Post("/cluster", s.ClusterFeatures)
+	r.Get("/tiles/{id}/features", s.GetViewportTileFeatures)
 	r.Get("/tiles/{id}", s.GetVectorTile)
 	r.Post("/geocode", s.ForwardGeocode)
+	r.Post("/reverse-geocode", s.ReverseGeocode)
 	r.Post("/geocode/reverse", s.ReverseGeocode)
 	return r
 }

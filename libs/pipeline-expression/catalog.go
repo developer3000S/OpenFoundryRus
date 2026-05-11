@@ -95,6 +95,29 @@ func ScalarSignatureFor(name string) (ScalarSignature, bool) {
 			Params: []ParamConstraint{{Kind: ParamNumeric}},
 			Result: ResultRule{Kind: ResultPromoteOf, Args: []int{0}},
 		}, true
+	case "haversine_meters", "haversine_km", "haversine_miles":
+		return ScalarSignature{
+			Name: n,
+			Params: []ParamConstraint{
+				{Kind: ParamNumeric},
+				{Kind: ParamNumeric},
+				{Kind: ParamNumeric},
+				{Kind: ParamNumeric},
+			},
+			Result: ResultRule{Kind: ResultFixed, Type: DoubleType()},
+		}, true
+	case "haversine_distance":
+		return ScalarSignature{
+			Name: n,
+			Params: []ParamConstraint{
+				{Kind: ParamNumeric},
+				{Kind: ParamNumeric},
+				{Kind: ParamNumeric},
+				{Kind: ParamNumeric},
+				{Kind: ParamTextual},
+			},
+			Result: ResultRule{Kind: ResultFixed, Type: DoubleType()},
+		}, true
 	// Temporal.
 	case "to_date":
 		return ScalarSignature{

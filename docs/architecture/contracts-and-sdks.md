@@ -32,7 +32,7 @@ proto/*.proto
 of-cli docs generate-openapi / validate-openapi
    |
    v
-apps/web/static/generated/openapi/openfoundry.json
+apps/web/public/generated/openapi/openfoundry.json
    |
    +--> TypeScript SDK
    +--> Python SDK
@@ -44,26 +44,27 @@ apps/web/static/generated/openapi/openfoundry.json
 
 | Artifact | Path |
 | --- | --- |
-| OpenAPI contract | `apps/web/static/generated/openapi/openfoundry.json` |
+| OpenAPI contract | `apps/web/public/generated/openapi/openfoundry.json` |
 | TypeScript SDK | `sdks/typescript/openfoundry-sdk` |
 | Python SDK | `sdks/python/openfoundry-sdk` |
 | Java SDK | `sdks/java/openfoundry-sdk` |
 | Terraform provider schema | `infra/terraform/providers/openfoundry/provider.schema.json` |
-| Web-consumable Terraform schema | `apps/web/static/generated/terraform/openfoundry-provider.json` |
+| Web-consumable Terraform schema | `apps/web/public/generated/terraform/openfoundry-provider.json` |
 
 ## Operational Tooling
 
-`tools/of-cli` is the bridge between the Rust workspace and generated documentation assets. The `justfile` exposes the common flows:
+`tools/of-cli` is the Go bridge between proto contracts and generated documentation assets. The root `Makefile` exposes the common flows:
 
-- `just openapi-gen`
-- `just openapi-check`
-- `just sdk-typescript-gen`
-- `just sdk-typescript-check`
-- `just sdk-python-gen`
-- `just sdk-python-check`
-- `just sdk-java-gen`
-- `just sdk-java-check`
-- `just terraform-schema`
+- `make openapi-gen`
+- `make openapi-check`
+- `make sdk-typescript-gen`
+- `make sdk-typescript-check`
+- `make sdk-python-gen`
+- `make sdk-python-check`
+- `make sdk-java-gen`
+- `make sdk-java-check`
+- `make contracts-gen`
+- `make contracts-check`
 
 ## Why This Matters
 

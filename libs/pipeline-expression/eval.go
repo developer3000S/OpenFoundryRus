@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	geospatialcore "github.com/openfoundry/openfoundry-go/libs/geospatial-core"
 )
 
 // EvalValueKind tags an [EvalValue].
@@ -544,6 +546,14 @@ func evalCall(name string, args []Expr, row Row) (EvalValue, error) {
 			Kind:    EvalErrTypeMismatch,
 			Message: fmt.Sprintf("abs expects numeric, got %s", typeHintDebug(v.TypeHint())),
 		}
+	case "haversine_meters":
+		return evalHaversineDistance(name, args, row, "meters")
+	case "haversine_km":
+		return evalHaversineDistance(name, args, row, "km")
+	case "haversine_miles":
+		return evalHaversineDistance(name, args, row, "miles")
+	case "haversine_distance":
+		return evalHaversineDistance(name, args, row, "")
 	case "cast":
 		if err := needArity(name, args, 2); err != nil {
 			return EvalValue{}, err
@@ -573,6 +583,70 @@ func needArity(name string, args []Expr, expected int) error {
 		}
 	}
 	return nil
+}
+
+func evalHaversineDistance(name string, args []Expr, row Row, fixedUnit string) (EvalValue, error) {
+	expectedArity := 4
+	if fixedUnit == "" {
+		expectedArity = 5
+	}
+	if err := needArity(name, args, expectedArity); err != nil {
+		return EvalValue{}, err
+	}
+	coords := make([]float64, 4)
+	for i := 0; i < 4; i++ {
+		value, isNull, err := evalNumericFloatArg(name, i, args[i], row)
+		if err != nil {
+			return EvalValue{}, err
+		}
+		if isNull {
+			return EvalNull(), nil
+		}
+		coords[i] = value
+	}
+	unit := fixedUnit
+	if unit == "" {
+		value, err := Eval(args[4], row)
+		if err != nil {
+			return EvalValue{}, err
+		}
+		switch value.Kind {
+		case EvalKindString:
+			unit = value.Str
+		case EvalKindNull:
+			return EvalNull(), nil
+		default:
+			return EvalValue{}, &EvalError{
+				Kind:    EvalErrTypeMismatch,
+				Message: fmt.Sprintf("%s expects unit String, got %s", name, typeHintDebug(value.TypeHint())),
+			}
+		}
+	}
+	distance, err := geospatialcore.HaversineDistance(coords[0], coords[1], coords[2], coords[3], unit)
+	if err != nil {
+		return EvalValue{}, &EvalError{Kind: EvalErrTypeMismatch, Message: err.Error()}
+	}
+	return EvalDouble(distance), nil
+}
+
+func evalNumericFloatArg(name string, index int, arg Expr, row Row) (float64, bool, error) {
+	value, err := Eval(arg, row)
+	if err != nil {
+		return 0, false, err
+	}
+	switch value.Kind {
+	case EvalKindInteger:
+		return float64(value.Int), false, nil
+	case EvalKindDouble:
+		return value.Double, false, nil
+	case EvalKindNull:
+		return 0, true, nil
+	default:
+		return 0, false, &EvalError{
+			Kind:    EvalErrTypeMismatch,
+			Message: fmt.Sprintf("%s expects numeric coordinate at argument %d, got %s", name, index+1, typeHintDebug(value.TypeHint())),
+		}
+	}
 }
 
 func unaryString(name string, args []Expr, row Row, f func(string) string) (EvalValue, error) {

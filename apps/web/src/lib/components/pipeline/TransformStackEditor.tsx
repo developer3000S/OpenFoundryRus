@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import {
+  listPipelineTransformCatalog,
+  type PipelineTransformCatalogEntry,
+} from '@/lib/api/pipelines';
 import { Glyph } from '@/lib/components/ui/Glyph';
 import {
   CAST_TYPES,
@@ -8,14 +12,18 @@ import {
   newCastBlock,
   newDropColumnsBlock,
   newFilterBlock,
+  newHaversineDistanceBlock,
   newNormalizeColumnsBlock,
   newRenameColumnsBlock,
+  newSelectColumnsBlock,
   type CastBlock,
   type DropColumnsBlock,
   type FilterBlock,
   type FilterCondition,
+  type HaversineDistanceBlock,
   type NormalizeColumnsBlock,
   type RenameColumnsBlock,
+  type SelectColumnsBlock,
   type TransformBlock,
   type TransformStack,
 } from './transformStack';
@@ -28,18 +36,41 @@ interface TransformStackEditorProps {
   onApplyAll: (next: TransformStack) => void;
 }
 
-const ADD_BLOCK_OPTIONS: Array<{ label: string; kind: TransformBlock['kind']; create: () => TransformBlock }> = [
-  { label: 'Cast to Timestamp', kind: 'cast', create: () => newCastBlock() },
-  { label: 'Filter rows', kind: 'filter', create: () => newFilterBlock() },
-  { label: 'Drop columns', kind: 'drop', create: () => newDropColumnsBlock() },
-  { label: 'Rename columns', kind: 'rename', create: () => newRenameColumnsBlock() },
-  { label: 'Normalize column names', kind: 'normalize', create: () => newNormalizeColumnsBlock() },
+interface AddBlockOption {
+  id: string;
+  label: string;
+  description: string;
+  status: string;
+  create?: () => TransformBlock;
+}
+
+const STACK_BLOCK_CREATORS: Record<string, () => TransformBlock> = {
+  select: () => newSelectColumnsBlock(),
+  cast: () => newCastBlock(),
+  filter: () => newFilterBlock(),
+  drop: () => newDropColumnsBlock(),
+  rename: () => newRenameColumnsBlock(),
+  normalize_columns: () => newNormalizeColumnsBlock(),
+  haversine_distance: () => newHaversineDistanceBlock(),
+};
+
+const FALLBACK_ADD_BLOCK_OPTIONS: AddBlockOption[] = [
+  { id: 'select', label: 'Select columns', description: 'Project an ordered set of columns.', status: 'available', create: () => newSelectColumnsBlock() },
+  { id: 'cast', label: 'Cast column', description: 'Convert a column to another scalar type.', status: 'available', create: () => newCastBlock() },
+  { id: 'filter', label: 'Filter rows', description: 'Keep or drop rows by condition.', status: 'available', create: () => newFilterBlock() },
+  { id: 'drop', label: 'Drop columns', description: 'Remove columns from the output.', status: 'available', create: () => newDropColumnsBlock() },
+  { id: 'rename', label: 'Rename columns', description: 'Rename columns while preserving values.', status: 'available', create: () => newRenameColumnsBlock() },
+  { id: 'normalize_columns', label: 'Normalize column names', description: 'Convert names to snake_case.', status: 'available', create: () => newNormalizeColumnsBlock() },
+  { id: 'haversine_distance', label: 'Haversine distance', description: 'Calculate distance between two coordinate pairs.', status: 'available', create: () => newHaversineDistanceBlock() },
 ];
 
 export function TransformStackEditor({ open, stack, schema = [], onClose, onApplyAll }: TransformStackEditorProps) {
   const [draft, setDraft] = useState<TransformStack | null>(null);
   const [search, setSearch] = useState('');
   const [showSearchMenu, setShowSearchMenu] = useState(false);
+  const [catalogEntries, setCatalogEntries] = useState<PipelineTransformCatalogEntry[]>([]);
+  const [catalogVersion, setCatalogVersion] = useState('');
+  const [catalogError, setCatalogError] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -48,12 +79,45 @@ export function TransformStackEditor({ open, stack, schema = [], onClose, onAppl
     setShowSearchMenu(false);
   }, [open, stack]);
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    listPipelineTransformCatalog()
+      .then((catalog) => {
+        if (cancelled) return;
+        setCatalogEntries(catalog.transforms);
+        setCatalogVersion(catalog.schema_version);
+        setCatalogError('');
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setCatalogEntries([]);
+        setCatalogVersion('');
+        setCatalogError(cause instanceof Error ? cause.message : 'catalog unavailable');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   const allApplied = useMemo(() => Boolean(draft && draft.blocks.every((block) => block.applied)), [draft]);
+  const addBlockOptions = useMemo<AddBlockOption[]>(() => {
+    const stackEntries = catalogEntries.filter((entry) => entry.builder_surface === 'transform_stack');
+    if (stackEntries.length === 0) return FALLBACK_ADD_BLOCK_OPTIONS;
+    return stackEntries.map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      description: entry.description,
+      status: entry.execution_status,
+      create: entry.execution_status === 'available' ? STACK_BLOCK_CREATORS[entry.id] : undefined,
+    }));
+  }, [catalogEntries]);
+  const catalogByID = useMemo(() => new Map(catalogEntries.map((entry) => [entry.id, entry])), [catalogEntries]);
   const filteredAddOptions = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return ADD_BLOCK_OPTIONS;
-    return ADD_BLOCK_OPTIONS.filter((entry) => entry.label.toLowerCase().includes(q));
-  }, [search]);
+    if (!q) return addBlockOptions;
+    return addBlockOptions.filter((entry) => `${entry.label} ${entry.description} ${entry.id}`.toLowerCase().includes(q));
+  }, [addBlockOptions, search]);
 
   if (!open || !draft) return null;
 
@@ -74,7 +138,8 @@ export function TransformStackEditor({ open, stack, schema = [], onClose, onAppl
     });
   }
 
-  function addBlock(creator: () => TransformBlock) {
+  function addBlock(creator?: () => TransformBlock) {
+    if (!creator) return;
     setDraft((current) => {
       if (!current) return current;
       return { ...current, blocks: [...current.blocks, creator()] };
@@ -231,6 +296,7 @@ export function TransformStackEditor({ open, stack, schema = [], onClose, onAppl
                 key={block.id}
                 block={block}
                 schema={schema}
+                catalogEntry={catalogByID.get(catalogIDForBlock(block))}
                 onPatch={(patch) => patchBlock(block.id, patch as Partial<TransformBlock>)}
                 onApply={() => patchBlock(block.id, { applied: true })}
                 onCancel={() => patchBlock(block.id, { applied: false })}
@@ -278,9 +344,11 @@ export function TransformStackEditor({ open, stack, schema = [], onClose, onAppl
             >
               {filteredAddOptions.map((option) => (
                 <button
-                  key={option.kind}
+                  key={option.id}
                   type="button"
                   onMouseDown={() => addBlock(option.create)}
+                  disabled={!option.create}
+                  title={option.create ? option.description : `${option.description} (${option.status})`}
                   style={{
                     display: 'block',
                     width: '100%',
@@ -289,12 +357,16 @@ export function TransformStackEditor({ open, stack, schema = [], onClose, onAppl
                     background: 'transparent',
                     fontSize: 13,
                     textAlign: 'left',
-                    cursor: 'pointer',
+                    cursor: option.create ? 'pointer' : 'not-allowed',
+                    color: option.create ? 'var(--text-strong)' : 'var(--text-muted)',
                   }}
                   onMouseEnter={(event) => (event.currentTarget.style.background = 'rgba(45, 114, 210, 0.06)')}
                   onMouseLeave={(event) => (event.currentTarget.style.background = 'transparent')}
                 >
-                  {option.label}
+                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span>{option.label}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{option.status}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -303,6 +375,9 @@ export function TransformStackEditor({ open, stack, schema = [], onClose, onAppl
             <Glyph name="sparkles" size={13} tone="#7c5dd6" />
             Generate
           </button>
+          <span className="of-text-muted" style={{ fontSize: 11 }}>
+            {catalogVersion || (catalogError ? 'local catalog' : 'catalog')}
+          </span>
         </div>
       </footer>
     </div>
@@ -312,6 +387,7 @@ export function TransformStackEditor({ open, stack, schema = [], onClose, onAppl
 function BlockCard({
   block,
   schema,
+  catalogEntry,
   onPatch,
   onApply,
   onCancel,
@@ -319,6 +395,7 @@ function BlockCard({
 }: {
   block: TransformBlock;
   schema: string[];
+  catalogEntry?: PipelineTransformCatalogEntry;
   onPatch: (patch: Partial<TransformBlock>) => void;
   onApply: () => void;
   onCancel: () => void;
@@ -348,8 +425,9 @@ function BlockCard({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: accent, textTransform: 'uppercase' }}>
-            {blockSectionLabel(block.kind)}
+            {catalogEntry?.label ?? blockSectionLabel(block.kind)}
           </span>
+          {catalogEntry ? <span className="of-chip" style={{ fontSize: 10 }}>{catalogEntry.form.kind}</span> : null}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <button type="button" className="of-button" onClick={onCancel} style={{ fontSize: 12 }}>
@@ -371,6 +449,9 @@ function BlockCard({
         {block.kind === 'filter' ? (
           <FilterBody block={block} schema={schema} onPatch={(patch) => onPatch(patch)} />
         ) : null}
+        {block.kind === 'select' ? (
+          <SelectBody block={block} schema={schema} onPatch={(patch) => onPatch(patch)} />
+        ) : null}
         {block.kind === 'drop' ? (
           <DropBody block={block} schema={schema} onPatch={(patch) => onPatch(patch)} />
         ) : null}
@@ -379,6 +460,9 @@ function BlockCard({
         ) : null}
         {block.kind === 'normalize' ? (
           <NormalizeBody block={block} onPatch={(patch) => onPatch(patch)} />
+        ) : null}
+        {block.kind === 'haversine_distance' ? (
+          <HaversineBody block={block} schema={schema} onPatch={(patch) => onPatch(patch)} />
         ) : null}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
           <button type="button" className="of-button" onClick={onCancel} style={{ fontSize: 12 }} disabled={!block.applied}>
@@ -583,6 +667,63 @@ function DropBody({
   );
 }
 
+function SelectBody({
+  block,
+  schema,
+  onPatch,
+}: {
+  block: SelectColumnsBlock;
+  schema: string[];
+  onPatch: (patch: Partial<SelectColumnsBlock>) => void;
+}) {
+  const [draftEntry, setDraftEntry] = useState('');
+
+  function commitDraft() {
+    const value = draftEntry.trim();
+    if (!value) return;
+    if (block.columns.includes(value)) return;
+    onPatch({ columns: [...block.columns, value] });
+    setDraftEntry('');
+  }
+
+  function removeColumn(name: string) {
+    onPatch({ columns: block.columns.filter((entry) => entry !== name) });
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <span className="of-text-muted" style={{ fontSize: 12 }}>Columns to keep *</span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: 6, border: '1px solid var(--border-default)', borderRadius: 4, background: '#fff', minHeight: 36 }}>
+        {block.columns.map((name) => (
+          <span key={name} style={chipStyle()}>
+            {name}
+            <button type="button" aria-label="Remove" style={chipDeleteStyle()} onClick={() => removeColumn(name)}>
+              <Glyph name="x" size={10} />
+            </button>
+          </span>
+        ))}
+        <input
+          list={`select-cols-${block.id}`}
+          value={draftEntry}
+          onChange={(event) => setDraftEntry(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ',') {
+              event.preventDefault();
+              commitDraft();
+            }
+          }}
+          onBlur={commitDraft}
+          placeholder="Search for columns..."
+          style={{ flex: 1, minWidth: 120, border: 0, outline: 'none', fontSize: 13 }}
+        />
+        <datalist id={`select-cols-${block.id}`}>
+          {schema.map((name) => <option key={name} value={name} />)}
+        </datalist>
+      </div>
+    </div>
+  );
+}
+
 function RenameBody({
   block,
   schema,
@@ -664,6 +805,43 @@ function NormalizeBody({
   );
 }
 
+function HaversineBody({
+  block,
+  schema,
+  onPatch,
+}: {
+  block: HaversineDistanceBlock;
+  schema: string[];
+  onPatch: (patch: Partial<HaversineDistanceBlock>) => void;
+}) {
+  function patchUnit(unit: HaversineDistanceBlock['unit']) {
+    const suffix = unit === 'km' ? 'km' : unit === 'meters' ? 'meters' : 'miles';
+    onPatch({ unit, target_column: block.target_column || `distance_${suffix}` });
+  }
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr', gap: 10, alignItems: 'center' }}>
+      <span className="of-text-muted" style={{ fontSize: 12 }}>Start point *</span>
+      <ColumnInput value={block.start_lat_column} onChange={(value) => onPatch({ start_lat_column: value })} schema={schema} />
+      <ColumnInput value={block.start_lon_column} onChange={(value) => onPatch({ start_lon_column: value })} schema={schema} />
+      <span className="of-text-muted" style={{ fontSize: 12 }}>End point *</span>
+      <ColumnInput value={block.end_lat_column} onChange={(value) => onPatch({ end_lat_column: value })} schema={schema} />
+      <ColumnInput value={block.end_lon_column} onChange={(value) => onPatch({ end_lon_column: value })} schema={schema} />
+      <span className="of-text-muted" style={{ fontSize: 12 }}>Output *</span>
+      <select value={block.unit} onChange={(event) => patchUnit(event.target.value as HaversineDistanceBlock['unit'])} style={inputStyle()}>
+        <option value="miles">Miles</option>
+        <option value="km">Kilometers</option>
+        <option value="meters">Meters</option>
+      </select>
+      <input
+        value={block.target_column}
+        onChange={(event) => onPatch({ target_column: event.target.value })}
+        placeholder="distance_miles"
+        style={inputStyle()}
+      />
+    </div>
+  );
+}
+
 function ColumnInput({ value, onChange, schema }: { value: string; onChange: (value: string) => void; schema: string[] }) {
   const datalistId = useMemo(() => `column-list-${Math.random().toString(36).slice(2, 8)}`, []);
   return (
@@ -688,13 +866,22 @@ function blockAccent(kind: TransformBlock['kind']): string {
       return '#2d72d2';
     case 'filter':
       return '#15803d';
+    case 'select':
+      return '#2563eb';
     case 'drop':
       return '#b42318';
     case 'rename':
       return '#9a5b00';
     case 'normalize':
       return '#7c5dd6';
+    case 'haversine_distance':
+      return '#047857';
   }
+}
+
+function catalogIDForBlock(block: TransformBlock): string {
+  if (block.kind === 'normalize') return 'normalize_columns';
+  return block.kind;
 }
 
 function inputStyle(): React.CSSProperties {

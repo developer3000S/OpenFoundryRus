@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,6 +125,76 @@ func TestExecutePipelinePythonSidecarContractSuccess(t *testing.T) {
 	require.Equal(t, uint32(9), py.seen.TimeoutSeconds)
 }
 
+func TestPythonTransformUsesUpstreamRowsAndStoresResultRows(t *testing.T) {
+	rt := newLightweightTableRuntime()
+	buildID := uuid.New()
+	ctx := context.Background()
+	_, err := rt.Run(ctx, executor.NodeContext{BuildID: buildID, Node: executor.Node{ID: "input"}}, json.RawMessage(`{
+		"rows":[{"activity_id":"987","raw_distance_m":8046.72,"raw_gpx":"<gpx/>"}]
+	}`), "dataset_input")
+	require.NoError(t, err)
+
+	rowsJSON := json.RawMessage(`[{"activity_id":"987","distance_miles":5,"gpx_points":2}]`)
+	py := &recordingPython{result: &runtimepkg.TransformResult{
+		RowsAffected:   uint64Ptr(1),
+		Output:         json.RawMessage(`{"stdout":"parsed\n","stderr":"gpx ok\n","result":{"status":"ok"}}`),
+		ResultRows:     []json.RawMessage{json.RawMessage(`{"activity_id":"987","distance_miles":5,"gpx_points":2}`)},
+		ResultRowsJSON: rowsJSON,
+		Stdout:         "parsed\n",
+		Stderr:         "gpx ok\n",
+	}}
+	runner := runtimeNodeRunner{Python: py, Table: rt}
+
+	result, err := runner.Run(ctx, executor.NodeContext{
+		BuildID: buildID,
+		Node: executor.Node{
+			ID:        "py",
+			DependsOn: []string{"input"},
+			Metadata: map[string]any{
+				"logic_kind":     "transform",
+				"transform_type": "python",
+				"logic_payload": json.RawMessage(`{
+					"source":"result_rows = input_rows",
+					"timeout_seconds":7,
+					"packages":["json"],
+					"allowed_packages":["json"],
+					"output_schema":{"fields":[
+						{"name":"activity_id","field_type":"STRING","nullable":false},
+						{"name":"distance_miles","field_type":"DOUBLE","nullable":false},
+						{"name":"gpx_points","field_type":"INTEGER","nullable":false}
+					]}
+				}`),
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.JSONEq(t, `[{"dataset_id":"input","node_id":"input","rows":[{"activity_id":"987","raw_distance_m":8046.72,"raw_gpx":"<gpx/>"}],"schema":[{"name":"activity_id","type":"STRING","nullable":false},{"name":"raw_distance_m","type":"DOUBLE","nullable":false},{"name":"raw_gpx","type":"STRING","nullable":false}],"row_count":1}]`, string(py.seen.PreparedInputsJSON))
+	require.Equal(t, uint32(7), py.seen.TimeoutSeconds)
+	require.Equal(t, "parsed\n", result.Metadata["stdout"])
+	require.Equal(t, "gpx ok\n", result.Metadata["stderr"])
+	require.Equal(t, []string{"activity_id", "distance_miles", "gpx_points"}, result.Metadata["columns"])
+	stored := rt.snapshotRows("py")
+	require.Len(t, stored, 1)
+	require.JSONEq(t, `5`, string(stored[0]["distance_miles"]))
+}
+
+func TestPythonTransformRejectsPackageOutsideAllowlist(t *testing.T) {
+	py := &recordingPython{result: &runtimepkg.TransformResult{Output: json.RawMessage(`{"status":"ok"}`)}}
+	runner := runtimeNodeRunner{Python: py, Table: newLightweightTableRuntime()}
+
+	_, err := runner.Run(context.Background(), executor.NodeContext{BuildID: uuid.New(), Node: executor.Node{
+		ID: "py",
+		Metadata: map[string]any{
+			"logic_kind":     "transform",
+			"transform_type": "python",
+			"logic_payload":  json.RawMessage(`{"source":"import pandas\nresult_rows = []","allowed_packages":["json"]}`),
+		},
+	}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "python_package_not_allowed:pandas")
+	require.Empty(t, py.seen.Source)
+}
+
 func TestExecutePipelinePythonRuntimeError(t *testing.T) {
 	restore := SetExecutionPorts(ExecutionPorts{Python: failingPython{err: errors.New("python exploded")}, Committer: &recordingCommitter{}, Transactions: &recordingTransactions{}})
 	defer restore()
@@ -138,6 +209,143 @@ func TestExecutePipelinePythonRuntimeError(t *testing.T) {
 	require.Contains(t, payload.Reasons["py"], "python exploded")
 }
 
+func TestLightweightTableRuntimeFiltersAndSelectsRows(t *testing.T) {
+	rt := newLightweightTableRuntime()
+	buildID := uuid.New()
+	ctx := context.Background()
+
+	_, err := rt.Run(ctx, executor.NodeContext{BuildID: buildID, Node: executor.Node{ID: "input"}}, json.RawMessage(`{
+		"rows":[
+			{"id":"mesa","distance":5,"name":"Mesa Trail"},
+			{"id":"road","distance":2,"name":"Road"}
+		]
+	}`), "dataset_input")
+	require.NoError(t, err)
+
+	_, err = rt.Run(ctx, executor.NodeContext{BuildID: buildID, Node: executor.Node{ID: "filter", DependsOn: []string{"input"}}}, json.RawMessage(`{"predicate":"distance > 3"}`), "filter")
+	require.NoError(t, err)
+
+	_, err = rt.Run(ctx, executor.NodeContext{BuildID: buildID, Node: executor.Node{ID: "select", DependsOn: []string{"filter"}}}, json.RawMessage(`{"columns":["id","name"]}`), "select")
+	require.NoError(t, err)
+
+	rows := rt.snapshotRows("select")
+	require.Len(t, rows, 1)
+	require.JSONEq(t, `"mesa"`, string(rows[0]["id"]))
+	require.JSONEq(t, `"Mesa Trail"`, string(rows[0]["name"]))
+	require.NotContains(t, rows[0], "distance")
+}
+
+func TestTriggerPipelineRunUsesLightweightRuntimeAndCommitsOutput(t *testing.T) {
+	pipelineID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	outputID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	nodes := []models.PipelineNode{
+		{ID: "input", Label: "Input", TransformType: "dataset_input", Config: json.RawMessage(`{"rows":[{"id":"mesa","distance":5,"name":"Mesa Trail"},{"id":"road","distance":2,"name":"Road"}]}`)},
+		{ID: "filter", Label: "Filter", TransformType: "filter", DependsOn: []string{"input"}, Config: json.RawMessage(`{"predicate":"distance > 3"}`)},
+		{ID: "select", Label: "Select", TransformType: "select", DependsOn: []string{"filter"}, Config: json.RawMessage(`{"columns":["id","name"]}`)},
+		{ID: "output", Label: "Output", TransformType: "output_dataset", DependsOn: []string{"select"}, Config: json.RawMessage(`{}`), OutputDatasetID: &outputID},
+	}
+	runRepo := newRecordingPipelineRunsWithNodes(pipelineID, nodes)
+	runRepo.pipeline.PipelineType = models.PipelineTypeFaster
+	committer := &recordingCommitter{}
+	audit := &recordingAuditSink{}
+	restore := SetExecutionPorts(ExecutionPorts{Runs: runRepo, Committer: committer, Transactions: &recordingTransactions{}, Audit: audit, Parallelism: 1})
+	defer restore()
+
+	rr := httptest.NewRecorder()
+	TriggerPipelineRun(rr, httptest.NewRequest(http.MethodPost, "/api/v1/pipelines/22222222-2222-2222-2222-222222222222/runs", bytes.NewReader([]byte(`{"skip_unchanged":false}`))))
+
+	require.Equal(t, http.StatusCreated, rr.Result().StatusCode)
+	require.Equal(t, 1, runRepo.opened)
+	require.Equal(t, 1, runRepo.markedRunning)
+	require.Equal(t, "succeeded", runRepo.finishedStatus)
+	require.Equal(t, []string{outputID.String()}, committer.datasets)
+	require.NotContains(t, rr.Body.String(), "runner_not_wired")
+	require.NotContains(t, rr.Body.String(), "transform_runtime_not_wired")
+
+	var results []models.PipelineNodeResult
+	require.NoError(t, json.Unmarshal(runRepo.nodeResults, &results))
+	require.Len(t, results, 4)
+	require.Equal(t, "succeeded", results[3].Status)
+	require.Equal(t, outputID.String(), results[3].OutputResources[0].RID)
+	require.Equal(t, "committed", results[3].OutputResources[0].Status)
+	require.Equal(t, "lightweight_table", results[3].Output["runtime"])
+	require.Equal(t, "pipeline-expression", results[3].Output["engine"])
+	require.NotNil(t, results[3].SchemaDelta)
+	require.Contains(t, results[3].SchemaDelta.ColumnsAfter, "id")
+	require.NotEmpty(t, results[3].Events)
+	require.Contains(t, results[3].LogRID, "ri.foundry.main.job.")
+	require.True(t, audit.containsReason("output committed"))
+	require.True(t, audit.containsTransition(executor.NodeRunning, executor.NodeCompleted))
+}
+
+func TestTriggerPipelineRunDistributedPipelineUsesDistributedPort(t *testing.T) {
+	pipelineID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	outputID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
+	nodes := []models.PipelineNode{
+		{ID: "input", Label: "Input", TransformType: "dataset_input", Config: json.RawMessage(`{"dataset_rid":"ri.dataset.trails"}`)},
+		{ID: "filter", Label: "Filter", TransformType: "filter", DependsOn: []string{"input"}, Config: json.RawMessage(`{"predicate":"distance > 10"}`)},
+		{ID: "output", Label: "Output", TransformType: "output_dataset", DependsOn: []string{"filter"}, OutputDatasetID: &outputID},
+	}
+	runRepo := newRecordingPipelineRunsWithNodes(pipelineID, nodes)
+	runRepo.pipeline.PipelineType = models.PipelineTypeDistributed
+	runRepo.pipeline.DistributedConfig = json.RawMessage(`{"engine":"spark"}`)
+	distributed := &recordingDistributedRunner{}
+	committer := &recordingCommitter{}
+	restore := SetExecutionPorts(ExecutionPorts{Runs: runRepo, Distributed: distributed, Committer: committer, Transactions: &recordingTransactions{}, Parallelism: 1})
+	defer restore()
+
+	rr := httptest.NewRecorder()
+	TriggerPipelineRun(rr, httptest.NewRequest(http.MethodPost, "/api/v1/pipelines/22222222-2222-2222-2222-222222222222/runs", bytes.NewReader([]byte(`{"skip_unchanged":false}`))))
+
+	require.Equal(t, http.StatusCreated, rr.Result().StatusCode)
+	require.Equal(t, "succeeded", runRepo.finishedStatus)
+	require.Equal(t, []string{"dataset_input", "filter", "output_dataset"}, distributed.transformTypes())
+	require.Equal(t, []string{"spark", "spark", "spark"}, distributed.engines())
+	require.Equal(t, []string{outputID.String()}, committer.datasets)
+	require.NotContains(t, rr.Body.String(), "runner_not_wired")
+	require.NotContains(t, rr.Body.String(), "transform_runtime_not_wired")
+}
+
+func TestLightweightPipelineFixedFixtureSmoke(t *testing.T) {
+	rows := runLightweightPipelineFixture(t, 128)
+	require.Equal(t, 117, rows)
+}
+
+func BenchmarkLightweightPipelineFixedFixture(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		if rows := runLightweightPipelineFixture(b, 1000); rows != 989 {
+			b.Fatalf("unexpected row count: %d", rows)
+		}
+	}
+}
+
+func runLightweightPipelineFixture(tb testing.TB, rowCount int) int {
+	tb.Helper()
+	rt := newLightweightTableRuntime()
+	buildID := uuid.New()
+	ctx := context.Background()
+	rows := make([]map[string]any, 0, rowCount)
+	for i := 0; i < rowCount; i++ {
+		rows = append(rows, map[string]any{
+			"id":        fmt.Sprintf("trail-%04d", i),
+			"distance":  i,
+			"gain":      i % 250,
+			"trailType": "trail",
+		})
+	}
+	inputPayload, err := json.Marshal(map[string]any{"rows": rows})
+	require.NoError(tb, err)
+	_, err = rt.Run(ctx, executor.NodeContext{BuildID: buildID, Node: executor.Node{ID: "source"}}, inputPayload, "dataset_input")
+	require.NoError(tb, err)
+	_, err = rt.Run(ctx, executor.NodeContext{BuildID: buildID, Node: executor.Node{ID: "filter", DependsOn: []string{"source"}}}, json.RawMessage(`{"predicate":"distance > 10"}`), "filter")
+	require.NoError(tb, err)
+	_, err = rt.Run(ctx, executor.NodeContext{BuildID: buildID, Node: executor.Node{ID: "select", DependsOn: []string{"filter"}}}, json.RawMessage(`{"columns":["id","distance","gain"]}`), "select")
+	require.NoError(tb, err)
+	_, err = rt.Run(ctx, executor.NodeContext{BuildID: buildID, Node: executor.Node{ID: "output", DependsOn: []string{"select"}}}, json.RawMessage(`{}`), "output_dataset")
+	require.NoError(tb, err)
+	return len(rt.snapshotRows("output"))
+}
+
 func TestTriggerPipelineRunCreatesAndExecutesRun(t *testing.T) {
 	pipelineID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	runRepo := newRecordingPipelineRuns(pipelineID)
@@ -149,11 +357,12 @@ func TestTriggerPipelineRunCreatesAndExecutesRun(t *testing.T) {
 
 	require.Equal(t, http.StatusCreated, rr.Result().StatusCode)
 	require.Equal(t, 1, runRepo.opened)
-	require.Equal(t, "completed", runRepo.finishedStatus)
+	require.Equal(t, 1, runRepo.markedRunning)
+	require.Equal(t, "succeeded", runRepo.finishedStatus)
 	var run models.PipelineRun
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&run))
 	require.Equal(t, pipelineID, run.PipelineID)
-	require.Equal(t, "running", run.Status)
+	require.Equal(t, "succeeded", run.Status)
 }
 
 type recordingNodeRunner struct {
@@ -180,12 +389,14 @@ type recordingCommitter struct {
 	mu          sync.Mutex
 	datasets    []string
 	failDataset string
+	results     []executor.NodeResult
 }
 
-func (c *recordingCommitter) Commit(_ context.Context, tx executor.OutputTransaction) error {
+func (c *recordingCommitter) Commit(_ context.Context, tx executor.OutputTransaction, result executor.NodeResult) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.datasets = append(c.datasets, tx.DatasetRID)
+	c.results = append(c.results, result)
 	if tx.DatasetRID == c.failDataset {
 		return errors.New("commit failed")
 	}
@@ -202,6 +413,40 @@ func (t *recordingTransactions) Abort(_ context.Context, tx executor.OutputTrans
 	defer t.mu.Unlock()
 	t.datasets = append(t.datasets, tx.DatasetRID)
 	return nil
+}
+
+type recordingAuditSink struct {
+	mu     sync.Mutex
+	events []executor.AuditEvent
+}
+
+func (s *recordingAuditSink) Record(_ context.Context, event executor.AuditEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (s *recordingAuditSink) containsReason(reason string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, event := range s.events {
+		if event.Reason == reason && event.JobID != uuid.Nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *recordingAuditSink) containsTransition(from, to executor.NodeState) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, event := range s.events {
+		if event.From == from && event.To == to && event.JobID != uuid.Nil {
+			return true
+		}
+	}
+	return false
 }
 
 type recordingPython struct {
@@ -226,17 +471,64 @@ func (f failingPython) ExecutePythonTransform(context.Context, runtimepkg.Transf
 	return nil, f.err
 }
 
+type recordingDistributedRunner struct {
+	mu    sync.Mutex
+	calls []DistributedTransformRequest
+}
+
+func (r *recordingDistributedRunner) RunDistributedTransform(_ context.Context, req DistributedTransformRequest) (executor.NodeResult, error) {
+	r.mu.Lock()
+	r.calls = append(r.calls, req)
+	r.mu.Unlock()
+	return executor.NodeResult{
+		OutputContentHash: "distributed-" + req.Node.Node.ID,
+		Metadata: map[string]any{
+			"runtime":        "distributed",
+			"engine":         req.Engine,
+			"transform_type": req.TransformType,
+			"rows_affected":  int64(1000),
+			"columns":        []string{"id", "distance"},
+		},
+	}, nil
+}
+
+func (r *recordingDistributedRunner) transformTypes() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.calls))
+	for _, call := range r.calls {
+		out = append(out, call.TransformType)
+	}
+	return out
+}
+
+func (r *recordingDistributedRunner) engines() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.calls))
+	for _, call := range r.calls {
+		out = append(out, call.Engine)
+	}
+	return out
+}
+
 type recordingPipelineRuns struct {
 	pipeline       *models.Pipeline
 	opened         int
+	markedRunning  int
 	finishedStatus string
+	nodeResults    json.RawMessage
 }
 
 func newRecordingPipelineRuns(pipelineID uuid.UUID) *recordingPipelineRuns {
-	owner := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	nodes := []models.PipelineNode{{ID: "a", Label: "A", TransformType: "passthrough"}, {ID: "b", Label: "B", TransformType: "passthrough", DependsOn: []string{"a"}}}
+	return newRecordingPipelineRunsWithNodes(pipelineID, nodes)
+}
+
+func newRecordingPipelineRunsWithNodes(pipelineID uuid.UUID, nodes []models.PipelineNode) *recordingPipelineRuns {
+	owner := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	dag, _ := json.Marshal(nodes)
-	return &recordingPipelineRuns{pipeline: &models.Pipeline{ID: pipelineID, Name: "p", OwnerID: owner, DAG: dag, RetryPolicy: json.RawMessage(`{"max_attempts":1}`)}}
+	return &recordingPipelineRuns{pipeline: &models.Pipeline{ID: pipelineID, Name: "p", OwnerID: owner, DAG: dag, PipelineType: models.PipelineTypeBatch, Lifecycle: models.PipelineLifecycleDraft, RetryPolicy: json.RawMessage(`{"max_attempts":1}`)}}
 }
 
 func (r *recordingPipelineRuns) LoadPipeline(_ context.Context, pipelineID uuid.UUID) (*models.Pipeline, error) {
@@ -251,13 +543,19 @@ func (r *recordingPipelineRuns) OpenPipelineRun(_ context.Context, pipeline *mod
 	if len(contextJSON) == 0 || !json.Valid(contextJSON) {
 		return nil, errors.New("invalid context")
 	}
-	return &models.PipelineRun{ID: uuid.MustParse("44444444-4444-4444-4444-444444444444"), PipelineID: pipeline.ID, Status: "running", TriggerType: "manual", AttemptNumber: 1, ExecutionContext: contextJSON, StartedAt: time.Now().UTC()}, nil
+	return &models.PipelineRun{ID: uuid.MustParse("44444444-4444-4444-4444-444444444444"), PipelineID: pipeline.ID, Status: "queued", TriggerType: "manual", AttemptNumber: 1, ExecutionContext: contextJSON, StartedAt: time.Now().UTC()}, nil
 }
 
-func (r *recordingPipelineRuns) FinishPipelineRun(_ context.Context, _ uuid.UUID, status string, _ json.RawMessage, errorMessage *string) error {
+func (r *recordingPipelineRuns) MarkPipelineRunRunning(context.Context, uuid.UUID) error {
+	r.markedRunning++
+	return nil
+}
+
+func (r *recordingPipelineRuns) FinishPipelineRun(_ context.Context, _ uuid.UUID, status string, nodeResults json.RawMessage, errorMessage *string) error {
 	r.finishedStatus = status
-	if status == "completed" && errorMessage != nil && strings.TrimSpace(*errorMessage) != "" {
-		return errors.New("completed run should not carry error")
+	r.nodeResults = append(json.RawMessage(nil), nodeResults...)
+	if status == "succeeded" && errorMessage != nil && strings.TrimSpace(*errorMessage) != "" {
+		return errors.New("succeeded run should not carry error")
 	}
 	return nil
 }

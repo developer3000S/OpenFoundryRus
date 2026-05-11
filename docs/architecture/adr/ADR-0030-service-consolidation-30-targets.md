@@ -215,8 +215,8 @@ and duplicated the Prometheus scrape target.
     this at the type-system level),
   * preserving the Helm Deployment-per-service model (multiple
     replicas, PDB, HPA),
-  * the chaos suite (S8.4) explicitly tests "kill one Pod of <merged
-    service>" and validates SLOs hold.
+  * the chaos suite (S8.4) explicitly tests "kill one Pod of `merged service`"
+    and validates SLOs hold.
 * **Loss of microservice purity**: an architectural constituency may
   argue this is "deconstructing the monolith back into a monolith".
   Counter-argument: ADR-0011 still partitions control vs data, and

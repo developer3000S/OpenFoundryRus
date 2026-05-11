@@ -9,7 +9,7 @@
 - **Related ADRs:**
   - [ADR-0008](./ADR-0008-iceberg-rest-catalog-lakekeeper.md) —
     Lakekeeper as the Iceberg REST catalog of record.
-  - [ADR-0009](./ADR-0009-datafusion-as-engine-of-record.md) —
+  - [ADR-0009](./ADR-0009-internal-query-fabric-datafusion-flightsql.md) —
     DataFusion as the engine of record for Iceberg reads.
   - [ADR-0020](./ADR-0020-cassandra-as-operational-store.md) — Cassandra
     multi-DC topology that defines the "regions" referenced here.
