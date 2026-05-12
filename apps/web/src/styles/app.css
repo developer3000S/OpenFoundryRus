@@ -1488,6 +1488,40 @@ button {
   line-height: 1.4;
 }
 
+.of-app-launcher__item-fav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+  cursor: pointer;
+}
+
+.of-app-launcher__item:hover .of-app-launcher__item-fav,
+.of-app-launcher__item:focus-within .of-app-launcher__item-fav,
+.of-app-launcher__item-fav:focus-visible,
+.of-app-launcher__item-fav[data-favorite] {
+  opacity: 1;
+}
+
+.of-app-launcher__item-fav:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fde68a;
+}
+
+.of-app-launcher__item-fav[data-favorite] {
+  color: #facc15;
+}
+
 .of-app-launcher__detail {
   display: grid;
   align-content: start;

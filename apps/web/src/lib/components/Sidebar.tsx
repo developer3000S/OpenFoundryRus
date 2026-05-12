@@ -14,10 +14,6 @@ interface NavItem {
   iconTone?: string;
 }
 
-interface PinnedApp extends NavItem {
-  iconTone: string;
-}
-
 interface CategoryDef {
   id: string;
   label: string;
@@ -36,6 +32,19 @@ interface LauncherApp {
 }
 
 const COLLAPSED_KEY = 'of_sidebar_collapsed';
+const FAVORITES_KEY = 'of_favorite_apps';
+
+function readFavorites(): string[] {
+  if (typeof localStorage === 'undefined') return DEFAULT_FAVORITES;
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    if (raw === null) return DEFAULT_FAVORITES;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
 const PRIMARY_NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: 'home', end: true },
@@ -49,9 +58,10 @@ const SECONDARY_NAV: NavItem[] = [
   { to: '/projects', label: 'Files', icon: 'folder' },
 ];
 
-const PINNED_APPS: PinnedApp[] = [
-  { to: '/apps', label: 'Workshop', icon: 'app', iconTone: '#a78bfa' },
-];
+// Favorites are now user-driven via the launcher star toggle (see
+// FAVORITES_KEY below). Workshop ships as a default favorite on first
+// load so the section is not empty on a fresh install.
+const DEFAULT_FAVORITES: string[] = ['workshop'];
 
 const FOOTER_NAV: NavItem[] = [
   { to: '/ai', label: 'AIP Assist', icon: 'asterisk', shortcut: 'ctrl + shift + U', iconTone: '#67e8f9' },
@@ -290,12 +300,30 @@ export function Sidebar() {
   const [search, setSearch] = useState('');
   const [hoveredAppId, setHoveredAppId] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [favorites, setFavorites] = useState<string[]>(() => readFavorites());
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (typeof localStorage === 'undefined') return;
     localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
   }, [collapsed]);
+
+  useEffect(() => {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+  }, [favorites]);
+
+  const toggleFavorite = (id: string) => {
+    setFavorites((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const favoriteApps = useMemo(
+    () =>
+      favorites
+        .map((id) => LAUNCHER_APPS.find((a) => a.id === id))
+        .filter((a): a is LauncherApp => Boolean(a)),
+    [favorites],
+  );
 
   useEffect(() => {
     if (launcherOpen) searchRef.current?.focus();
@@ -402,11 +430,16 @@ export function Sidebar() {
             </button>
           </section>
 
-          {PINNED_APPS.length > 0 && (
+          {favoriteApps.length > 0 && (
             <section className="of-sidebar__section">
               <div className="of-sidebar__heading">{t('nav.workshop.section')}</div>
-              {PINNED_APPS.map((app) => (
-                <SidebarLink key={app.to} item={app} pathname={pathname} collapsed={collapsed} />
+              {favoriteApps.map((app) => (
+                <SidebarLink
+                  key={`fav-${app.id}`}
+                  item={{ to: app.href, label: app.name, icon: app.icon, iconTone: app.iconTone }}
+                  pathname={pathname}
+                  collapsed={collapsed}
+                />
               ))}
             </section>
           )}
@@ -509,32 +542,51 @@ export function Sidebar() {
                   groupedApps.map((group) => (
                     <div key={group.id} className="of-app-launcher__group">
                       <div className="of-app-launcher__group-title">{group.label}</div>
-                      {group.apps.map((app) => (
-                        <Link
-                          key={app.id}
-                          to={app.href}
-                          className="of-app-launcher__item"
-                          data-selected={hoveredAppId === app.id || undefined}
-                          data-active={isActive(app.href, pathname) || undefined}
-                          onMouseEnter={() => setHoveredAppId(app.id)}
-                          onFocus={() => setHoveredAppId(app.id)}
-                          onClick={() => setLauncherOpen(false)}
-                        >
-                          <span
-                            className="of-app-launcher__item-icon"
-                            style={{
-                              background: `${app.iconTone}28`,
-                              color: app.iconTone,
-                            }}
+                      {group.apps.map((app) => {
+                        const isFav = favorites.includes(app.id);
+                        return (
+                          <Link
+                            key={app.id}
+                            to={app.href}
+                            className="of-app-launcher__item"
+                            data-selected={hoveredAppId === app.id || undefined}
+                            data-active={isActive(app.href, pathname) || undefined}
+                            data-favorite={isFav || undefined}
+                            onMouseEnter={() => setHoveredAppId(app.id)}
+                            onFocus={() => setHoveredAppId(app.id)}
+                            onClick={() => setLauncherOpen(false)}
                           >
-                            <Glyph name={app.icon} size={16} tone={app.iconTone} />
-                          </span>
-                          <span className="of-app-launcher__item-copy">
-                            <span className="of-app-launcher__item-name">{app.name}</span>
-                            <span className="of-app-launcher__item-description">{app.description}</span>
-                          </span>
-                        </Link>
-                      ))}
+                            <span
+                              className="of-app-launcher__item-icon"
+                              style={{
+                                background: `${app.iconTone}28`,
+                                color: app.iconTone,
+                              }}
+                            >
+                              <Glyph name={app.icon} size={16} tone={app.iconTone} />
+                            </span>
+                            <span className="of-app-launcher__item-copy">
+                              <span className="of-app-launcher__item-name">{app.name}</span>
+                              <span className="of-app-launcher__item-description">{app.description}</span>
+                            </span>
+                            <button
+                              type="button"
+                              className="of-app-launcher__item-fav"
+                              data-favorite={isFav || undefined}
+                              aria-pressed={isFav}
+                              aria-label={isFav ? `Remove ${app.name} from favorites` : `Add ${app.name} to favorites`}
+                              title={isFav ? 'Remove from favorites' : 'Add to favorites'}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toggleFavorite(app.id);
+                              }}
+                            >
+                              <Glyph name={isFav ? 'star-filled' : 'star'} size={14} />
+                            </button>
+                          </Link>
+                        );
+                      })}
                     </div>
                   ))
                 )}
