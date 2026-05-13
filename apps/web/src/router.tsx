@@ -191,6 +191,10 @@ export const router = createBrowserRouter([
         lazy: async () => ({ Component: (await import('./routes/ai/AiPage')).AiPage }),
       },
       {
+        path: 'logic',
+        lazy: async () => ({ Component: (await import('./routes/logic/LogicAuthoringPage')).LogicAuthoringPage }),
+      },
+      {
         path: 'object-views',
         lazy: async () => ({ Component: (await import('./routes/object-views/ObjectViewsPage')).ObjectViewsPage }),
       },

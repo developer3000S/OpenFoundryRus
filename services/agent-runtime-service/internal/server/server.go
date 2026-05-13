@@ -58,6 +58,15 @@ func buildRouter(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers
 	r.Route("/api/v1/agent-runtime", func(api chi.Router) {
 		api.Use(authmw.Middleware(jwt))
 
+		api.Get("/logic/files", h.ListLogicFiles)
+		api.Post("/logic/files", h.CreateLogicFile)
+		api.Get("/logic/files/{id}", h.GetLogicFile)
+		api.Patch("/logic/files/{id}", h.UpdateLogicFileMetadata)
+		api.Post("/logic/files/{id}/move", h.MoveLogicFile)
+		api.Post("/logic/files/{id}/duplicate", h.DuplicateLogicFile)
+		api.Delete("/logic/files/{id}", h.ArchiveLogicFile)
+		api.Post("/logic/files/{id}/restore", h.RestoreLogicFile)
+
 		api.Get("/agents", h.ListAgents)
 		api.Post("/agents", h.CreateAgent)
 		api.Get("/agents/{id}", h.GetAgent)

@@ -161,3 +161,195 @@ func (r *Repo) RecordHumanApproval(ctx context.Context, runID uuid.UUID, payload
 		uuid.New(), runID, payload)
 	return scanStep(row)
 }
+
+const logicFileColumns = `id, name, description, project_id, folder_id, owner_id,
+                         current_draft_version_id, published_version_id,
+                         execution_mode, permissions, archived_at, created_at, updated_at`
+
+func scanLogicFile(s scanner) (models.LogicFile, error) {
+	var lf models.LogicFile
+	err := s.Scan(&lf.ID, &lf.Name, &lf.Description, &lf.ProjectID, &lf.FolderID,
+		&lf.OwnerID, &lf.CurrentDraftVersionID, &lf.PublishedVersionID,
+		&lf.ExecutionMode, &lf.Permissions, &lf.ArchivedAt, &lf.CreatedAt, &lf.UpdatedAt)
+	return lf, err
+}
+
+func nullableUUID(id *uuid.UUID) any {
+	if id == nil {
+		return nil
+	}
+	return *id
+}
+
+func defaultLogicPermissions(ownerID uuid.UUID, raw *json.RawMessage) json.RawMessage {
+	if raw != nil && len(*raw) > 0 {
+		return *raw
+	}
+	b, _ := json.Marshal(map[string][]string{
+		"owners":  {ownerID.String()},
+		"editors": {},
+		"viewers": {},
+	})
+	return b
+}
+
+func (r *Repo) CreateLogicFile(ctx context.Context, ownerID uuid.UUID, body models.CreateLogicFileRequest) (models.LogicFile, error) {
+	executionMode := "user_scoped"
+	if body.ExecutionMode != nil {
+		executionMode = *body.ExecutionMode
+	}
+	row := r.Pool.QueryRow(ctx,
+		`INSERT INTO logic_files
+		        (id, name, description, project_id, folder_id, owner_id,
+		         current_draft_version_id, execution_mode, permissions)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		 RETURNING `+logicFileColumns,
+		uuid.New(), body.Name, body.Description, body.ProjectID, body.FolderID,
+		ownerID, uuid.New(), executionMode, defaultLogicPermissions(ownerID, body.Permissions))
+	return scanLogicFile(row)
+}
+
+func (r *Repo) GetLogicFile(ctx context.Context, id uuid.UUID, actorID uuid.UUID, includeArchived bool, admin bool) (*models.LogicFile, error) {
+	query := `SELECT ` + logicFileColumns + ` FROM logic_files
+	          WHERE id = $1
+	            AND ($2::bool OR archived_at IS NULL)
+	            AND ($4::bool OR owner_id = $3 OR permissions->'owners' ? $3::text OR permissions->'editors' ? $3::text OR permissions->'viewers' ? $3::text)`
+	lf, err := scanLogicFile(r.Pool.QueryRow(ctx, query, id, includeArchived, actorID, admin))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &lf, nil
+}
+
+func (r *Repo) ListLogicFiles(ctx context.Context, projectID, folderID *uuid.UUID, actorID uuid.UUID, includeArchived bool, admin bool) ([]models.LogicFile, error) {
+	rows, err := r.Pool.Query(ctx,
+		`SELECT `+logicFileColumns+` FROM logic_files
+		  WHERE ($1::uuid IS NULL OR project_id = $1)
+		    AND ($2::uuid IS NULL OR folder_id = $2)
+		    AND ($3::bool OR archived_at IS NULL)
+		    AND ($5::bool OR owner_id = $4 OR permissions->'owners' ? $4::text OR permissions->'editors' ? $4::text OR permissions->'viewers' ? $4::text)
+		  ORDER BY updated_at DESC, created_at DESC`,
+		nullableUUID(projectID), nullableUUID(folderID), includeArchived, actorID, admin)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.LogicFile, 0)
+	for rows.Next() {
+		lf, err := scanLogicFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, lf)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) UpdateLogicFileMetadata(ctx context.Context, id, actorID uuid.UUID, body models.UpdateLogicFileMetadataRequest, admin bool) (*models.LogicFile, error) {
+	row := r.Pool.QueryRow(ctx,
+		`UPDATE logic_files
+		    SET name = COALESCE($2, name),
+		        description = COALESCE($3, description),
+		        execution_mode = COALESCE($4, execution_mode),
+		        permissions = COALESCE($5, permissions),
+		        updated_at = now()
+		  WHERE id = $1 AND archived_at IS NULL
+		    AND ($7::bool OR owner_id = $6 OR permissions->'owners' ? $6::text OR permissions->'editors' ? $6::text)
+		  RETURNING `+logicFileColumns,
+		id, body.Name, body.Description, body.ExecutionMode, body.Permissions, actorID, admin)
+	lf, err := scanLogicFile(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &lf, nil
+}
+
+func (r *Repo) MoveLogicFile(ctx context.Context, id, actorID uuid.UUID, body models.MoveLogicFileRequest, admin bool) (*models.LogicFile, error) {
+	row := r.Pool.QueryRow(ctx,
+		`UPDATE logic_files
+		    SET project_id = $2, folder_id = $3, updated_at = now()
+		  WHERE id = $1 AND archived_at IS NULL
+		    AND ($5::bool OR owner_id = $4 OR permissions->'owners' ? $4::text OR permissions->'editors' ? $4::text)
+		  RETURNING `+logicFileColumns,
+		id, body.ProjectID, body.FolderID, actorID, admin)
+	lf, err := scanLogicFile(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &lf, nil
+}
+
+func (r *Repo) DuplicateLogicFile(ctx context.Context, id, actorID uuid.UUID, body models.DuplicateLogicFileRequest, admin bool) (*models.LogicFile, error) {
+	newID := uuid.New()
+	row := r.Pool.QueryRow(ctx,
+		`INSERT INTO logic_files
+		        (id, name, description, project_id, folder_id, owner_id,
+		         current_draft_version_id, execution_mode, permissions)
+		 SELECT $1,
+		        COALESCE($2, name || ' (copy)'),
+		        COALESCE($3, description),
+		        COALESCE($4, project_id),
+		        COALESCE($5, folder_id),
+		        $6,
+		        $7,
+		        execution_mode,
+		        permissions
+		   FROM logic_files
+		  WHERE id = $8 AND archived_at IS NULL
+		    AND ($10::bool OR owner_id = $9 OR permissions->'owners' ? $9::text OR permissions->'editors' ? $9::text)
+		 RETURNING `+logicFileColumns,
+		newID, body.Name, body.Description, nullableUUID(body.ProjectID), nullableUUID(body.FolderID), actorID, uuid.New(), id, actorID, admin)
+	lf, err := scanLogicFile(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &lf, nil
+}
+
+func (r *Repo) ArchiveLogicFile(ctx context.Context, id, actorID uuid.UUID, admin bool) (*models.LogicFile, error) {
+	row := r.Pool.QueryRow(ctx,
+		`UPDATE logic_files
+		    SET archived_at = COALESCE(archived_at, now()), updated_at = now()
+		  WHERE id = $1
+		    AND ($3::bool OR owner_id = $2 OR permissions->'owners' ? $2::text OR permissions->'editors' ? $2::text)
+		  RETURNING `+logicFileColumns,
+		id, actorID, admin)
+	lf, err := scanLogicFile(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &lf, nil
+}
+
+func (r *Repo) RestoreLogicFile(ctx context.Context, id, actorID uuid.UUID, admin bool) (*models.LogicFile, error) {
+	row := r.Pool.QueryRow(ctx,
+		`UPDATE logic_files
+		    SET archived_at = NULL, updated_at = now()
+		  WHERE id = $1 AND archived_at IS NOT NULL
+		    AND ($3::bool OR owner_id = $2 OR permissions->'owners' ? $2::text OR permissions->'editors' ? $2::text)
+		  RETURNING `+logicFileColumns,
+		id, actorID, admin)
+	lf, err := scanLogicFile(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &lf, nil
+}

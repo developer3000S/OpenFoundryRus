@@ -143,21 +143,25 @@ OpenFoundry canonical IDs.
 
 ### AIP Logic application shell and authoring basics
 
-- [ ] `AIPLE.1` Logic file CRUD and project placement (`P0`, `todo`)
+- [x] `AIPLE.1` Logic file CRUD and project placement (`P0`, `done`)
   - Create, get, list, update metadata, move, duplicate, archive/delete, and restore Logic files.
   - Require Logic files to be saved in project folders rather than personal-only home folders when mirroring documented behavior.
   - Track name, description, project/folder, owner, created/updated timestamps, current draft version, published version, execution mode, and permissions.
+  - Implemented in `agent-runtime-service` with project/folder-required Logic file metadata, owner/permission-aware CRUD, move, duplicate, archive/delete, and restore endpoints under `/api/v1/agent-runtime/logic/files`.
+  - Tests cover the project/folder placement guardrail, execution-mode validation, authentication guardrail, and duplicate placement validation.
   - Docs: [AIP Logic overview](https://www.palantir.com/docs/foundry/logic), [AIP Logic getting started](https://www.palantir.com/docs/foundry/logic/getting-started).
 
-- [ ] `AIPLE.2` Logic authoring interface shell (`P0`, `todo`)
+- [x] `AIPLE.2` Logic authoring interface shell (`P0`, `done`)
   - Provide a three-panel authoring UI: inputs/blocks/outputs configuration, debugger, and run panel.
   - Include right sidebar entry points for uses, automations, evaluations, run history, version history, metrics, and execution settings.
   - Preserve OpenFoundry-native UI styling and avoid Palantir screenshots or visual assets.
+  - Implemented as the OpenFoundry-native `/logic` authoring route with configuration, debugger, run panel, and right resource rail for uses, automations, evaluations, history, metrics, and execution settings.
   - Docs: [AIP Logic getting started](https://www.palantir.com/docs/foundry/logic/getting-started), [AIP Logic core concepts](https://www.palantir.com/docs/foundry/logic/core-concepts/).
 
-- [ ] `AIPLE.3` Logic input board (`P0`, `todo`)
+- [x] `AIPLE.3` Logic input board (`P0`, `done`)
   - Define typed inputs for array/list, Boolean, date, double, float, integer, long, media reference, model, object, object list, object set, short, string, struct, and timestamp where local services exist.
   - Validate input API names, required/optional state, default values, object type selections, object set compatibility, and model variable compatibility.
+  - Implemented shared input-board validators and UI editing for all supported input types, including typed defaults, object/object-set checks, and model slot compatibility.
   - Docs: [AIP Logic getting started](https://www.palantir.com/docs/foundry/logic/getting-started), [AIP Logic blocks](https://www.palantir.com/docs/foundry/logic/blocks/).
 
 - [ ] `AIPLE.4` Logic block graph and dataflow (`P0`, `todo`)
@@ -166,54 +170,62 @@ OpenFoundry canonical IDs.
   - Show which block outputs feed subsequent blocks and final outputs.
   - Docs: [AIP Logic core concepts](https://www.palantir.com/docs/foundry/logic/core-concepts/), [AIP Logic blocks](https://www.palantir.com/docs/foundry/logic/blocks/).
 
-- [ ] `AIPLE.5` Use LLM block (`P0`, `todo`)
+- [x] `AIPLE.5` Use LLM block (`P0`, `done`)
   - Configure model, system/task prompt, tool access, structured output type, and prompt variable references.
   - Support model variables so Evals experiments can swap model values.
   - Record prompt, tool-call, output, token/compute, and error trace metadata in the debugger.
+  - Implemented shared Use LLM block config/validation, model-variable binding for Evals, structured output validation, and debugger trace metadata surfaced in the `/logic` authoring shell.
   - Docs: [AIP Logic blocks](https://www.palantir.com/docs/foundry/logic/blocks/), [AIP Logic compute usage](https://www.palantir.com/docs/foundry/logic/compute-usage).
 
-- [ ] `AIPLE.6` Query objects tool (`P0`, `todo`)
+- [x] `AIPLE.6` Query objects tool (`P0`, `done`)
   - Allow LLM blocks to query configured object types and selected properties.
   - Limit accessible object types/properties to what the Logic function/user can read.
   - Provide token-efficiency warnings when too many object types or properties are exposed.
+  - Implemented Query objects tool selection in the Use LLM block editor with readable object/property allowlists and token-efficiency warnings for wide/large query context.
   - Docs: [AIP Logic blocks](https://www.palantir.com/docs/foundry/logic/blocks/), [AIP Logic overview](https://www.palantir.com/docs/foundry/logic).
 
-- [ ] `AIPLE.7` Apply action tool and Ontology edits (`P0`, `todo`)
+- [x] `AIPLE.7` Apply action tool and Ontology edits (`P0`, `done`)
   - Let LLM blocks propose action-backed Ontology edits using selected action types and parameters.
   - Show proposed edits in debugger during preview without applying them to the real Ontology.
   - Require published Logic plus action or automation invocation before real Ontology edits can be applied.
+  - Implemented Apply action tool config/validation, preview-only proposed edit trace metadata, and commit guardrails requiring published Logic plus action/automation invocation.
   - Docs: [AIP Logic getting started](https://www.palantir.com/docs/foundry/logic/getting-started), [AIP Logic blocks](https://www.palantir.com/docs/foundry/logic/blocks/).
 
-- [ ] `AIPLE.8` Execute function and calculator tools (`P0`, `todo`)
+- [x] `AIPLE.8` Execute function and calculator tools (`P0`, `done`)
   - Configure calls to TypeScript, Python, existing Logic, and function-on-objects functions where available.
   - Provide calculator tool support for exact mathematical computation in LLM workflows.
   - Validate function signatures, parameter mapping, permissions, and output type compatibility.
+  - Implemented Execute function and calculator tool config/validation, permission allowlists, signature/type checks, deterministic arithmetic evaluation, and debugger tool metadata.
   - Docs: [AIP Logic blocks](https://www.palantir.com/docs/foundry/logic/blocks/).
 
-- [ ] `AIPLE.9` Create variable, conditionals, and loops (`P0`, `todo`)
+- [x] `AIPLE.9` Create variable, conditionals, and loops (`P0`, `done`)
   - Support create variable blocks for primitive/object-compatible values.
   - Support conditionals and loops with list inputs, element/index variables, output aggregation, and parallel-loop behavior when no actions are present.
   - Validate list/array conversion and loop output type compatibility.
+  - Implemented create-variable, conditional, and loop config/validation for source typing, branch output compatibility, list/object-list inputs, array-to-list conversion warnings, element/index loop variables, aggregation output compatibility, ontology-edit/no-action branches, and action-aware parallelization.
   - Docs: [AIP Logic blocks](https://www.palantir.com/docs/foundry/logic/blocks/).
 
-- [ ] `AIPLE.10` Logic outputs (`P0`, `todo`)
+- [x] `AIPLE.10` Logic outputs (`P0`, `done`)
   - Define final outputs as primitive values, objects, object sets/lists, structs, media references, or Ontology edit bundles where locally supported.
   - Support block intermediary outputs and final Logic function output.
   - Enforce that Workshop Markdown usage requires a string output when using Logic as a display function.
+  - Implemented final/intermediate output definitions and validators for supported output families, source compatibility, final-output presence, unique API names, Ontology edit bundles, and Workshop Markdown string outputs.
   - Docs: [AIP Logic getting started](https://www.palantir.com/docs/foundry/logic/getting-started), [AIP Logic core concepts](https://www.palantir.com/docs/foundry/logic/core-concepts/).
 
 ### Running, debugging, publishing, and usage
 
-- [ ] `AIPLE.11` Run panel and preview execution (`P0`, `todo`)
+- [x] `AIPLE.11` Run panel and preview execution (`P0`, `done`)
   - Execute draft Logic with sample inputs from the run panel.
   - Show latest result, status, duration, run metadata, recent runs, and save-as-test-case shortcuts.
   - Support single-run rerun and input editing without publishing.
+  - Implemented local draft preview execution helpers plus an editable run panel with latest result, run status/duration/metadata, recent run selection, rerun, and save-as-test-case shortcut affordances.
   - Docs: [AIP Logic getting started](https://www.palantir.com/docs/foundry/logic/getting-started).
 
-- [ ] `AIPLE.12` Logic debugger (`P0`, `todo`)
+- [x] `AIPLE.12` Logic debugger (`P0`, `done`)
   - Display block-by-block trace, prompt/tool-call details, inputs, outputs, errors, and final result.
   - Allow expanding/collapsing block cards and clearing local tool-call display state.
   - Ensure logs/traces are security-filtered and retained according to execution mode.
+  - Implemented debugger trace builders and UI cards for input binding, LLM prompt/tool calls, final output mapping, expandable block details, local tool-call clearing, sensitive-key redaction, and draft-vs-policy retention metadata.
   - Docs: [AIP Logic getting started](https://www.palantir.com/docs/foundry/logic/getting-started), [AIP Logic core concepts](https://www.palantir.com/docs/foundry/logic/core-concepts/).
 
 - [ ] `AIPLE.13` Save, publish, and version history (`P0`, `todo`)

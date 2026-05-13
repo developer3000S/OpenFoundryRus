@@ -137,6 +137,9 @@ const LAUNCHER_APPS: LauncherApp[] = [
   { id: 'global-branching', href: '/global-branching', icon: 'asterisk', iconTone: '#facc15', category: 'application-development',
     name: 'Global Branching',
     description: 'Promote, review, and merge cross-app branches with policy.' },
+  { id: 'logic', href: '/logic', icon: 'graph', iconTone: '#38bdf8', category: 'application-development', promoted: true,
+    name: 'AIP Logic',
+    description: 'Author no-code Logic functions with inputs, blocks, outputs, debugging, and run previews.' },
 
   // Data integration
   { id: 'datasets', href: '/datasets', icon: 'database', iconTone: '#60a5fa', category: 'data-integration',
