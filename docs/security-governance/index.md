@@ -2,6 +2,8 @@
 
 This section covers identity, permissions, policy, traceability, and controlled operational change.
 
+> **New here?** Start with [Security overview](./security-overview.md) for the seven control layers and how they compose, and with [Shared responsibility model](./shared-responsibility-model.md) for who owns which control. The full parity backlog lives in the [security & governance 1:1 checklist](../migration/foundry-security-governance-1to1-checklist.md).
+
 ## OpenFoundry mapping
 
 - `services/identity-federation-service` — identity, MFA, WebAuthn, OIDC, SAML, RBAC, SCIM, JWKS rotation
@@ -29,6 +31,8 @@ This section covers identity, permissions, policy, traceability, and controlled 
 
 ## Section map
 
+- [Security overview](/security-governance/security-overview) — landing page for the seven control layers
+- [Shared responsibility model](/security-governance/shared-responsibility-model) — operator vs tenant ownership
 - [Identity and access](/security-governance/identity-and-access)
 - [Policies and authorization](/security-governance/policies-and-authorization)
 - [Policy bundles in-process](/security-governance/policy-bundles)

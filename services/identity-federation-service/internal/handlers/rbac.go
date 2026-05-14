@@ -107,6 +107,11 @@ func (h *RBAC) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
+	// SG.4: snapshot the previous is_active so we can detect a
+	// false transition and revoke refresh tokens. The repo layer
+	// could do this too, but the handler is the natural place to
+	// audit the policy "deactivation revokes tokens".
+	previous, _ := h.Repo.FindUserByID(r.Context(), id)
 	u, err := h.Repo.UpdateUser(r.Context(), id, &body)
 	if err != nil {
 		slog.Error("update user", slog.String("error", err.Error()))
@@ -117,15 +122,39 @@ func (h *RBAC) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusNotFound, "not found")
 		return
 	}
+	if previous != nil && previous.IsActive && !u.IsActive {
+		count, revokeErr := h.Repo.RevokeAllUserRefreshTokens(r.Context(), id, time.Now().UTC())
+		if revokeErr != nil {
+			slog.Warn("revoke tokens on deactivation",
+				slog.String("user_id", id.String()),
+				slog.String("error", revokeErr.Error()))
+		} else if count > 0 {
+			slog.Info("revoked refresh tokens on deactivation",
+				slog.String("user_id", id.String()),
+				slog.Int64("revoked", count))
+		}
+	}
 	writeJSON(w, http.StatusOK, u)
 }
 
+// DeleteUser performs a soft delete by default: sets deleted_at and
+// inactivates the user, and revokes every active refresh token. The
+// hard-delete escape hatch is `?hard=true` for compliance flows that
+// need a true row removal.
 func (h *RBAC) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
 		return
 	}
-	if err := h.Repo.DeleteUser(r.Context(), id); err != nil {
+	if r.URL.Query().Get("hard") == "true" {
+		if err := h.Repo.DeleteUser(r.Context(), id); err != nil {
+			writeJSONErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := h.Repo.SoftDeleteUser(r.Context(), id); err != nil {
 		writeJSONErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

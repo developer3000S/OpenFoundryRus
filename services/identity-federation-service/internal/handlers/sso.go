@@ -201,6 +201,10 @@ func (s *SSO) Callback(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	// SG.4: stamp last_login_at + last_login_ip on every SSO sign-in.
+	if err := s.Repo.StampLogin(r.Context(), user.ID, time.Now().UTC(), clientIP(r)); err != nil {
+		slog.Warn("sso callback: stamp login", slog.String("user_id", user.ID.String()), slog.String("error", err.Error()))
+	}
 
 	target, _ := url.Parse(st.RedirectAfter)
 	q := url.Values{}
@@ -290,6 +294,10 @@ func (s *SSO) AssertionConsumerService(w http.ResponseWriter, r *http.Request) {
 		slog.Error("sso acs: issue tokens", slog.String("error", err.Error()))
 		writeJSONErr(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+	// SG.4: stamp last_login_at + last_login_ip on every SAML sign-in.
+	if err := s.Repo.StampLogin(r.Context(), user.ID, time.Now().UTC(), clientIP(r)); err != nil {
+		slog.Warn("sso acs: stamp login", slog.String("user_id", user.ID.String()), slog.String("error", err.Error()))
 	}
 
 	target, _ := url.Parse(st.RedirectAfter)

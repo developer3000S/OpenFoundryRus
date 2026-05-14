@@ -68,7 +68,8 @@ func TestGetInternalDatasetMetadataUsesStoragePathDirectMarkings(t *testing.T) {
 	markingID := uuid.New()
 	now := time.Now().UTC()
 	storagePath := "ri.foundry.main.dataset." + datasetID.String()
-	mock.ExpectQuery("SELECT id, name, format, tags").WithArgs(datasetID).WillReturnRows(pgxmock.NewRows([]string{"id", "name", "format", "tags", "current_version", "active_branch", "owner_id", "updated_at", "storage_path"}).AddRow(datasetID, "orders", "parquet", []string{"finance"}, int32(7), "master", ownerID, now, storagePath))
+	rid := "ri.foundry.main.dataset." + datasetID.String()
+	mock.ExpectQuery("SELECT id, rid, name, format").WithArgs(datasetID).WillReturnRows(pgxmock.NewRows([]string{"id", "rid", "name", "format", "tags", "current_version", "active_branch", "owner_id", "parent_folder_rid", "folder_path", "project_id", "project_rid", "path", "resource_visibility", "updated_at", "storage_path"}).AddRow(datasetID, rid, "orders", "parquet", []string{"finance"}, int32(7), "master", ownerID, "ri.openfoundry.main.folder.root", "/datasets", "default", "ri.openfoundry.main.project.default", "/datasets/orders", "private", now, storagePath))
 	mock.ExpectQuery("SELECT marking_id FROM dataset_markings").WithArgs(storagePath).WillReturnRows(pgxmock.NewRows([]string{"marking_id"}).AddRow(markingID))
 
 	r := &repo.Repo{Pool: mock}
@@ -92,9 +93,12 @@ func TestPatchDatasetMetadataScansCatalogDataset(t *testing.T) {
 	name := "orders-v2"
 	metadata := models.JSONValue(`{"tier":"gold"}`)
 
-	rows := pgxmock.NewRows([]string{"id", "name", "description", "format", "storage_path", "size_bytes", "row_count", "owner_id", "tags", "current_version", "active_branch", "metadata", "health_status", "current_view_id", "created_at", "updated_at"}).
-		AddRow(datasetID, name, "desc", "parquet", "s3://lake/orders", int64(1), int64(2), ownerID, []string{"gold"}, int32(3), "master", []byte(metadata), "HEALTHY", &viewID, now, now)
-	mock.ExpectQuery("UPDATE datasets SET").WithArgs(datasetID, &name, pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), []byte(metadata), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnRows(rows)
+	selectRows := pgxmock.NewRows([]string{"id", "name", "description", "format", "storage_path", "size_bytes", "row_count", "owner_id", "tags", "current_version", "active_branch", "metadata", "health_status", "current_view_id", "rid", "parent_folder_rid", "folder_path", "project_id", "project_rid", "path", "resource_visibility", "deleted_at", "created_at", "updated_at"}).
+		AddRow(datasetID, "orders", "desc", "parquet", "s3://lake/orders", int64(1), int64(2), ownerID, []string{"gold"}, int32(3), "master", []byte(metadata), "HEALTHY", &viewID, "ri.foundry.main.dataset."+datasetID.String(), "ri.openfoundry.main.folder.root", "/datasets", "default", "ri.openfoundry.main.project.default", "/datasets/orders", "private", nil, now, now)
+	updateRows := pgxmock.NewRows([]string{"id", "name", "description", "format", "storage_path", "size_bytes", "row_count", "owner_id", "tags", "current_version", "active_branch", "metadata", "health_status", "current_view_id", "rid", "parent_folder_rid", "folder_path", "project_id", "project_rid", "path", "resource_visibility", "deleted_at", "created_at", "updated_at"}).
+		AddRow(datasetID, name, "desc", "parquet", "s3://lake/orders", int64(1), int64(2), ownerID, []string{"gold"}, int32(3), "master", []byte(metadata), "HEALTHY", &viewID, "ri.foundry.main.dataset."+datasetID.String(), "ri.openfoundry.main.folder.root", "/datasets", "default", "ri.openfoundry.main.project.default", "/datasets/"+name, "private", nil, now, now)
+	mock.ExpectQuery("SELECT id, name, description").WithArgs(datasetID).WillReturnRows(selectRows)
+	mock.ExpectQuery("UPDATE datasets SET").WithArgs(datasetID, name, pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), []byte(metadata), pgxmock.AnyArg(), pgxmock.AnyArg(), "ri.openfoundry.main.folder.root", "/datasets", "default", "ri.openfoundry.main.project.default", "/datasets/"+name, "private").WillReturnRows(updateRows)
 
 	r := &repo.Repo{Pool: mock}
 	got, err := r.PatchDatasetMetadata(ctx, datasetID, &models.DatasetMetadataPatch{Name: &name, Metadata: metadata})
@@ -129,10 +133,40 @@ func TestStartTransactionRejectsConcurrentOpen(t *testing.T) {
 	defer mock.Close()
 
 	branchID := uuid.New()
+	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT EXISTS").WithArgs(branchID).WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectRollback()
 	r := &repo.Repo{Pool: mock}
 	_, err = r.StartTransaction(ctx, uuid.New(), branchID, "master", models.TransactionTypeAppend, "", nil, uuid.New())
 	require.ErrorIs(t, err, repo.ErrConflict)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestStartTransactionMovesBranchPointerToOpenTransaction(t *testing.T) {
+	ctx := context.Background()
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	datasetID := uuid.New()
+	branchID := uuid.New()
+	actor := uuid.New()
+	now := time.Now().UTC()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT EXISTS").WithArgs(branchID).WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectQuery("INSERT INTO dataset_transactions").
+		WithArgs(pgxmock.AnyArg(), datasetID, branchID, "main", models.TransactionTypeAppend, "work", []byte(`{}`), actor).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "dataset_id", "branch_id", "branch_name", "tx_type", "status", "summary", "metadata", "providence", "started_by", "started_at", "committed_at", "aborted_at"}).
+			AddRow(uuid.New(), datasetID, branchID, "main", models.TransactionTypeAppend, models.TransactionStatusOpen, "work", []byte(`{}`), []byte(`{}`), &actor, now, nil, nil))
+	mock.ExpectExec("UPDATE dataset_branches").
+		WithArgs(branchID, pgxmock.AnyArg(), datasetID).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectCommit()
+
+	r := &repo.Repo{Pool: mock}
+	tx, err := r.StartTransaction(ctx, datasetID, branchID, "main", models.TransactionTypeAppend, "work", nil, actor)
+	require.NoError(t, err)
+	require.Equal(t, models.TransactionStatusOpen, tx.Status)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -151,6 +185,52 @@ func TestCommitTransactionRejectsNonOpenTransaction(t *testing.T) {
 	r := &repo.Repo{Pool: mock}
 	err = r.CommitTransaction(ctx, datasetID, txnID)
 	require.ErrorIs(t, err, repo.ErrInvalidTransition)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAbortTransactionRejectsNonOpenTransaction(t *testing.T) {
+	ctx := context.Background()
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+	datasetID := uuid.New()
+	branchID := uuid.New()
+	txnID := uuid.New()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT id, dataset_id, branch_id").WithArgs(txnID).WillReturnRows(pgxmock.NewRows([]string{"id", "dataset_id", "branch_id", "branch_name", "tx_type", "status", "summary"}).AddRow(txnID, datasetID, branchID, "master", models.TransactionTypeAppend, models.TransactionStatusAborted, "cancelled"))
+	mock.ExpectRollback()
+
+	r := &repo.Repo{Pool: mock}
+	err = r.AbortTransaction(ctx, datasetID, txnID)
+	require.ErrorIs(t, err, repo.ErrInvalidTransition)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAbortTransactionRestoresBranchPointerToLatestNonAborted(t *testing.T) {
+	ctx := context.Background()
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+	datasetID := uuid.New()
+	branchID := uuid.New()
+	txnID := uuid.New()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT id, dataset_id, branch_id").
+		WithArgs(txnID).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "dataset_id", "branch_id", "branch_name", "tx_type", "status", "summary"}).
+			AddRow(txnID, datasetID, branchID, "main", models.TransactionTypeAppend, models.TransactionStatusOpen, "cancel"))
+	mock.ExpectExec("UPDATE dataset_transactions").
+		WithArgs(txnID, datasetID).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectExec("UPDATE dataset_branches").
+		WithArgs(branchID, datasetID).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectCommit()
+
+	r := &repo.Repo{Pool: mock}
+	err = r.AbortTransaction(ctx, datasetID, txnID)
+	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -232,8 +312,10 @@ func TestStartTransactionPropagatesInsertError(t *testing.T) {
 	require.NoError(t, err)
 	defer mock.Close()
 	branchID := uuid.New()
+	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT EXISTS").WithArgs(branchID).WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery("INSERT INTO dataset_transactions").WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), branchID, "master", models.TransactionTypeAppend, "", []byte(`{}`), pgxmock.AnyArg()).WillReturnError(errors.New("insert failed"))
+	mock.ExpectRollback()
 
 	r := &repo.Repo{Pool: mock}
 	_, err = r.StartTransaction(ctx, uuid.New(), branchID, "master", models.TransactionTypeAppend, "", nil, uuid.New())

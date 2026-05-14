@@ -25,6 +25,13 @@ func TestRouteSmokeMountsPipelineBuilderRoutes(t *testing.T) {
 		{http.MethodPost, "/api/v1/pipelines/geospatial/gpx/parse"},
 		{http.MethodGet, "/api/v1/pipelines/{id}/nodes/{node_id}/preview"},
 		{http.MethodPost, "/api/v1/pipelines/{id}/runs"},
+		{http.MethodGet, "/api/v1/data-integration/v1/schedules"},
+		{http.MethodPost, "/api/v1/data-integration/v1/schedules"},
+		{http.MethodPost, "/api/v1/data-integration/v1/schedules/_scheduler/run-due"},
+		{http.MethodPost, "/api/v1/data-integration/v1/schedules/_events"},
+		{http.MethodPatch, "/api/v1/data-integration/v1/schedules/{rid}"},
+		{http.MethodPost, "/api/v1/data-integration/v1/schedules/{rid}:pause"},
+		{http.MethodPost, "/api/v1/data-integration/v1/schedules/{rid}:resume"},
 	})
 }
 

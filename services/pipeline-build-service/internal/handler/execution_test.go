@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/domain/executor"
+	livellogs "github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/logs"
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/models"
 	runtimepkg "github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/runtime"
 )
@@ -98,6 +99,39 @@ func TestExecutePipelineMultiOutputPartialCommitFailure(t *testing.T) {
 	require.Equal(t, string(models.BuildFailed), payload.State)
 	require.Equal(t, []string{"out.one", "out.two"}, committer.datasets)
 	require.Equal(t, []string{"out.one", "out.two"}, tx.datasets)
+}
+
+func TestExecutePipelineEmitsPersistedAndLiveAuditLogs(t *testing.T) {
+	buildID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	jobID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(buildID.String()+":log-node"))
+	jobRID := "ri.foundry.main.job." + jobID.String()
+	mem := livellogs.NewMemoryService()
+	restoreLogs := SetJobLogService(&livellogs.Service{Store: mem, Subscriber: mem})
+	defer restoreLogs()
+	live, cancelLive, err := mem.Subscribe(context.Background(), jobRID)
+	require.NoError(t, err)
+	defer cancelLive()
+	restore := SetExecutionPorts(ExecutionPorts{NodeRunner: &recordingNodeRunner{}, Committer: &recordingCommitter{}, Transactions: &recordingTransactions{}})
+	defer restore()
+
+	rr := httptest.NewRecorder()
+	ExecutePipeline(rr, httptest.NewRequest(http.MethodPost, "/api/v1/execute", bytes.NewReader([]byte(`{
+		"build_id":"11111111-1111-1111-1111-111111111111",
+		"nodes":[{"id":"log-node","outputs":[{"DatasetRID":"out.logs","TransactionRID":"txn.logs"}]}]
+	}`))))
+	require.Equal(t, http.StatusOK, rr.Result().StatusCode)
+	select {
+	case entry := <-live:
+		require.Contains(t, entry.Message, "job state changed")
+	case <-time.After(time.Second):
+		t.Fatal("expected live job log entry")
+	}
+
+	logs, err := mem.History(context.Background(), jobRID, livellogs.Query{})
+	require.NoError(t, err)
+	require.NotEmpty(t, logs)
+	require.Contains(t, logs[len(logs)-1].Message, "job state changed")
+	require.Equal(t, livellogs.LogInfo, logs[0].Level)
 }
 
 func TestExecutePipelinePythonSidecarContractSuccess(t *testing.T) {
@@ -297,6 +331,21 @@ func TestOutputTransactionsForVirtualTableOutputKeepExternalMetadata(t *testing.
 	require.False(t, canCommitDatasetOutput(outputs[0].DatasetRID))
 }
 
+func TestOutputTransactionsSkipLogicalViewOutputs(t *testing.T) {
+	pipelineID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	runID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	node := models.PipelineNode{
+		ID:            "logical_view",
+		Label:         "Union view",
+		TransformType: "output",
+		Config:        json.RawMessage(`{"_output":{"kind":"logical_view","dataset_rid":"ri.foundry.main.view.global_sales"}}`),
+	}
+
+	outputs, rid := outputTransactionsForPipelineNode(pipelineID, runID, node, []models.PipelineNode{node})
+	require.Empty(t, outputs)
+	require.Empty(t, rid)
+}
+
 func TestTriggerPipelineRunDistributedPipelineUsesDistributedPort(t *testing.T) {
 	pipelineID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	outputID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
@@ -382,6 +431,75 @@ func TestTriggerPipelineRunCreatesAndExecutesRun(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&run))
 	require.Equal(t, pipelineID, run.PipelineID)
 	require.Equal(t, "succeeded", run.Status)
+}
+
+func TestApplyPipelineStalenessMarksMatchingPreviousRunIgnored(t *testing.T) {
+	pipelineID := uuid.New()
+	currentRunID := uuid.New()
+	previousRunID := uuid.New()
+	plan := executor.Plan{BuildID: currentRunID, Nodes: []executor.Node{
+		{
+			ID:      "extract",
+			Outputs: []executor.OutputTransaction{{DatasetRID: "out.extract", TransactionRID: "txn.extract"}},
+			Metadata: map[string]any{
+				"logic_kind":        "transform",
+				"transform_type":    "dataset_input",
+				"logic_payload":     json.RawMessage(`{"dataset_rid":"in.orders"}`),
+				"input_dataset_ids": []string{"in.orders"},
+				"output_dataset_id": "out.extract",
+			},
+		},
+		{
+			ID:        "load",
+			DependsOn: []string{"extract"},
+			Outputs:   []executor.OutputTransaction{{DatasetRID: "out.load", TransactionRID: "txn.load"}},
+			Metadata: map[string]any{
+				"logic_kind":        "transform",
+				"transform_type":    "output_dataset",
+				"logic_payload":     json.RawMessage(`{"write_mode":"SNAPSHOT"}`),
+				"input_dataset_ids": []string{"out.extract"},
+				"output_dataset_id": "out.load",
+			},
+		},
+	}}
+	signatures := pipelineStalenessSignatures(plan.Nodes)
+	rawResults, err := json.Marshal([]models.PipelineNodeResult{
+		{NodeID: "extract", Status: "succeeded", Output: map[string]any{"staleness_signature": signatures["extract"]}},
+		{NodeID: "load", Status: "succeeded", Output: map[string]any{"staleness_signature": signatures["load"]}},
+	})
+	require.NoError(t, err)
+	history := pipelineRunHistoryStub{runs: []models.PipelineRun{{
+		ID:          previousRunID,
+		PipelineID:  pipelineID,
+		Status:      "succeeded",
+		NodeResults: rawResults,
+		StartedAt:   time.Now().Add(-time.Minute),
+	}}}
+
+	applyPipelineStaleness(context.Background(), pipelineID, currentRunID, &plan, true, history)
+	require.True(t, plan.Nodes[0].StaleSkipped)
+	require.True(t, plan.Nodes[1].StaleSkipped)
+	require.Equal(t, signatures["extract"], plan.Nodes[0].Metadata["staleness_signature"])
+
+	outcome := executor.Outcome{
+		FinalState: models.BuildCompleted,
+		Ignored:    2,
+		Nodes: map[string]executor.NodeState{
+			"extract": executor.NodeCompleted,
+			"load":    executor.NodeCompleted,
+		},
+		Attempts: map[string]int{},
+		Results:  map[string]executor.NodeResult{},
+	}
+	status, errMsg := pipelineRunStatus(outcome)
+	require.Equal(t, "ignored", status)
+	require.Nil(t, errMsg)
+
+	results := pipelineRunNodeResults(plan, outcome, nil)
+	require.Len(t, results, 2)
+	require.Equal(t, "ignored", results[1].Status)
+	require.Equal(t, "fresh", results[1].Output["ignored_reason"])
+	require.Equal(t, "unchanged", results[1].OutputResources[0].Status)
 }
 
 type recordingNodeRunner struct {
@@ -537,6 +655,14 @@ type recordingPipelineRuns struct {
 	markedRunning  int
 	finishedStatus string
 	nodeResults    json.RawMessage
+}
+
+type pipelineRunHistoryStub struct {
+	runs []models.PipelineRun
+}
+
+func (s pipelineRunHistoryStub) ListPipelineRuns(context.Context, uuid.UUID, int64, int64) ([]models.PipelineRun, error) {
+	return s.runs, nil
 }
 
 func newRecordingPipelineRuns(pipelineID uuid.UUID) *recordingPipelineRuns {

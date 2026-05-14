@@ -14,6 +14,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	authmw "github.com/openfoundry/openfoundry-go/libs/auth-middleware"
+	"github.com/openfoundry/openfoundry-go/libs/capabilities"
 	"github.com/openfoundry/openfoundry-go/libs/core-models/health"
 	"github.com/openfoundry/openfoundry-go/libs/observability"
 	"github.com/openfoundry/openfoundry-go/services/tenancy-organizations-service/internal/config"
@@ -22,7 +23,21 @@ import (
 )
 
 // New builds the http.Server for the foundation slice + workspace surface.
-func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, ph *handlers.ProjectsHandlers, ws *workspace.Handlers, m *observability.Metrics) *http.Server {
+//
+// SG.2 (2026-05-14) added administrators / guests / tenancy-spaces /
+// membership routes alongside the foundation organizations + enrollments
+// surface, and threaded the nexus SpacesHandlers + dependency probes
+// through here so main.go has a single wiring call.
+func New(
+	cfg *config.Config,
+	jwt *authmw.JWTConfig,
+	h *handlers.Handlers,
+	ph *handlers.ProjectsHandlers,
+	sh *handlers.SpacesHandlers,
+	ws *workspace.Handlers,
+	m *observability.Metrics,
+	probes ...capabilities.DependencyProbe,
+) *http.Server {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, chimw.Compress(5))
 	r.Use(chimw.Timeout(30 * time.Second))
@@ -32,6 +47,12 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, ph *ha
 		_ = json.NewEncoder(w).Encode(health.OK(cfg.Service.Name, cfg.Service.Version))
 	})
 	r.Method(http.MethodGet, "/metrics", m.Handler())
+
+	caps := capabilities.New(cfg.Service.Name, cfg.Service.Version)
+	for _, p := range probes {
+		caps.RegisterDependency(p)
+	}
+	caps.Mount(r)
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Use(authmw.Middleware(jwt))
@@ -46,6 +67,23 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, ph *ha
 		api.Post("/enrollments", h.CreateEnrollment)
 		api.Delete("/enrollments/{id}", h.DeleteEnrollment)
 
+		// SG.2: administrators / guests / spaces per organization.
+		api.Get("/organizations/{id}/admins", h.ListOrganizationAdmins)
+		api.Post("/organizations/{id}/admins", h.CreateOrganizationAdmin)
+		api.Delete("/organizations/{id}/admins/{user_id}", h.DeleteOrganizationAdmin)
+
+		api.Get("/organizations/{id}/guests", h.ListOrganizationGuests)
+		api.Post("/organizations/{id}/guests", h.CreateOrganizationGuest)
+		api.Delete("/organizations/{id}/guests/{user_id}", h.DeleteOrganizationGuest)
+
+		api.Get("/organizations/{id}/spaces", h.ListTenancySpaces)
+		api.Post("/organizations/{id}/spaces", h.CreateTenancySpace)
+		api.Get("/tenancy-spaces/{id}", h.GetTenancySpace)
+		api.Patch("/tenancy-spaces/{id}", h.UpdateTenancySpace)
+		api.Delete("/tenancy-spaces/{id}", h.DeleteTenancySpace)
+
+		api.Get("/organizations/{id}/membership", h.CheckOrganizationMembership)
+
 		api.Get("/projects", ph.ListProjects)
 		api.Post("/projects", ph.CreateProject)
 		api.Get("/projects/{id}", ph.GetProject)
@@ -59,6 +97,15 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, h *handlers.Handlers, ph *ha
 		api.Get("/projects/{id}/resources", ph.ListProjectResources)
 		api.Post("/projects/{id}/resources", ph.BindProjectResource)
 		api.Delete("/projects/{id}/resources/{kind}/{resource_id}", ph.UnbindProjectResource)
+
+		// Nexus federation peer spaces — distinct from the SG.2
+		// tenancy_spaces above. Kept under /nexus to avoid collision
+		// with the Foundry-style /organizations/{id}/spaces.
+		api.Route("/nexus", func(nr chi.Router) {
+			nr.Get("/spaces", sh.ListSpaces)
+			nr.Post("/spaces", sh.CreateSpace)
+			nr.Patch("/spaces/{id}", sh.UpdateSpace)
+		})
 
 		api.Route("/workspace", func(wr chi.Router) {
 			wr.Get("/favorites", ws.ListFavorites)

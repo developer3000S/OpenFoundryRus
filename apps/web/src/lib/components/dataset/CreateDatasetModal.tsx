@@ -4,6 +4,7 @@ import { createDataset, type Dataset } from '@/lib/api/datasets';
 import { Glyph } from '@/lib/components/ui/Glyph';
 
 const DATASET_FORMATS = ['parquet', 'csv', 'json', 'avro', 'text'] as const;
+const VISIBILITIES = ['private', 'shared', 'organization', 'public'] as const;
 
 interface CreateDatasetModalProps {
   open: boolean;
@@ -17,6 +18,9 @@ export function CreateDatasetModal({ open, initialTag = '', onClose, onCreated }
   const [description, setDescription] = useState('');
   const [format, setFormat] = useState<(typeof DATASET_FORMATS)[number]>('parquet');
   const [tags, setTags] = useState('');
+  const [folderPath, setFolderPath] = useState('/datasets');
+  const [projectId, setProjectId] = useState('default');
+  const [visibility, setVisibility] = useState<(typeof VISIBILITIES)[number]>('private');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -26,6 +30,9 @@ export function CreateDatasetModal({ open, initialTag = '', onClose, onCreated }
     setDescription('');
     setFormat('parquet');
     setTags(initialTag);
+    setFolderPath('/datasets');
+    setProjectId('default');
+    setVisibility('private');
     setError('');
   }, [open, initialTag]);
 
@@ -55,6 +62,9 @@ export function CreateDatasetModal({ open, initialTag = '', onClose, onCreated }
         description: description.trim() || undefined,
         format,
         tags: parseTags(tags),
+        folder_path: folderPath.trim() || '/datasets',
+        project_id: projectId.trim() || 'default',
+        resource_visibility: visibility,
       });
       onCreated(dataset);
     } catch (cause) {
@@ -169,6 +179,43 @@ export function CreateDatasetModal({ open, initialTag = '', onClose, onCreated }
               />
             </label>
           </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 140px)', gap: 10 }}>
+            <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>
+              <span style={{ fontWeight: 600 }}>Folder</span>
+              <input
+                value={folderPath}
+                onChange={(event) => setFolderPath(event.target.value)}
+                className="of-input"
+                placeholder="/datasets"
+              />
+            </label>
+
+            <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>
+              <span style={{ fontWeight: 600 }}>Visibility</span>
+              <select
+                value={visibility}
+                onChange={(event) => setVisibility(event.target.value as (typeof VISIBILITIES)[number])}
+                className="of-input"
+              >
+                {VISIBILITIES.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>
+            <span style={{ fontWeight: 600 }}>Project</span>
+            <input
+              value={projectId}
+              onChange={(event) => setProjectId(event.target.value)}
+              className="of-input"
+              placeholder="default"
+            />
+          </label>
         </div>
 
         <footer

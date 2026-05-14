@@ -149,6 +149,20 @@ func TestComputeViewNoSnapshotReplaysFromOldest(t *testing.T) {
 	}
 }
 
+func TestComputeViewIgnoresRemoveOpsOutsideDeleteTransactions(t *testing.T) {
+	txns := []TransactionEntry{
+		entry(10, models.TransactionTypeSnapshot, []FileOp{addOp("A", "phys/A"), removeOp("ghost")}),
+		entry(20, models.TransactionTypeUpdate, []FileOp{removeOp("A"), addOp("B", "phys/B")}),
+	}
+	view := ComputeView(txns, nil)
+	if got := logicalPaths(view); !equalSlice(got, []string{"A", "B"}) {
+		t.Fatalf("logical paths = %v, want [A B]", got)
+	}
+	if view[0].PhysicalPath != "phys/A" {
+		t.Fatalf("A physical = %q, want phys/A", view[0].PhysicalPath)
+	}
+}
+
 // physical_path is decoupled from logical_path: an UPDATE rewrites the
 // backing file but the dataset-relative key is unchanged.
 func TestComputeViewPhysicalPathDecoupledFromLogical(t *testing.T) {

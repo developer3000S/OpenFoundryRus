@@ -120,6 +120,31 @@ func TestExecuteRetriesUntilSuccess(t *testing.T) {
 	require.Equal(t, 2, outcome.Attempts["flaky"])
 }
 
+func TestExecuteIgnoresFreshNodeWithoutRunningOrCommitting(t *testing.T) {
+	plan := Plan{BuildBranch: "master", Nodes: []Node{{
+		ID:           "fresh",
+		StaleSkipped: true,
+		Outputs:      []OutputTransaction{{DatasetRID: "out.fresh", TransactionRID: "txn.fresh"}},
+		Metadata:     map[string]any{"staleness_signature": "sig-fresh"},
+	}}}
+	runner := &scriptedRunner{}
+	tx := &recordingTransactions{}
+	committer := &recordingCommitter{}
+	audit := &recordingAudit{}
+
+	outcome, err := Execute(context.Background(), plan, runner, tx, committer, audit)
+	require.NoError(t, err)
+	require.Equal(t, models.BuildCompleted, outcome.FinalState)
+	require.Equal(t, 0, outcome.Completed)
+	require.Equal(t, 1, outcome.Ignored)
+	require.Empty(t, runner.started)
+	require.Empty(t, committer.committedDatasets())
+	require.Equal(t, []string{"out.fresh"}, tx.abortedDatasets())
+	require.Equal(t, "ignored because fresh", outcome.Reasons["fresh"])
+	require.Equal(t, "sig-fresh", outcome.Results["fresh"].Metadata["staleness_signature"])
+	require.True(t, audit.containsTransition(NodeWaiting, NodeCompleted, "ignored because fresh"))
+}
+
 func TestExecuteRejectsInvalidGraphCycle(t *testing.T) {
 	_, err := Execute(context.Background(), Plan{Nodes: []Node{
 		node("a", []string{"b"}),
@@ -218,6 +243,17 @@ func (r *recordingAudit) Record(_ context.Context, event AuditEvent) error {
 	defer r.mu.Unlock()
 	r.events = append(r.events, event)
 	return nil
+}
+
+func (r *recordingAudit) containsTransition(from, to NodeState, reason string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, event := range r.events {
+		if event.From == from && event.To == to && event.Reason == reason {
+			return true
+		}
+	}
+	return false
 }
 
 func indexOfString(items []string, needle string) int {

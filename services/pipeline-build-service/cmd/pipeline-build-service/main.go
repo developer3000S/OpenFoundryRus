@@ -123,6 +123,7 @@ func main() {
 		handler.SetBuildQueryRepository(repo)
 		handler.SetPipelineAuthoringRepository(repo)
 		handler.SetSparkSubmissionRepository(repo)
+		handler.SetScheduleRepository(repo)
 		handler.SetJobLogService(&livellogs.Service{Store: repo, Subscriber: livellogs.NewMemoryService()})
 		log.Info("postgres repositories wired", slog.String("database_url", "set"))
 	} else {

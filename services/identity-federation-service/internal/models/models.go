@@ -10,17 +10,27 @@ import (
 	"github.com/google/uuid"
 )
 
-// User mirrors `models::user::User`. Wire format byte-identical.
+// User mirrors `models::user::User`. SG.4 (2026-05-14) extended the
+// shape with Username, Realm, LastLoginAt, LastLoginIP, DeletedAt,
+// Preregistered and InvitedBy. Existing rows backfill Username from
+// the email localpart and Realm from AuthSource via migration 0011.
 type User struct {
 	ID             uuid.UUID       `json:"id"`
 	Email          string          `json:"email"`
+	Username       *string         `json:"username,omitempty"`
 	Name           string          `json:"name"`
 	PasswordHash   string          `json:"-"` // never serialised
 	IsActive       bool            `json:"is_active"`
 	AuthSource     string          `json:"auth_source"`
+	Realm          string          `json:"realm"`
 	MFAEnforced    bool            `json:"mfa_enforced"`
 	OrganizationID *uuid.UUID      `json:"organization_id,omitempty"`
 	Attributes     json.RawMessage `json:"attributes,omitempty"`
+	LastLoginAt    *time.Time      `json:"last_login_at,omitempty"`
+	LastLoginIP    *string         `json:"last_login_ip,omitempty"`
+	Preregistered  bool            `json:"preregistered"`
+	InvitedBy      *uuid.UUID      `json:"invited_by,omitempty"`
+	DeletedAt      *time.Time      `json:"deleted_at,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at"`
 }

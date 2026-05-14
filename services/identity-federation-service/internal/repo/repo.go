@@ -58,11 +58,19 @@ func (r *Repo) CountUsers(ctx context.Context) (int64, error) {
 	return n, err
 }
 
+// userSelectColumns is the canonical column projection used by every
+// users-table SELECT in this package. SG.4 (2026-05-14) extended the
+// projection with username, realm, last_login_at, last_login_ip,
+// deleted_at, preregistered and invited_by.
+const userSelectColumns = `id, email, username, name, password_hash,
+	is_active, auth_source, realm, mfa_enforced, organization_id, attributes,
+	last_login_at, last_login_ip, preregistered, invited_by, deleted_at,
+	created_at, updated_at`
+
 // FindUserByEmail returns the user row or nil when absent.
 func (r *Repo) FindUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	row := r.Pool.QueryRow(ctx,
-		`SELECT id, email, name, password_hash, is_active, auth_source,
-		        mfa_enforced, organization_id, attributes, created_at, updated_at
+		`SELECT `+userSelectColumns+`
 		 FROM users WHERE email = $1`,
 		email,
 	)
@@ -72,18 +80,32 @@ func (r *Repo) FindUserByEmail(ctx context.Context, email string) (*models.User,
 // FindUserByID returns the user row or nil when absent.
 func (r *Repo) FindUserByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
 	row := r.Pool.QueryRow(ctx,
-		`SELECT id, email, name, password_hash, is_active, auth_source,
-		        mfa_enforced, organization_id, attributes, created_at, updated_at
+		`SELECT `+userSelectColumns+`
 		 FROM users WHERE id = $1`,
 		id,
 	)
 	return scanUser(row)
 }
 
+// FindUserByUsername returns the user row keyed by case-insensitive
+// username, or nil when absent.
+func (r *Repo) FindUserByUsername(ctx context.Context, username string) (*models.User, error) {
+	row := r.Pool.QueryRow(ctx,
+		`SELECT `+userSelectColumns+`
+		 FROM users WHERE LOWER(username) = LOWER($1)`,
+		username,
+	)
+	return scanUser(row)
+}
+
 func scanUser(row pgx.Row) (*models.User, error) {
 	u := &models.User{}
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.IsActive, &u.AuthSource,
-		&u.MFAEnforced, &u.OrganizationID, &u.Attributes, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(
+		&u.ID, &u.Email, &u.Username, &u.Name, &u.PasswordHash,
+		&u.IsActive, &u.AuthSource, &u.Realm, &u.MFAEnforced, &u.OrganizationID, &u.Attributes,
+		&u.LastLoginAt, &u.LastLoginIP, &u.Preregistered, &u.InvitedBy, &u.DeletedAt,
+		&u.CreatedAt, &u.UpdatedAt,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

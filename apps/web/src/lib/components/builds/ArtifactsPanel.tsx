@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import {
   getJobOutputsV1,
@@ -25,6 +26,15 @@ interface ArtifactRow {
 
 function shortRid(value: string | null | undefined, chars = 12) {
   return value ? value.slice(0, chars) : '—';
+}
+
+function DatasetRidLink({ rid }: { rid: string | null | undefined }) {
+  if (!rid) return <>—</>;
+  return (
+    <Link to={`/datasets/${encodeURIComponent(rid)}`} className="of-link" style={{ fontFamily: 'var(--font-mono)' }}>
+      {shortRid(rid, 18)}
+    </Link>
+  );
 }
 
 function artifactRows(build: BuildEnvelope, outputsByJob: Record<string, JobOutputsResponse | null>): ArtifactRow[] {
@@ -146,7 +156,7 @@ export function ArtifactsPanel({ build, selectedJobRid, onSelectJob }: Artifacts
                       )}
                     </td>
                     <td><StateBadge kind="job" state={row.job.state} size="sm" /></td>
-                    <td style={{ fontFamily: 'var(--font-mono)' }}>{shortRid(row.output?.output_dataset_rid, 18)}</td>
+                    <td><DatasetRidLink rid={row.output?.output_dataset_rid} /></td>
                     <td style={{ fontFamily: 'var(--font-mono)' }}>{shortRid(row.transactionRid, 24)}</td>
                     <td>
                       {row.output ? (

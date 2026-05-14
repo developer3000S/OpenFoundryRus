@@ -279,6 +279,18 @@ export const router = createBrowserRouter([
         lazy: async () => ({ Component: (await import('./routes/control-panel/DataHealthPage')).DataHealthPage }),
       },
       {
+        path: 'control-panel/tenancy',
+        lazy: async () => ({ Component: (await import('./routes/control-panel/TenancyPage')).TenancyPage }),
+      },
+      {
+        path: 'control-panel/identity-providers',
+        lazy: async () => ({ Component: (await import('./routes/control-panel/IdentityProvidersPage')).IdentityProvidersPage }),
+      },
+      {
+        path: 'control-panel/users',
+        lazy: async () => ({ Component: (await import('./routes/control-panel/UsersPage')).UsersPage }),
+      },
+      {
         path: 'functions',
         lazy: async () => ({ Component: (await import('./routes/functions/FunctionsPage')).FunctionsPage }),
       },
@@ -297,6 +309,10 @@ export const router = createBrowserRouter([
       {
         path: 'pipelines/:id/runs/:runId',
         lazy: async () => ({ Component: (await import('./routes/pipelines/PipelineEditPage')).PipelineEditPage }),
+      },
+      {
+        path: 'schedules/new',
+        lazy: async () => ({ Component: (await import('./routes/schedules/NewSchedulePage')).NewSchedulePage }),
       },
       {
         path: 'schedules/:rid',

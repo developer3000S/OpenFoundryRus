@@ -139,6 +139,25 @@ export function ControlPanelPage() {
         <p className="of-text-muted" style={{ marginTop: 4 }}>
           Platform configuration, upgrade readiness, SSO providers.
         </p>
+        <p className="of-text-muted" style={{ marginTop: 4, fontSize: 12 }}>
+          Sensitive admin surface — review the{' '}
+          {docsUrl ? (
+            <a href={`${docsUrl.replace(/\/$/, '')}/security-governance/security-overview`} target="_blank" rel="noreferrer">
+              security overview
+            </a>
+          ) : (
+            <span>security overview</span>
+          )}
+          {' '}and the{' '}
+          {docsUrl ? (
+            <a href={`${docsUrl.replace(/\/$/, '')}/security-governance/shared-responsibility-model`} target="_blank" rel="noreferrer">
+              shared responsibility model
+            </a>
+          ) : (
+            <span>shared responsibility model</span>
+          )}
+          {' '}before changing identity, role, marking, scoped-session, application-access, or egress configuration. Anything modeled on a Foundry concept follows the public-docs parity policy.
+        </p>
       </header>
 
       {error && (
@@ -152,6 +171,9 @@ export function ControlPanelPage() {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Link to="/control-panel/streaming-profiles" className="of-button">Streaming profiles →</Link>
         <Link to="/control-panel/data-health" className="of-button">Data health →</Link>
+        <Link to="/control-panel/tenancy" className="of-button">Organizations &amp; spaces →</Link>
+        <Link to="/control-panel/identity-providers" className="of-button">Identity providers →</Link>
+        <Link to="/control-panel/users" className="of-button">Users →</Link>
       </div>
 
       {settings && (

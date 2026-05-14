@@ -21,7 +21,7 @@ func (h *Handlers) CommitDatasetOutput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canWriteDataset(claims) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden", "required_scope": "dataset.write", "dataset_rid": datasetIDParam(r)})
+		writePermissionDenied(w, datasetWriteScope, datasetIDParam(r))
 		return
 	}
 	var body models.CommitDatasetOutputRequest
@@ -141,7 +141,8 @@ func (h *Handlers) CommitDatasetOutput(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusInternalServerError, "failed to list dataset file index")
 		return
 	}
-	preview, err := h.Repo.PreviewData(r.Context(), dataset.ID, nil, models.PreviewQuery{})
+	previewBranch := branch.Name
+	preview, err := h.Repo.PreviewData(r.Context(), dataset.ID, nil, models.PreviewQuery{Branch: &previewBranch})
 	if err != nil {
 		writeViewError(w, err)
 		return
@@ -222,7 +223,7 @@ func outputCommitFiles(datasetID uuid.UUID, txnID uuid.UUID, body models.CommitD
 		if err != nil {
 			return nil, nil, err
 		}
-		staged = append(staged, models.StageTransactionFile{LogicalPath: logical, PhysicalPath: storagePath, SizeBytes: file.SizeBytes, Operation: op})
+		staged = append(staged, models.StageTransactionFile{LogicalPath: logical, PhysicalPath: storagePath, SizeBytes: file.SizeBytes, MediaType: file.ContentType, Operation: op})
 		indexEntries = append(indexEntries, models.PutDatasetFileIndexEntry{Path: logical, StoragePath: storagePath, EntryType: &entryType, SizeBytes: &file.SizeBytes, ContentType: file.ContentType, Metadata: meta, LastModified: &now})
 	}
 	return staged, indexEntries, nil

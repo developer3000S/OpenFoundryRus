@@ -418,12 +418,12 @@ export OF_BENCH_DATASET="50k objects; 10 type_ids; 5k objects/type"
 benchmarks/ontology/scripts/run-s1-baseline.sh
 ```
 
-El comando anterior ejecuta `k6`, escribe
+The command above runs `k6`, writes
 `benchmarks/results/ontology-mix-k6.json`,
 `benchmarks/results/ontology-mix-summary.json`,
-`benchmarks/results/ontology-mix-metadata.json` y genera
-`benchmarks/results/adr-0012-s1-baseline.md`, que contiene la tabla
-lista para pegar aquí con p50/p95/p99 reales por operación.
+`benchmarks/results/ontology-mix-metadata.json`, and generates
+`benchmarks/results/adr-0012-s1-baseline.md`, which contains the table
+ready to paste here with real p50/p95/p99 values per operation.
 
 Table to replace after the first accepted run:
 
@@ -435,29 +435,29 @@ Table to replace after the first accepted run:
 | A3 action execute | BLOCKED: `EXC-S1-ADR0012-2026-05-03` not approved | BLOCKED: `EXC-S1-ADR0012-2026-05-03` not approved | BLOCKED: `EXC-S1-ADR0012-2026-05-03` not approved | no accepted run |
 | Throughput (mix) | BLOCKED: no 5,000 RPS run | BLOCKED: no dropped-iteration evidence | BLOCKED: no error-rate evidence | no accepted run |
 
-Cada corrida aceptable debe adjuntar, además de los JSON de k6, un
-snapshot pre/post de `nodetool tablestats -F json` generado con
-`benchmarks/ontology/scripts/capture-cassandra-baseline.sh`. Esos
-artefactos son la evidencia primaria; esta sección solo los resume.
+Every acceptable run must attach, in addition to the k6 JSON files, a
+pre/post snapshot of `nodetool tablestats -F json` generated with
+`benchmarks/ontology/scripts/capture-cassandra-baseline.sh`. Those
+artifacts are the primary evidence; this section only summarizes them.
 
 ### A.5 Error budgets
 
-Mantenemos el patrón de la sección 3: **99.5 %** de las requests bajo
-el bound p95 = 0.5 % de presupuesto mensual. Para A4 (throughput
-sostenido) el budget es de tipo binario por run: cualquier run que
-reporte `dropped_iterations > 0.01 %` consume budget igual a la
-duración del run.
+We keep the pattern from section 3: **99.5%** of requests under the
+p95 bound = 0.5% of monthly budget. For A4 (sustained throughput) the
+budget is binary per run: any run that reports
+`dropped_iterations > 0.01%` consumes budget equal to the duration of
+the run.
 
 ### A.6 Conditions to revisit
 
-Además de las tres condiciones generales del ADR original, este
-addendum se reabre si:
+In addition to the three general conditions of the original ADR, this
+addendum is reopened if:
 
-1. La PK de `objects_by_type` cambia (hot-tenant mitigation, S1.8.e),
-   porque `route` y la cardinalidad de partición cambian.
-2. El cache moka del read service se elimina o se reemplaza por un
-   side-cache distribuido — la separación strong / eventual deja de
-   ser observable a través de los hits/misses locales.
-3. El bridge NATS↔Kafka del path de invalidación (S1.5.b) se
-   reemplaza por un path puro Kafka, lo que cambia las métricas que
-   alimentan A1 cache hit ratio.
+1. The PK of `objects_by_type` changes (hot-tenant mitigation, S1.8.e),
+   because `route` and the partition cardinality change.
+2. The moka cache of the read service is removed or replaced by a
+   distributed side-cache — the strong / eventual separation is no
+   longer observable through local hits/misses.
+3. The NATS↔Kafka bridge of the invalidation path (S1.5.b) is replaced
+   by a pure Kafka path, which changes the metrics that feed A1 cache
+   hit ratio.

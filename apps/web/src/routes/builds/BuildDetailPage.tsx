@@ -44,6 +44,15 @@ function shortRid(value: string | null | undefined, chars = 12) {
   return value ? value.slice(0, chars) : '—';
 }
 
+function DatasetRidLink({ rid, chars = 18 }: { rid: string | null | undefined; chars?: number }) {
+  if (!rid) return <>—</>;
+  return (
+    <Link to={`/datasets/${encodeURIComponent(rid)}`} className="of-link" style={{ fontFamily: 'var(--font-mono)' }}>
+      {shortRid(rid, chars)}
+    </Link>
+  );
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
   const date = new Date(value);
@@ -418,7 +427,7 @@ function JobDataPanel({ job }: { job: Job | null }) {
                 <tbody>
                   {outputRows.map((row) => (
                     <tr key={`${row.output_dataset_rid}:${row.transaction_rid}`}>
-                      <td style={{ fontFamily: 'var(--font-mono)' }}>{shortRid(row.output_dataset_rid, 18)}</td>
+                      <td><DatasetRidLink rid={row.output_dataset_rid} /></td>
                       <td style={{ fontFamily: 'var(--font-mono)' }}>{shortRid(row.transaction_rid, 18)}</td>
                       <td>{row.aborted ? 'aborted' : row.committed ? 'committed' : 'open'}</td>
                     </tr>
@@ -447,7 +456,7 @@ function JobDataPanel({ job }: { job: Job | null }) {
                 <tbody>
                   {resolutionRows.map((row) => (
                     <tr key={`${row.dataset_rid}:${row.branch}:${filterLabel(row.filter)}`}>
-                      <td style={{ fontFamily: 'var(--font-mono)' }}>{shortRid(row.dataset_rid, 18)}</td>
+                      <td><DatasetRidLink rid={row.dataset_rid} /></td>
                       <td>{row.branch}</td>
                       <td>{filterLabel(row.filter)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)' }}>

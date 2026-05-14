@@ -175,7 +175,7 @@ func ResolveBuild(ctx context.Context, args ResolveBuildArgs, jobSpecs JobSpecRe
 		}
 		if upstream {
 			reason := "upstream build in progress"
-			return &models.ResolvedBuild{BuildID: buildID, State: models.BuildQueued, JobSpecs: specs, InputViews: inputViews, QueuedReason: &reason, ResolvedAt: started}, nil
+			return &models.ResolvedBuild{BuildID: buildID, State: models.BuildQueued, ForceBuild: args.ForceBuild, JobSpecs: specs, InputViews: inputViews, QueuedReason: &reason, ResolvedAt: started}, nil
 		}
 	}
 
@@ -184,7 +184,7 @@ func ResolveBuild(ctx context.Context, args ResolveBuildArgs, jobSpecs JobSpecRe
 		return nil, err
 	}
 	jobs, stages := BuildFanOutPlan(buildID, specs, opened)
-	return &models.ResolvedBuild{BuildID: buildID, State: models.BuildResolution, JobSpecs: specs, InputViews: inputViews, OpenedTransactions: opened, Jobs: jobs, FanOutStages: stages, ResolvedAt: started}, nil
+	return &models.ResolvedBuild{BuildID: buildID, State: models.BuildResolution, ForceBuild: args.ForceBuild, JobSpecs: specs, InputViews: inputViews, OpenedTransactions: opened, Jobs: jobs, FanOutStages: stages, ResolvedAt: started}, nil
 }
 
 // LoadJobSpecs performs Rust step a, including deterministic RID de-duplication.
@@ -321,10 +321,19 @@ func ValidateInputs(ctx context.Context, buildBranch string, specs []models.JobS
 			if len(schema) == 0 {
 				schema = json.RawMessage(`null`)
 			}
-			resolved = append(resolved, models.ResolvedInputView{DatasetRID: input.DatasetRID, Branch: outcome.Branch, Schema: schema})
+			resolved = append(resolved, models.ResolvedInputView{DatasetRID: input.DatasetRID, Branch: outcome.Branch, HeadTransactionRID: headTransactionForBranch(snapshots, outcome.Branch), Schema: schema})
 		}
 	}
 	return resolved, nil
+}
+
+func headTransactionForBranch(snapshots []models.BranchSnapshot, branch string) *string {
+	for _, snapshot := range snapshots {
+		if snapshot.Name == branch {
+			return snapshot.HeadTransactionRID
+		}
+	}
+	return nil
 }
 
 // AcquireLocks opens one transaction per output and delegates lock persistence.

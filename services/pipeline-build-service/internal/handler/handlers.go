@@ -1172,6 +1172,37 @@ func GetBuildV1(w http.ResponseWriter, r *http.Request) {
 
 func AbortBuildV1(w http.ResponseWriter, r *http.Request) { AbortBuild(w, r) }
 
+func ListBuildJobsV1(w http.ResponseWriter, r *http.Request) {
+	repo, ok := requireBuildQueryRepository(w, "ListBuildJobsV1 requires DATABASE_URL-backed repository wiring")
+	if !ok {
+		return
+	}
+	buildRID := chi.URLParam(r, "rid")
+	items, err := repo.ListJobsForBuildID(r.Context(), buildRID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list_build_jobs_failed", "detail": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items, "build_rid": buildRID, "total": len(items)})
+}
+
+func GetJobV1(w http.ResponseWriter, r *http.Request) {
+	repo, ok := requireBuildQueryRepository(w, "GetJobV1 requires DATABASE_URL-backed repository wiring")
+	if !ok {
+		return
+	}
+	job, err := repo.GetJob(r.Context(), chi.URLParam(r, "rid"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "get_job_failed", "detail": err.Error()})
+		return
+	}
+	if job == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
 func ListDatasetBuildsV1(w http.ResponseWriter, r *http.Request) {
 	v1, ok := requireBuildV1Repository(w, "ListDatasetBuilds requires DATABASE_URL-backed repository wiring")
 	if !ok {
@@ -1193,10 +1224,42 @@ type JobOutputRow struct {
 }
 
 type JobOutputsResponse struct {
-	RID          string         `json:"rid"`
-	State        string         `json:"state"`
-	StaleSkipped bool           `json:"stale_skipped"`
-	Outputs      []JobOutputRow `json:"outputs"`
+	RID                      string         `json:"rid"`
+	State                    string         `json:"state"`
+	StaleSkipped             bool           `json:"stale_skipped"`
+	Outputs                  []JobOutputRow `json:"outputs"`
+	TotalOutputs             int            `json:"total_outputs"`
+	CommittedOutputs         int            `json:"committed_outputs"`
+	AbortedOutputs           int            `json:"aborted_outputs"`
+	AtomicCommitStatus       string         `json:"atomic_commit_status"`
+	AllOutputsUpdateTogether bool           `json:"all_outputs_update_together"`
+}
+
+func (r *JobOutputsResponse) NormalizeAtomicity() {
+	r.TotalOutputs = len(r.Outputs)
+	r.CommittedOutputs = 0
+	r.AbortedOutputs = 0
+	for _, output := range r.Outputs {
+		if output.Committed {
+			r.CommittedOutputs++
+		}
+		if output.Aborted {
+			r.AbortedOutputs++
+		}
+	}
+	switch {
+	case r.TotalOutputs == 0:
+		r.AtomicCommitStatus = "NO_OUTPUTS"
+	case r.CommittedOutputs == r.TotalOutputs:
+		r.AtomicCommitStatus = "COMMITTED"
+	case r.AbortedOutputs == r.TotalOutputs:
+		r.AtomicCommitStatus = "ABORTED"
+	case r.CommittedOutputs == 0 && r.AbortedOutputs == 0:
+		r.AtomicCommitStatus = "OPEN"
+	default:
+		r.AtomicCommitStatus = "PARTIAL"
+	}
+	r.AllOutputsUpdateTogether = r.AtomicCommitStatus != "PARTIAL"
 }
 
 func GetJobOutputsV1(w http.ResponseWriter, r *http.Request) {
@@ -1243,9 +1306,13 @@ type CreateJobSpecRequest struct {
 }
 
 type PublishedJobSpec struct {
-	RID         string `json:"rid"`
-	LogicKind   string `json:"logic_kind"`
-	ContentHash string `json:"content_hash"`
+	RID               string   `json:"rid"`
+	PipelineRID       string   `json:"pipeline_rid"`
+	BranchName        string   `json:"branch_name"`
+	LogicKind         string   `json:"logic_kind"`
+	OutputDatasetRIDs []string `json:"output_dataset_rids"`
+	ContentHash       string   `json:"content_hash"`
+	Immutable         bool     `json:"immutable"`
 }
 
 func CreateJobSpecV1(w http.ResponseWriter, r *http.Request) {

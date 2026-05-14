@@ -31,6 +31,9 @@ type DatasetServiceOutputCommitter struct {
 }
 
 func (c DatasetServiceOutputCommitter) Commit(ctx context.Context, tx executor.OutputTransaction, result executor.NodeResult) error {
+	if isLogicalViewOutputKind(tx.OutputKind) {
+		return fmt.Errorf("logical_view_output_forbidden: views can be transform inputs but not outputs")
+	}
 	if !canCommitDatasetOutput(tx.DatasetRID) {
 		return commitOutputMetadata(ctx, c.Metadata, tx, result)
 	}
@@ -99,6 +102,15 @@ func canCommitDatasetOutput(datasetRID string) bool {
 	}
 	_, err := uuid.Parse(trimmed)
 	return err == nil
+}
+
+func isLogicalViewOutputKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "view", "dataset_view", "logical_view", "logical":
+		return true
+	default:
+		return false
+	}
 }
 
 func routeDatasetRID(datasetRID string) string {

@@ -9,6 +9,7 @@ package models
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -85,13 +86,16 @@ type Build struct {
 	PipelineRID       string     `json:"pipeline_rid"`
 	BuildBranch       string     `json:"build_branch"`
 	JobSpecFallback   []string   `json:"job_spec_fallback"`
+	TargetDatasetRIDs []string   `json:"target_dataset_rids,omitempty"`
 	State             string     `json:"state"`
+	ExecutionStatus   string     `json:"execution_status,omitempty"`
 	TriggerKind       string     `json:"trigger_kind"`
 	ForceBuild        bool       `json:"force_build"`
 	AbortPolicy       string     `json:"abort_policy"`
 	QueuedAt          *time.Time `json:"queued_at,omitempty"`
 	StartedAt         *time.Time `json:"started_at,omitempty"`
 	FinishedAt        *time.Time `json:"finished_at,omitempty"`
+	DurationMillis    *int64     `json:"duration_ms,omitempty"`
 	ErrorMessage      *string    `json:"error_message,omitempty"`
 	RequestedBy       string     `json:"requested_by"`
 	CreatedAt         time.Time  `json:"created_at"`
@@ -132,7 +136,80 @@ type ListBuildsQuery struct {
 // BuildEnvelope wraps the build with its jobs (mirrors the Rust shape).
 type BuildEnvelope struct {
 	Build
-	Jobs []Job `json:"jobs"`
+	Jobs         []Job          `json:"jobs"`
+	JobDAG       []JobDAGEdge   `json:"job_dag,omitempty"`
+	StatusCounts map[string]int `json:"status_counts,omitempty"`
+}
+
+type JobDAGEdge struct {
+	JobSpecRID          string    `json:"job_spec_rid"`
+	DependsOnJobSpecRID string    `json:"depends_on_job_spec_rid"`
+	JobID               uuid.UUID `json:"job_id,omitempty"`
+	DependsOnJobID      uuid.UUID `json:"depends_on_job_id,omitempty"`
+}
+
+// NormalizeBuildExecutionStatus maps the persisted BuildState vocabulary to
+// the queue/history status terms exposed to build and schedule UIs.
+func NormalizeBuildExecutionStatus(state string, jobs []Job) string {
+	switch BuildState(state) {
+	case BuildResolution, BuildQueued:
+		return "queued"
+	case BuildRunning:
+		return "running"
+	case BuildFailed:
+		return "failed"
+	case BuildAborting, BuildAborted:
+		return "cancelled"
+	case BuildCompleted:
+		if len(jobs) == 0 {
+			return "succeeded"
+		}
+		counts := map[string]int{}
+		for _, job := range jobs {
+			status := job.ExecutionStatus
+			if status == "" {
+				status = NormalizeJobExecutionStatus(job.State, job.StaleSkipped, job.FailureReason)
+			}
+			counts[status]++
+		}
+		if counts["succeeded"] > 0 {
+			return "succeeded"
+		}
+		if counts["ignored"] == len(jobs) {
+			return "ignored"
+		}
+		if counts["skipped"] == len(jobs) {
+			return "skipped"
+		}
+		return "succeeded"
+	default:
+		switch strings.ToLower(strings.TrimSpace(state)) {
+		case "queued", "pending":
+			return "queued"
+		case "running":
+			return "running"
+		case "failed":
+			return "failed"
+		case "cancelled", "canceled", "aborted":
+			return "cancelled"
+		case "ignored":
+			return "ignored"
+		case "skipped":
+			return "skipped"
+		case "succeeded", "success", "completed":
+			return "succeeded"
+		default:
+			return ""
+		}
+	}
+}
+
+func DurationMillisBetween(start, end *time.Time) *int64 {
+	if start == nil || end == nil || end.Before(*start) {
+		return nil
+	}
+	v := end.Sub(*start).Milliseconds()
+	return &v
 }
 
 // EncodeStringSlice is the SQL-friendly serialisation for

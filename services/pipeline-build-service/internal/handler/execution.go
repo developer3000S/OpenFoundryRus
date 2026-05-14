@@ -21,6 +21,7 @@ import (
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/domain/executor"
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/domain/runners"
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/iceberg"
+	livellogs "github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/logs"
 	"github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/models"
 	runtimepkg "github.com/openfoundry/openfoundry-go/services/pipeline-build-service/internal/runtime"
 )
@@ -203,6 +204,7 @@ type executePipelineResponse struct {
 	BuildID   uuid.UUID                     `json:"build_id"`
 	State     string                        `json:"state"`
 	Completed int                           `json:"completed"`
+	Ignored   int                           `json:"ignored"`
 	Failed    int                           `json:"failed"`
 	Aborted   int                           `json:"aborted"`
 	Attempts  map[string]int                `json:"attempts"`
@@ -235,12 +237,13 @@ func ExecutePipeline(w http.ResponseWriter, r *http.Request) {
 	execCtx, cancel := context.WithCancel(r.Context())
 	unregister := registerExecutionCancel(plan.BuildID, cancel)
 	defer unregister()
-	outcome, err := executor.Execute(execCtx, plan, runner, ports.Transactions, ports.Committer, ports.Audit)
+	audit := newCapturingAuditSink(ports.Audit)
+	outcome, err := executor.Execute(execCtx, plan, runner, ports.Transactions, ports.Committer, audit)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, executePipelineResponse{BuildID: plan.BuildID, State: string(outcome.FinalState), Completed: outcome.Completed, Failed: outcome.Failed, Aborted: outcome.Aborted, Attempts: outcome.Attempts, Nodes: outcome.Nodes, Reasons: outcome.Reasons})
+	writeJSON(w, http.StatusOK, executePipelineResponse{BuildID: plan.BuildID, State: string(outcome.FinalState), Completed: outcome.Completed, Ignored: outcome.Ignored, Failed: outcome.Failed, Aborted: outcome.Aborted, Attempts: outcome.Attempts, Nodes: outcome.Nodes, Reasons: outcome.Reasons})
 }
 
 // TriggerPipelineRun mirrors Rust trigger_run for the supported Go path: open a
@@ -297,7 +300,7 @@ func TriggerPipelineRun(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	plan, err := planFromPipeline(pipeline, run.ID, body, ports)
+	plan, err := planFromPipeline(r.Context(), pipeline, run.ID, body, ports)
 	if err != nil {
 		finishRunBestEffort(r.Context(), ports.Runs, run.ID, "failed", nil, err.Error())
 		writeJSON(w, http.StatusBadRequest, err.Error())
@@ -404,7 +407,7 @@ func executorNodeFromRequest(buildID uuid.UUID, node executeNodeRequest) executo
 	return executor.Node{ID: node.ID, JobID: jobID, DependsOn: node.DependsOn, Outputs: node.Outputs, Metadata: metadata, ResolvedInputViews: node.ResolvedInputViews}
 }
 
-func planFromPipeline(pipeline *models.Pipeline, runID uuid.UUID, req models.TriggerPipelineRequest, ports ExecutionPorts) (executor.Plan, error) {
+func planFromPipeline(ctx context.Context, pipeline *models.Pipeline, runID uuid.UUID, req models.TriggerPipelineRequest, ports ExecutionPorts) (executor.Plan, error) {
 	nodes, err := pipeline.RuntimeNodes()
 	if err != nil {
 		return executor.Plan{}, err
@@ -454,7 +457,155 @@ func planFromPipeline(pipeline *models.Pipeline, runID uuid.UUID, req models.Tri
 		}
 		plan.Nodes = append(plan.Nodes, executor.Node{ID: node.ID, JobID: uuid.NewSHA1(uuid.NameSpaceOID, []byte(runID.String()+":"+node.ID)), DependsOn: deps, Outputs: outputs, Metadata: metadata})
 	}
-	return normalizePlan(plan, ports), nil
+	plan = normalizePlan(plan, ports)
+	applyPipelineStaleness(ctx, pipeline.ID, runID, &plan, req.SkipUnchanged, ports.Runs)
+	return plan, nil
+}
+
+type pipelineRunHistoryLister interface {
+	ListPipelineRuns(ctx context.Context, pipelineID uuid.UUID, page, perPage int64) ([]models.PipelineRun, error)
+}
+
+func applyPipelineStaleness(ctx context.Context, pipelineID, currentRunID uuid.UUID, plan *executor.Plan, skipUnchanged bool, runs any) {
+	if plan == nil || len(plan.Nodes) == 0 {
+		return
+	}
+	current := pipelineStalenessSignatures(plan.Nodes)
+	for i := range plan.Nodes {
+		if plan.Nodes[i].Metadata == nil {
+			plan.Nodes[i].Metadata = map[string]any{}
+		}
+		if sig := current[plan.Nodes[i].ID]; sig != "" {
+			plan.Nodes[i].Metadata["staleness_signature"] = sig
+		}
+	}
+	if !skipUnchanged {
+		return
+	}
+	history, ok := runs.(pipelineRunHistoryLister)
+	if !ok || history == nil {
+		return
+	}
+	previous := previousPipelineRunSignatures(ctx, history, pipelineID, currentRunID)
+	if len(previous) == 0 {
+		return
+	}
+	fresh := map[string]bool{}
+	for _, node := range plan.Nodes {
+		fresh[node.ID] = previous[node.ID] != "" && previous[node.ID] == current[node.ID]
+	}
+	changed := true
+	for changed {
+		changed = false
+		for _, node := range plan.Nodes {
+			if !fresh[node.ID] {
+				continue
+			}
+			for _, dep := range node.DependsOn {
+				if !fresh[dep] {
+					fresh[node.ID] = false
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	for i := range plan.Nodes {
+		if fresh[plan.Nodes[i].ID] {
+			plan.Nodes[i].StaleSkipped = true
+		}
+	}
+}
+
+func pipelineStalenessSignatures(nodes []executor.Node) map[string]string {
+	byID := map[string]executor.Node{}
+	for _, node := range nodes {
+		byID[node.ID] = node
+	}
+	memo := map[string]string{}
+	var sign func(string) string
+	sign = func(nodeID string) string {
+		if value, ok := memo[nodeID]; ok {
+			return value
+		}
+		node, ok := byID[nodeID]
+		if !ok {
+			return ""
+		}
+		depSigs := map[string]string{}
+		for _, dep := range node.DependsOn {
+			depSigs[dep] = sign(dep)
+		}
+		payload := map[string]any{
+			"id":                node.ID,
+			"depends_on":        sortedUniqueStrings(node.DependsOn),
+			"dependency_hashes": depSigs,
+			"logic_kind":        metadataString(node.Metadata, "logic_kind"),
+			"transform_type":    metadataString(node.Metadata, "transform_type"),
+			"logic_payload":     metadataRaw(node.Metadata, "logic_payload"),
+			"input_dataset_ids": metadataStringSlice(node.Metadata, "input_dataset_ids"),
+			"output_dataset_id": metadataString(node.Metadata, "output_dataset_id"),
+		}
+		raw, _ := json.Marshal(payload)
+		sum := sha256.Sum256(raw)
+		value := hex.EncodeToString(sum[:])
+		memo[nodeID] = value
+		return value
+	}
+	for _, node := range nodes {
+		sign(node.ID)
+	}
+	return memo
+}
+
+func previousPipelineRunSignatures(ctx context.Context, repo pipelineRunHistoryLister, pipelineID, currentRunID uuid.UUID) map[string]string {
+	runs, err := repo.ListPipelineRuns(ctx, pipelineID, 1, 25)
+	if err != nil {
+		return nil
+	}
+	sort.SliceStable(runs, func(i, j int) bool { return runs[i].StartedAt.After(runs[j].StartedAt) })
+	for _, run := range runs {
+		if run.ID == currentRunID {
+			continue
+		}
+		if !runStatusCarriesFreshness(run.Status) {
+			continue
+		}
+		signatures := signaturesFromPipelineNodeResults(run.NodeResults)
+		if len(signatures) > 0 {
+			return signatures
+		}
+	}
+	return nil
+}
+
+func runStatusCarriesFreshness(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "succeeded", "success", "completed", "ignored", strings.ToLower(string(models.BuildCompleted)):
+		return true
+	default:
+		return false
+	}
+}
+
+func signaturesFromPipelineNodeResults(raw json.RawMessage) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var results []models.PipelineNodeResult
+	if err := json.Unmarshal(raw, &results); err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, result := range results {
+		if result.Output == nil {
+			continue
+		}
+		if sig, ok := result.Output["staleness_signature"].(string); ok && strings.TrimSpace(sig) != "" {
+			out[result.NodeID] = strings.TrimSpace(sig)
+		}
+	}
+	return out
 }
 
 type outputDatasetConfig struct {
@@ -524,6 +675,9 @@ type outputPropertyConfig struct {
 func outputTransactionsForPipelineNode(pipelineID uuid.UUID, runID uuid.UUID, node models.PipelineNode, nodes []models.PipelineNode) ([]executor.OutputTransaction, string) {
 	cfg := parseOutputDatasetConfig(node.Config)
 	if node.OutputDatasetID == nil && normaliseTableTransform(node.TransformType) != "output" {
+		return nil, ""
+	}
+	if isLogicalViewOutputKind(outputKindForNode(node, cfg)) {
 		return nil, ""
 	}
 	outputRID := outputDatasetRIDForPipelineNode(pipelineID, node, cfg)
@@ -619,6 +773,9 @@ func (c outputDatasetConfig) empty() bool {
 }
 
 func outputDatasetRIDForPipelineNode(pipelineID uuid.UUID, node models.PipelineNode, cfg outputDatasetConfig) string {
+	if isLogicalViewOutputKind(outputKindForNode(node, cfg)) {
+		return ""
+	}
 	if outputKindForNode(node, cfg) == "virtual_table" {
 		if strings.TrimSpace(cfg.VirtualTableRID) != "" {
 			return strings.TrimSpace(cfg.VirtualTableRID)
@@ -980,6 +1137,9 @@ func pipelineIDFromRequest(r *http.Request) (uuid.UUID, error) {
 func pipelineRunStatus(outcome executor.Outcome) (string, *string) {
 	switch outcome.FinalState {
 	case models.BuildCompleted:
+		if outcome.Ignored > 0 && outcome.Completed == 0 {
+			return "ignored", nil
+		}
 		return "succeeded", nil
 	case models.BuildAborted:
 		msg := "cancelled"
@@ -1007,6 +1167,7 @@ func (s *capturingAuditSink) Record(ctx context.Context, event executor.AuditEve
 	s.mu.Lock()
 	s.events = append(s.events, event)
 	s.mu.Unlock()
+	emitJobAuditLog(ctx, event)
 	if s.delegate != nil {
 		return s.delegate.Record(ctx, event)
 	}
@@ -1017,6 +1178,61 @@ func (s *capturingAuditSink) Events() []executor.AuditEvent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]executor.AuditEvent(nil), s.events...)
+}
+
+func emitJobAuditLog(ctx context.Context, event executor.AuditEvent) {
+	if event.JobID == uuid.Nil {
+		return
+	}
+	service, _ := jobLogService.Load().(*livellogs.Service)
+	if service == nil {
+		return
+	}
+	jobRID := "ri.foundry.main.job." + event.JobID.String()
+	level := auditLogLevel(event)
+	message := auditLogMessage(event)
+	params, _ := json.Marshal(map[string]any{
+		"build_id":    event.BuildID,
+		"job_id":      event.JobID,
+		"node_id":     event.NodeID,
+		"from":        event.From,
+		"to":          event.To,
+		"attempt":     event.Attempt,
+		"reason":      event.Reason,
+		"dataset_rid": event.DatasetRID,
+	})
+	if appender, ok := service.Store.(LogAppendStore); ok && appender != nil {
+		_, _ = appender.AppendLogByRID(ctx, jobRID, level, message, params)
+	}
+	if mem, ok := service.Subscriber.(*livellogs.MemoryService); ok && mem != nil {
+		if storeMem, ok := service.Store.(*livellogs.MemoryService); !ok || storeMem != mem {
+			mem.Emit(jobRID, level, message, params)
+		}
+	}
+}
+
+func auditLogLevel(event executor.AuditEvent) livellogs.LogLevel {
+	switch {
+	case event.To == executor.NodeFailed || event.To == executor.NodeAborted || event.To == executor.NodeAbortPending:
+		return livellogs.LogError
+	case strings.Contains(strings.ToLower(event.Reason), "warn"):
+		return livellogs.LogWarn
+	default:
+		return livellogs.LogInfo
+	}
+}
+
+func auditLogMessage(event executor.AuditEvent) string {
+	switch {
+	case event.From != "" || event.To != "":
+		return fmt.Sprintf("job state changed from %s to %s", event.From, event.To)
+	case event.DatasetRID != "":
+		return "output event: " + event.Reason
+	case strings.TrimSpace(event.Reason) != "":
+		return event.Reason
+	default:
+		return "job event"
+	}
 }
 
 func pipelineRunNodeResults(plan executor.Plan, outcome executor.Outcome, events []executor.AuditEvent) []models.PipelineNodeResult {
@@ -1035,7 +1251,7 @@ func pipelineRunNodeResults(plan executor.Plan, outcome executor.Outcome, events
 	for _, node := range plan.Nodes {
 		result := outcome.Results[node.ID]
 		state := outcome.Nodes[node.ID]
-		status := nodeResultStatus(state)
+		status := nodeResultStatus(node, state)
 		reason := strings.TrimSpace(outcome.Reasons[node.ID])
 		var errPtr *string
 		if reason != "" && (status == "failed" || status == "cancelled") {
@@ -1050,7 +1266,7 @@ func pipelineRunNodeResults(plan executor.Plan, outcome executor.Outcome, events
 			Status:          status,
 			RowsAffected:    metadataInt64(result.Metadata, "rows_affected"),
 			Attempts:        outcome.Attempts[node.ID],
-			Output:          nodeResultOutput(result),
+			Output:          nodeResultOutput(node, result),
 			Error:           errPtr,
 			SchemaDelta:     schemaDelta(before, after),
 			OutputResources: outputResourcesForNode(node, status),
@@ -1085,9 +1301,12 @@ func pipelineRunEventFromAudit(event executor.AuditEvent) models.PipelineRunEven
 	}
 }
 
-func nodeResultStatus(state executor.NodeState) string {
+func nodeResultStatus(node executor.Node, state executor.NodeState) string {
 	switch state {
 	case executor.NodeCompleted:
+		if node.StaleSkipped {
+			return "ignored"
+		}
 		return "succeeded"
 	case executor.NodeFailed:
 		return "failed"
@@ -1100,10 +1319,16 @@ func nodeResultStatus(state executor.NodeState) string {
 	}
 }
 
-func nodeResultOutput(result executor.NodeResult) map[string]any {
+func nodeResultOutput(node executor.Node, result executor.NodeResult) map[string]any {
 	out := map[string]any{}
 	if result.OutputContentHash != "" {
 		out["content_hash"] = result.OutputContentHash
+	}
+	if signature := metadataString(node.Metadata, "staleness_signature"); signature != "" {
+		out["staleness_signature"] = signature
+	}
+	if node.StaleSkipped {
+		out["ignored_reason"] = "fresh"
 	}
 	for key, value := range result.Metadata {
 		if key == "data_rows" {
@@ -1203,6 +1428,8 @@ func outputResourcesForNode(node executor.Node, status string) []models.Pipeline
 	outputStatus := "pending"
 	if status == "succeeded" {
 		outputStatus = "committed"
+	} else if status == "ignored" {
+		outputStatus = "unchanged"
 	} else if status == "failed" || status == "cancelled" {
 		outputStatus = "aborted"
 	}

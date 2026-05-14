@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { JsonEditor } from '@/lib/components/JsonEditor';
 import type { PipelineNode } from '@/lib/api/pipelines';
@@ -34,6 +35,10 @@ function defaultConfigFor(transformType: string): Record<string, unknown> {
     default:
       return {};
   }
+}
+
+function datasetRoute(id: string) {
+  return `/datasets/${encodeURIComponent(id)}`;
 }
 
 export function PipelineNodeList({ nodes, onChange, disabled }: PipelineNodeListProps) {
@@ -165,6 +170,11 @@ export function PipelineNodeList({ nodes, onChange, disabled }: PipelineNodeList
                 className="of-input"
                 style={{ marginTop: 4 }}
               />
+              {selectedNode.output_dataset_id && (
+                <Link to={datasetRoute(selectedNode.output_dataset_id)} className="of-link" style={{ display: 'inline-block', marginTop: 4, fontSize: 11 }}>
+                  Open dataset
+                </Link>
+              )}
             </label>
             <label style={{ fontSize: 13 }}>
               Input dataset ids (comma-separated)
@@ -177,6 +187,15 @@ export function PipelineNodeList({ nodes, onChange, disabled }: PipelineNodeList
                 className="of-input"
                 style={{ marginTop: 4, fontFamily: 'var(--font-mono)' }}
               />
+              {selectedNode.input_dataset_ids.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                  {selectedNode.input_dataset_ids.map((datasetId) => (
+                    <Link key={datasetId} to={datasetRoute(datasetId)} className="of-link" style={{ fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                      {datasetId}
+                    </Link>
+                  ))}
+                </div>
+              )}
             </label>
             <div style={{ fontSize: 13 }}>
               Depends on

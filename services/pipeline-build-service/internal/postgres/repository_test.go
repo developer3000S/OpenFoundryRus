@@ -33,12 +33,12 @@ func TestRepositoryOpenListGetBuild(t *testing.T) {
 	now := time.Now().UTC()
 
 	mock.ExpectExec("INSERT INTO builds").
-		WithArgs(buildID, "ri.pipeline.1", "master", pgxmock.AnyArg(), "MANUAL", false, "user-1", "DEPENDENT_ONLY").
+		WithArgs(buildID, "ri.pipeline.1", "master", pgxmock.AnyArg(), []string{"out.users"}, "MANUAL", false, "user-1", "DEPENDENT_ONLY").
 		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
-	require.NoError(t, repo.OpenBuild(ctx, resolver.ResolveBuildArgs{PipelineRID: "ri.pipeline.1", BuildBranch: "master", RequestedBy: "user-1"}, buildID))
+	require.NoError(t, repo.OpenBuild(ctx, resolver.ResolveBuildArgs{PipelineRID: "ri.pipeline.1", BuildBranch: "master", OutputDatasetRIDs: []string{"out.users"}, RequestedBy: "user-1"}, buildID))
 
-	buildRows := pgxmock.NewRows([]string{"id", "rid", "pipeline_rid", "build_branch", "job_spec_fallback", "state", "trigger_kind", "force_build", "abort_policy", "queued_at", "started_at", "finished_at", "error_message", "requested_by", "created_at"}).
-		AddRow(buildID, "ri.foundry.main.build."+buildID.String(), "ri.pipeline.1", "master", []string{}, string(models.BuildResolution), "MANUAL", false, string(models.AbortDependentOnly), nil, nil, nil, nil, "user-1", now)
+	buildRows := pgxmock.NewRows([]string{"id", "rid", "pipeline_rid", "build_branch", "job_spec_fallback", "target_dataset_rids", "state", "trigger_kind", "force_build", "abort_policy", "queued_at", "started_at", "finished_at", "error_message", "requested_by", "created_at"}).
+		AddRow(buildID, "ri.foundry.main.build."+buildID.String(), "ri.pipeline.1", "master", []string{}, []string{"out.users"}, string(models.BuildResolution), "MANUAL", false, string(models.AbortDependentOnly), nil, nil, nil, nil, "user-1", now)
 	mock.ExpectQuery("SELECT id, rid, pipeline_rid").WithArgs("ri.pipeline.1", "", "", pgxmock.AnyArg(), pgxmock.AnyArg(), int64(25)).WillReturnRows(buildRows)
 	limit := int64(25)
 	items, err := repo.ListBuilds(ctx, models.ListBuildsQuery{PipelineRID: "ri.pipeline.1", Limit: &limit})
@@ -46,15 +46,182 @@ func TestRepositoryOpenListGetBuild(t *testing.T) {
 	require.Len(t, items, 1)
 	require.Equal(t, buildID, items[0].ID)
 
-	getRows := pgxmock.NewRows([]string{"id", "rid", "pipeline_rid", "build_branch", "job_spec_fallback", "state", "trigger_kind", "force_build", "abort_policy", "queued_at", "started_at", "finished_at", "error_message", "requested_by", "created_at"}).
-		AddRow(buildID, "ri.foundry.main.build."+buildID.String(), "ri.pipeline.1", "master", []string{}, string(models.BuildResolution), "MANUAL", false, string(models.AbortDependentOnly), nil, nil, nil, nil, "user-1", now)
+	getRows := pgxmock.NewRows([]string{"id", "rid", "pipeline_rid", "build_branch", "job_spec_fallback", "target_dataset_rids", "state", "trigger_kind", "force_build", "abort_policy", "queued_at", "started_at", "finished_at", "error_message", "requested_by", "created_at"}).
+		AddRow(buildID, "ri.foundry.main.build."+buildID.String(), "ri.pipeline.1", "master", []string{}, []string{"out.users"}, string(models.BuildResolution), "MANUAL", false, string(models.AbortDependentOnly), nil, nil, nil, nil, "user-1", now)
 	mock.ExpectQuery("FROM builds WHERE").WithArgs(buildID.String()).WillReturnRows(getRows)
-	jobRows := pgxmock.NewRows([]string{"id", "rid", "build_id", "job_spec_rid", "state", "output_transaction_rids", "state_changed_at", "attempt", "stale_skipped", "failure_reason", "output_content_hash", "created_at"})
+	jobRows := pgxmock.NewRows(jobSelectColumnsForTest())
 	mock.ExpectQuery("FROM jobs WHERE build_id").WithArgs(buildID).WillReturnRows(jobRows)
 	env, err := repo.GetBuild(ctx, buildID.String())
 	require.NoError(t, err)
 	require.NotNil(t, env)
 	require.Equal(t, buildID, env.ID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPersistResolvedBuildStoresBuildTargetsAndJobSpecSnapshot(t *testing.T) {
+	mock, _ := newMockRepo(t)
+	ctx := context.Background()
+	buildID := uuid.New()
+	jobID := uuid.New()
+	specRID := "ri.foundry.main.job_spec.shared"
+	resolved := &models.ResolvedBuild{
+		BuildID:    buildID,
+		State:      models.BuildResolution,
+		ForceBuild: true,
+		JobSpecs: []models.JobSpec{{
+			RID:               specRID,
+			LogicKind:         "TRANSFORM",
+			ContentHash:       "hash-shared",
+			Inputs:            []models.InputSpec{{DatasetRID: "in.orders"}},
+			OutputDatasetRIDs: []string{"out.beta", "out.alpha"},
+		}},
+		OpenedTransactions: []models.OpenedTransaction{
+			{DatasetRID: "out.alpha", TransactionRID: "txn-alpha"},
+			{DatasetRID: "out.beta", TransactionRID: "txn-beta"},
+		},
+		Jobs: []models.ResolvedJob{{
+			ID:                    jobID,
+			JobSpecRID:            specRID,
+			OutputTransactionRIDs: []string{"txn-alpha", "txn-beta"},
+		}},
+	}
+
+	mock.ExpectExec("UPDATE builds").
+		WithArgs(buildID, string(models.BuildResolution), []string{"out.alpha", "out.beta"}).
+		WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	mock.ExpectExec("INSERT INTO jobs").
+		WithArgs(jobID, buildID, specRID, "TRANSFORM", "hash-shared", []string{"in.orders"}, []string{"out.alpha", "out.beta"}, pgxmock.AnyArg(), "hash-shared", false, []string{"txn-alpha", "txn-beta"}).
+		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	mock.ExpectExec("INSERT INTO job_outputs").
+		WithArgs(jobID, "out.alpha", "txn-alpha").
+		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	mock.ExpectExec("INSERT INTO job_outputs").
+		WithArgs(jobID, "out.beta", "txn-beta").
+		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+
+	require.NoError(t, persistResolvedBuild(ctx, mock, resolved))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPersistResolvedBuildMarksFreshJobsSkipped(t *testing.T) {
+	mock, _ := newMockRepo(t)
+	ctx := context.Background()
+	buildID := uuid.New()
+	jobID := uuid.New()
+	specRID := "ri.foundry.main.job_spec.fresh"
+	head := "ri.foundry.main.transaction.input-head"
+	resolved := &models.ResolvedBuild{
+		BuildID: buildID,
+		State:   models.BuildResolution,
+		JobSpecs: []models.JobSpec{{
+			RID:               specRID,
+			LogicKind:         "TRANSFORM",
+			ContentHash:       "hash-fresh",
+			Inputs:            []models.InputSpec{{DatasetRID: "in.orders"}},
+			OutputDatasetRIDs: []string{"out.orders"},
+		}},
+		InputViews: []models.ResolvedInputView{{
+			DatasetRID:         "in.orders",
+			Branch:             "master",
+			HeadTransactionRID: &head,
+			Schema:             json.RawMessage(`{"fields":[{"name":"id","type":"STRING"}]}`),
+		}},
+		OpenedTransactions: []models.OpenedTransaction{
+			{DatasetRID: "out.orders", TransactionRID: "txn-orders"},
+		},
+		Jobs: []models.ResolvedJob{{
+			ID:                    jobID,
+			JobSpecRID:            specRID,
+			OutputTransactionRIDs: []string{"txn-orders"},
+		}},
+	}
+
+	mock.ExpectExec("UPDATE builds").
+		WithArgs(buildID, string(models.BuildResolution), []string{"out.orders"}).
+		WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs(specRID, "hash-fresh", pgxmock.AnyArg(), []string{"out.orders"}).
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec("INSERT INTO jobs").
+		WithArgs(jobID, buildID, specRID, "TRANSFORM", "hash-fresh", []string{"in.orders"}, []string{"out.orders"}, pgxmock.AnyArg(), "hash-fresh", true, []string{"txn-orders"}).
+		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	mock.ExpectExec("INSERT INTO job_outputs").
+		WithArgs(jobID, "out.orders", "txn-orders").
+		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+
+	require.NoError(t, persistResolvedBuild(ctx, mock, resolved))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRepositoryGetBuildEnrichesExecutionHistory(t *testing.T) {
+	mock, repo := newMockRepo(t)
+	ctx := context.Background()
+	buildID := uuid.New()
+	extractID := uuid.New()
+	loadID := uuid.New()
+	started := time.Unix(100, 0).UTC()
+	finished := time.Unix(130, 0).UTC()
+	buildRID := "ri.foundry.main.build." + buildID.String()
+
+	buildRows := pgxmock.NewRows([]string{"id", "rid", "pipeline_rid", "build_branch", "job_spec_fallback", "target_dataset_rids", "state", "trigger_kind", "force_build", "abort_policy", "queued_at", "started_at", "finished_at", "error_message", "requested_by", "created_at"}).
+		AddRow(buildID, buildRID, "pipe", "master", []string{}, []string{"out.extract", "out.load"}, string(models.BuildCompleted), "MANUAL", false, string(models.AbortDependentOnly), nil, &started, &finished, nil, "user-1", started.Add(-time.Second))
+	mock.ExpectQuery("FROM builds WHERE").WithArgs(buildRID).WillReturnRows(buildRows)
+	mock.ExpectQuery("FROM jobs WHERE build_id").
+		WithArgs(buildID).
+		WillReturnRows(pgxmock.NewRows(jobSelectColumnsForTest()).
+			AddRow(extractID, "ri.foundry.main.job."+extractID.String(), buildID, "spec.extract", "TRANSFORM", "hash-extract", []string{"in.raw"}, []string{"out.extract"}, "input-a", "logic-a", string(models.JobCompleted), []string{"txn-extract"}, started, &started, &finished, int32(1), false, "lightweight_table", "pipeline-expression", int64(42), int64(1), []byte(`{"runtime":"lightweight_table","rows_affected":42}`), nil, ptrString("hash-output"), started).
+			AddRow(loadID, "ri.foundry.main.job."+loadID.String(), buildID, "spec.load", "TRANSFORM", "hash-load", []string{"out.extract"}, []string{"out.load"}, "input-b", "logic-b", string(models.JobCompleted), []string{"txn-load"}, finished, &finished, &finished, int32(0), true, "", "", nil, nil, []byte(`{"ignored_reason":"fresh"}`), nil, nil, finished))
+	mock.ExpectQuery("FROM job_dependencies jd JOIN jobs dep").
+		WithArgs(buildID).
+		WillReturnRows(pgxmock.NewRows([]string{"job_id", "depends_on_spec"}).
+			AddRow(loadID, "spec.extract"))
+	mock.ExpectQuery("FROM job_outputs jo").
+		WithArgs(buildID).
+		WillReturnRows(pgxmock.NewRows([]string{"job_id", "output_dataset_rid", "transaction_rid", "committed", "aborted"}).
+			AddRow(extractID, "out.extract", "txn-extract", true, false).
+			AddRow(loadID, "out.load", "txn-load", false, true))
+
+	env, err := repo.GetBuild(ctx, buildRID)
+	require.NoError(t, err)
+	require.NotNil(t, env)
+	require.Equal(t, "succeeded", env.ExecutionStatus)
+	require.NotNil(t, env.DurationMillis)
+	require.Equal(t, int64(30000), *env.DurationMillis)
+	require.Equal(t, map[string]int{"succeeded": 1, "ignored": 1}, env.StatusCounts)
+	require.Len(t, env.JobDAG, 1)
+	require.Equal(t, "spec.load", env.JobDAG[0].JobSpecRID)
+	require.Equal(t, "spec.extract", env.JobDAG[0].DependsOnJobSpecRID)
+	require.Equal(t, "lightweight_table", env.Jobs[0].Runtime)
+	require.Equal(t, "pipeline-expression", env.Jobs[0].WorkerID)
+	require.Equal(t, int64(42), *env.Jobs[0].RowCount)
+	require.Equal(t, int64(1), *env.Jobs[0].FileCount)
+	require.Equal(t, "committed", env.Jobs[0].OutputTransactions[0].Status)
+	require.Equal(t, "ignored", env.Jobs[1].ExecutionStatus)
+	require.Equal(t, "aborted", env.Jobs[1].OutputTransactions[0].Status)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRepositoryCommitPersistsExecutionMetrics(t *testing.T) {
+	mock, repo := newMockRepo(t)
+	ctx := context.Background()
+	result := executor.NodeResult{
+		OutputContentHash: "sha256:abc",
+		Metadata: map[string]any{
+			"runtime":       "python",
+			"engine":        "python_sidecar",
+			"rows_affected": int64(7),
+			"data_rows":     []map[string]any{{"id": "hidden"}},
+		},
+	}
+
+	mock.ExpectExec("UPDATE job_outputs SET committed=TRUE").
+		WithArgs("out.python", "txn-python").
+		WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	mock.ExpectExec("UPDATE jobs").
+		WithArgs("out.python", "txn-python", "sha256:abc", "python", "python_sidecar", ptrInt64(7), (*int64)(nil), pgxmock.AnyArg()).
+		WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+
+	require.NoError(t, repo.Commit(ctx, executor.OutputTransaction{DatasetRID: "out.python", TransactionRID: "txn-python"}, result))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -147,10 +314,10 @@ func TestRepositoryLoadPlanPopulatesNodeMetadata(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"id", "build_branch", "abort_policy", "force_build"}).
 			AddRow(buildID, "master", string(models.AbortDependentOnly), true))
 
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, rid, build_id, job_spec_rid, state, output_transaction_rids, state_changed_at, attempt, stale_skipped, failure_reason, output_content_hash, created_at FROM jobs WHERE build_id")).
+	mock.ExpectQuery(regexp.QuoteMeta(jobSelectSQL + " WHERE build_id")).
 		WithArgs(buildID).
-		WillReturnRows(pgxmock.NewRows([]string{"id", "rid", "build_id", "job_spec_rid", "state", "output_transaction_rids", "state_changed_at", "attempt", "stale_skipped", "failure_reason", "output_content_hash", "created_at"}).
-			AddRow(jobID, "ri.foundry.main.job."+jobID.String(), buildID, "ri.foundry.main.job_spec.alpha", string(models.JobWaiting), []string{}, now, int32(0), false, nil, nil, now))
+		WillReturnRows(pgxmock.NewRows(jobSelectColumnsForTest()).
+			AddRow(jobID, "ri.foundry.main.job."+jobID.String(), buildID, "ri.foundry.main.job_spec.alpha", "TRANSFORM", "hash-alpha", []string{"in.alpha"}, []string{"out.alpha"}, "input-sig", "logic-sig", string(models.JobWaiting), []string{}, now, nil, nil, int32(0), false, "", "", nil, nil, []byte(`{}`), nil, nil, now))
 
 	mock.ExpectQuery("FROM job_dependencies jd JOIN jobs dep").
 		WithArgs(buildID).
@@ -179,6 +346,9 @@ func TestRepositoryLoadPlanPopulatesNodeMetadata(t *testing.T) {
 	require.Equal(t, "out.alpha", node.Metadata["output_dataset_id"])
 	require.Equal(t, []string{"in.alpha"}, node.Metadata["input_dataset_ids"])
 	require.Equal(t, true, node.Metadata["force_build"])
+	require.Equal(t, "input-sig", node.Metadata["input_signature"])
+	require.Equal(t, "logic-sig", node.Metadata["canonical_logic_hash"])
+	require.NotEmpty(t, node.Metadata["staleness_signature"])
 	require.Equal(t, json.RawMessage(`{"transform_type":"python","source":"select 1"}`), node.Metadata["logic_payload"])
 	require.Len(t, node.Outputs, 1)
 	require.Equal(t, "out.alpha", node.Outputs[0].DatasetRID)
@@ -191,6 +361,9 @@ func TestRepositoryAuditSinkPersistsLifecycleTransitions(t *testing.T) {
 	buildID := uuid.New()
 	jobID := uuid.New()
 
+	mock.ExpectExec("UPDATE builds").
+		WithArgs(buildID).
+		WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
 	mock.ExpectExec("UPDATE jobs SET state").
 		WithArgs(jobID, string(models.JobRunPending), string(models.JobWaiting), 0).
 		WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
@@ -199,13 +372,21 @@ func TestRepositoryAuditSinkPersistsLifecycleTransitions(t *testing.T) {
 		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
 	require.NoError(t, repo.Record(ctx, executor.AuditEvent{BuildID: buildID, JobID: jobID, NodeID: "n", From: executor.NodeWaiting, To: executor.NodeRunPending, Reason: "dispatching"}))
 
-	mock.ExpectExec("UPDATE jobs SET state=\\$2, state_changed_at=NOW\\(\\), failure_reason=\\$3").
+	mock.ExpectExec("UPDATE jobs SET state=\\$2, state_changed_at=NOW\\(\\), finished_at=COALESCE\\(finished_at, NOW\\(\\)\\), failure_reason=\\$3").
 		WithArgs(jobID, string(models.JobFailed), "boom", string(models.JobRunning), 2).
 		WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
 	mock.ExpectExec("INSERT INTO job_state_transitions").
 		WithArgs(jobID, string(models.JobRunning), string(models.JobFailed), "boom").
 		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
 	require.NoError(t, repo.Record(ctx, executor.AuditEvent{BuildID: buildID, JobID: jobID, NodeID: "n", From: executor.NodeRunning, To: executor.NodeFailed, Attempt: 2, Reason: "boom"}))
+
+	mock.ExpectExec("UPDATE jobs SET state=\\$2, state_changed_at=NOW\\(\\), started_at=COALESCE\\(started_at, NOW\\(\\)\\), finished_at=COALESCE\\(finished_at, NOW\\(\\)\\), stale_skipped=TRUE").
+		WithArgs(jobID, string(models.JobCompleted), string(models.JobWaiting), 0).
+		WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	mock.ExpectExec("INSERT INTO job_state_transitions").
+		WithArgs(jobID, string(models.JobWaiting), string(models.JobCompleted), "ignored because fresh").
+		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	require.NoError(t, repo.Record(ctx, executor.AuditEvent{BuildID: buildID, JobID: jobID, NodeID: "n", From: executor.NodeWaiting, To: executor.NodeCompleted, Reason: "ignored because fresh"}))
 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -234,3 +415,17 @@ func TestRepositoryAuditSinkIdempotentWhenStateAlreadyAdvanced(t *testing.T) {
 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func jobSelectColumnsForTest() []string {
+	return []string{
+		"id", "rid", "build_id", "job_spec_rid", "logic_kind", "job_spec_content_hash",
+		"input_dataset_rids", "output_dataset_rids", "input_signature", "canonical_logic_hash",
+		"state", "output_transaction_rids", "state_changed_at", "started_at", "finished_at",
+		"attempt", "stale_skipped", "runtime", "worker_id", "row_count", "file_count",
+		"output_metadata", "failure_reason", "output_content_hash", "created_at",
+	}
+}
+
+func ptrString(value string) *string { return &value }
+
+func ptrInt64(value int64) *int64 { return &value }

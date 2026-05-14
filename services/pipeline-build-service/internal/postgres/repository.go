@@ -4,6 +4,7 @@ package postgres
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -66,7 +67,10 @@ func (r *Repository) Lookup(ctx context.Context, pipelineRID, outputDatasetRID, 
 func (r *Repository) lookupJobSpecOnBranch(ctx context.Context, pipelineRID, outputDatasetRID, branch string) (*models.JobSpec, error) {
 	const q = `SELECT rid, pipeline_rid, branch_name, inputs, output_dataset_rid, job_spec_json, content_hash
 FROM pipeline_job_specs
-WHERE pipeline_rid=$1 AND output_dataset_rid=$2 AND branch_name=$3`
+WHERE pipeline_rid=$1 AND branch_name=$3
+  AND (output_dataset_rid=$2 OR COALESCE(job_spec_json->'output_dataset_rids', '[]'::jsonb) ? $2)
+ORDER BY CASE WHEN output_dataset_rid=$2 THEN 0 ELSE 1 END, published_at DESC
+LIMIT 1`
 	var spec models.JobSpec
 	var inputsRaw, jobSpecRaw []byte
 	var singleOutput string
@@ -83,6 +87,7 @@ WHERE pipeline_rid=$1 AND output_dataset_rid=$2 AND branch_name=$3`
 		}
 	}
 	var body struct {
+		RID               string          `json:"rid"`
 		LogicKind         string          `json:"logic_kind"`
 		LogicPayload      json.RawMessage `json:"logic_payload"`
 		OutputDatasetRIDs []string        `json:"output_dataset_rids"`
@@ -91,6 +96,9 @@ WHERE pipeline_rid=$1 AND output_dataset_rid=$2 AND branch_name=$3`
 		if err := json.Unmarshal(jobSpecRaw, &body); err != nil {
 			return nil, fmt.Errorf("decode job_spec_json: %w", err)
 		}
+	}
+	if body.RID != "" {
+		spec.RID = body.RID
 	}
 	spec.LogicKind = body.LogicKind
 	spec.LogicPayload = body.LogicPayload
@@ -209,9 +217,9 @@ func (r *Repository) OpenBuild(ctx context.Context, args resolver.ResolveBuildAr
 	if args.AbortPolicy == "" {
 		args.AbortPolicy = string(models.AbortDependentOnly)
 	}
-	_, err := r.db.Exec(ctx, `INSERT INTO builds (id, pipeline_rid, build_branch, job_spec_fallback, state, trigger_kind, force_build, requested_by, abort_policy)
-VALUES ($1,$2,$3,$4,'BUILD_RESOLUTION',$5,$6,$7,$8)
-ON CONFLICT (id) DO NOTHING`, buildID, args.PipelineRID, args.BuildBranch, args.JobSpecFallback, args.TriggerKind, args.ForceBuild, args.RequestedBy, args.AbortPolicy)
+	_, err := r.db.Exec(ctx, `INSERT INTO builds (id, pipeline_rid, build_branch, job_spec_fallback, target_dataset_rids, state, trigger_kind, force_build, requested_by, abort_policy)
+VALUES ($1,$2,$3,$4,$5,'BUILD_RESOLUTION',$6,$7,$8,$9)
+ON CONFLICT (id) DO NOTHING`, buildID, args.PipelineRID, args.BuildBranch, args.JobSpecFallback, uniqueStrings(args.OutputDatasetRIDs), args.TriggerKind, args.ForceBuild, args.RequestedBy, args.AbortPolicy)
 	return err
 }
 
@@ -238,16 +246,49 @@ func persistResolvedBuild(ctx context.Context, db DB, resolved *models.ResolvedB
 	if resolved.QueuedReason != nil {
 		state = string(models.BuildQueued)
 	}
-	_, err := db.Exec(ctx, `UPDATE builds SET state=$2, queued_at=CASE WHEN $2='BUILD_QUEUED' THEN NOW() ELSE queued_at END WHERE id=$1`, resolved.BuildID, state)
+	_, err := db.Exec(ctx, `UPDATE builds
+SET state=$2,
+    target_dataset_rids=$3,
+    queued_at=CASE WHEN $2='BUILD_QUEUED' THEN NOW() ELSE queued_at END
+WHERE id=$1`, resolved.BuildID, state, targetDatasetRIDsFromSpecs(resolved.JobSpecs))
 	if err != nil {
 		return err
+	}
+	specsByRID := map[string]models.JobSpec{}
+	for _, spec := range resolved.JobSpecs {
+		specsByRID[spec.RID] = spec
+	}
+	staleness := stalenessMetadataBySpec(resolved.JobSpecs, resolved.InputViews)
+	freshBySpec := map[string]bool{}
+	if !resolved.ForceBuild {
+		for _, job := range resolved.Jobs {
+			spec := specsByRID[job.JobSpecRID]
+			meta := staleness[job.JobSpecRID]
+			fresh, err := previousFreshJobExists(ctx, db, job.JobSpecRID, meta.LogicHash, meta.InputSignature, spec.OutputDatasetRIDs)
+			if err != nil {
+				return err
+			}
+			freshBySpec[job.JobSpecRID] = fresh
+		}
+		propagateStaleDependencies(resolved.Jobs, freshBySpec)
 	}
 	jobBySpec := map[string]uuid.UUID{}
 	for _, job := range resolved.Jobs {
 		jobBySpec[job.JobSpecRID] = job.ID
-		_, err := db.Exec(ctx, `INSERT INTO jobs (id, build_id, job_spec_rid, state, output_transaction_rids)
-VALUES ($1,$2,$3,'WAITING',$4)
-ON CONFLICT (id) DO UPDATE SET output_transaction_rids=EXCLUDED.output_transaction_rids`, job.ID, resolved.BuildID, job.JobSpecRID, job.OutputTransactionRIDs)
+		spec := specsByRID[job.JobSpecRID]
+		meta := staleness[job.JobSpecRID]
+		staleSkipped := freshBySpec[job.JobSpecRID]
+		_, err := db.Exec(ctx, `INSERT INTO jobs (id, build_id, job_spec_rid, logic_kind, job_spec_content_hash, input_dataset_rids, output_dataset_rids, input_signature, canonical_logic_hash, stale_skipped, state, output_transaction_rids)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'WAITING',$11)
+ON CONFLICT (id) DO UPDATE SET
+  logic_kind=EXCLUDED.logic_kind,
+  job_spec_content_hash=EXCLUDED.job_spec_content_hash,
+  input_dataset_rids=EXCLUDED.input_dataset_rids,
+  output_dataset_rids=EXCLUDED.output_dataset_rids,
+  input_signature=EXCLUDED.input_signature,
+  canonical_logic_hash=EXCLUDED.canonical_logic_hash,
+  stale_skipped=EXCLUDED.stale_skipped,
+  output_transaction_rids=EXCLUDED.output_transaction_rids`, job.ID, resolved.BuildID, job.JobSpecRID, spec.LogicKind, spec.ContentHash, inputDatasetRIDs(spec.Inputs), uniqueStrings(spec.OutputDatasetRIDs), meta.InputSignature, meta.LogicHash, staleSkipped, job.OutputTransactionRIDs)
 		if err != nil {
 			return err
 		}
@@ -273,6 +314,173 @@ VALUES ($1,$2,$3) ON CONFLICT (job_id, output_dataset_rid) DO UPDATE SET transac
 		}
 	}
 	return nil
+}
+
+func targetDatasetRIDsFromSpecs(specs []models.JobSpec) []string {
+	out := []string{}
+	for _, spec := range specs {
+		out = append(out, spec.OutputDatasetRIDs...)
+	}
+	return uniqueStrings(out)
+}
+
+func inputDatasetRIDs(inputs []models.InputSpec) []string {
+	out := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		if input.DatasetRID != "" {
+			out = append(out, input.DatasetRID)
+		}
+	}
+	return uniqueStrings(out)
+}
+
+func uniqueStrings(in []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(in))
+	for _, value := range in {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+type stalenessMetadata struct {
+	InputSignature string
+	LogicHash      string
+}
+
+func stalenessMetadataBySpec(specs []models.JobSpec, inputViews []models.ResolvedInputView) map[string]stalenessMetadata {
+	producers := map[string]models.JobSpec{}
+	for _, spec := range specs {
+		for _, output := range spec.OutputDatasetRIDs {
+			producers[output] = spec
+		}
+	}
+	views := map[string]models.ResolvedInputView{}
+	for _, view := range inputViews {
+		views[view.DatasetRID] = view
+	}
+	out := map[string]stalenessMetadata{}
+	for _, spec := range specs {
+		out[spec.RID] = stalenessMetadata{
+			InputSignature: inputSignatureForSpec(spec, producers, views),
+			LogicHash:      logicHashForSpec(spec),
+		}
+	}
+	return out
+}
+
+func inputSignatureForSpec(spec models.JobSpec, producers map[string]models.JobSpec, views map[string]models.ResolvedInputView) string {
+	items := make([]map[string]any, 0, len(spec.Inputs))
+	for _, input := range spec.Inputs {
+		if producer, ok := producers[input.DatasetRID]; ok && producer.RID != spec.RID {
+			items = append(items, map[string]any{
+				"dataset_rid":         input.DatasetRID,
+				"kind":                "internal",
+				"producer_job_spec":   producer.RID,
+				"producer_logic_hash": logicHashForSpec(producer),
+			})
+			continue
+		}
+		view := views[input.DatasetRID]
+		schemaHash := ""
+		if len(view.Schema) > 0 {
+			sum := sha256.Sum256(view.Schema)
+			schemaHash = hex.EncodeToString(sum[:])
+		}
+		head := ""
+		if view.HeadTransactionRID != nil {
+			head = *view.HeadTransactionRID
+		}
+		items = append(items, map[string]any{
+			"dataset_rid":          input.DatasetRID,
+			"kind":                 "external",
+			"branch":               view.Branch,
+			"head_transaction_rid": head,
+			"schema_hash":          schemaHash,
+			"fallback_chain":       append([]string(nil), input.FallbackChain...),
+			"require_fresh":        input.RequireFresh,
+			"view_filter_count":    len(input.ViewFilter),
+		})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return fmt.Sprint(items[i]["dataset_rid"]) < fmt.Sprint(items[j]["dataset_rid"])
+	})
+	raw, _ := json.Marshal(items)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func logicHashForSpec(spec models.JobSpec) string {
+	if strings.TrimSpace(spec.ContentHash) != "" {
+		return strings.TrimSpace(spec.ContentHash)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"logic_kind":    spec.LogicKind,
+		"logic_payload": spec.LogicPayload,
+		"inputs":        spec.Inputs,
+		"outputs":       uniqueStrings(spec.OutputDatasetRIDs),
+	})
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func previousFreshJobExists(ctx context.Context, db DB, jobSpecRID, logicHash, inputSignature string, outputDatasetRIDs []string) (bool, error) {
+	if strings.TrimSpace(jobSpecRID) == "" || len(outputDatasetRIDs) == 0 {
+		return false, nil
+	}
+	const q = `SELECT EXISTS (
+  SELECT 1
+  FROM jobs j
+  WHERE j.job_spec_rid=$1
+    AND j.state='COMPLETED'
+    AND j.stale_skipped=FALSE
+    AND COALESCE(j.canonical_logic_hash, '')=$2
+    AND COALESCE(j.input_signature, '')=$3
+    AND j.output_dataset_rids @> $4::text[]
+    AND NOT EXISTS (
+      SELECT 1
+      FROM unnest($4::text[]) required(output_dataset_rid)
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM job_outputs jo
+        WHERE jo.job_id=j.id
+          AND jo.output_dataset_rid=required.output_dataset_rid
+          AND jo.committed=TRUE
+      )
+    )
+  LIMIT 1
+)`
+	var exists bool
+	err := db.QueryRow(ctx, q, jobSpecRID, logicHash, inputSignature, uniqueStrings(outputDatasetRIDs)).Scan(&exists)
+	return exists, err
+}
+
+func propagateStaleDependencies(jobs []models.ResolvedJob, fresh map[string]bool) {
+	changed := true
+	for changed {
+		changed = false
+		for _, job := range jobs {
+			if !fresh[job.JobSpecRID] {
+				continue
+			}
+			for _, dep := range job.DependsOnJobSpecRIDs {
+				if !fresh[dep] {
+					fresh[job.JobSpecRID] = false
+					changed = true
+					break
+				}
+			}
+		}
+	}
 }
 
 func datasetForTransaction(items []models.OpenedTransaction, txRID string) string {
@@ -304,7 +512,7 @@ func (r *Repository) ListBuilds(ctx context.Context, q models.ListBuildsQuery) (
 			cursor = &parsed
 		}
 	}
-	rows, err := r.db.Query(ctx, `SELECT id, rid, pipeline_rid, build_branch, job_spec_fallback, state, trigger_kind, force_build, abort_policy, queued_at, started_at, finished_at, error_message, requested_by, created_at
+	rows, err := r.db.Query(ctx, `SELECT id, rid, pipeline_rid, build_branch, job_spec_fallback, target_dataset_rids, state, trigger_kind, force_build, abort_policy, queued_at, started_at, finished_at, error_message, requested_by, created_at
 FROM builds
 WHERE ($1='' OR pipeline_rid=$1) AND ($2='' OR state=$2) AND ($3='' OR build_branch=$3)
   AND ($4::timestamptz IS NULL OR created_at >= $4)
@@ -328,8 +536,8 @@ LIMIT $6`, q.PipelineRID, q.Status, q.Branch, q.Since, cursor, limit)
 
 func (r *Repository) GetBuild(ctx context.Context, idOrRID string) (*models.BuildEnvelope, error) {
 	var b models.Build
-	err := r.db.QueryRow(ctx, `SELECT id, rid, pipeline_rid, build_branch, job_spec_fallback, state, trigger_kind, force_build, abort_policy, queued_at, started_at, finished_at, error_message, requested_by, created_at
-FROM builds WHERE id::text=$1 OR rid=$1`, idOrRID).Scan(&b.ID, &b.RID, &b.PipelineRID, &b.BuildBranch, &b.JobSpecFallback, &b.State, &b.TriggerKind, &b.ForceBuild, &b.AbortPolicy, &b.QueuedAt, &b.StartedAt, &b.FinishedAt, &b.ErrorMessage, &b.RequestedBy, &b.CreatedAt)
+	err := r.db.QueryRow(ctx, `SELECT id, rid, pipeline_rid, build_branch, job_spec_fallback, target_dataset_rids, state, trigger_kind, force_build, abort_policy, queued_at, started_at, finished_at, error_message, requested_by, created_at
+FROM builds WHERE id::text=$1 OR rid=$1`, idOrRID).Scan(&b.ID, &b.RID, &b.PipelineRID, &b.BuildBranch, &b.JobSpecFallback, &b.TargetDatasetRIDs, &b.State, &b.TriggerKind, &b.ForceBuild, &b.AbortPolicy, &b.QueuedAt, &b.StartedAt, &b.FinishedAt, &b.ErrorMessage, &b.RequestedBy, &b.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -340,12 +548,17 @@ FROM builds WHERE id::text=$1 OR rid=$1`, idOrRID).Scan(&b.ID, &b.RID, &b.Pipeli
 	if err != nil {
 		return nil, err
 	}
-	return &models.BuildEnvelope{Build: b, Jobs: jobs}, nil
+	env := &models.BuildEnvelope{Build: b, Jobs: jobs}
+	if err := r.enrichBuildEnvelope(ctx, env); err != nil {
+		return nil, err
+	}
+	return env, nil
 }
 
 func scanBuild(rows pgx.Rows) (models.Build, error) {
 	var b models.Build
-	err := rows.Scan(&b.ID, &b.RID, &b.PipelineRID, &b.BuildBranch, &b.JobSpecFallback, &b.State, &b.TriggerKind, &b.ForceBuild, &b.AbortPolicy, &b.QueuedAt, &b.StartedAt, &b.FinishedAt, &b.ErrorMessage, &b.RequestedBy, &b.CreatedAt)
+	err := rows.Scan(&b.ID, &b.RID, &b.PipelineRID, &b.BuildBranch, &b.JobSpecFallback, &b.TargetDatasetRIDs, &b.State, &b.TriggerKind, &b.ForceBuild, &b.AbortPolicy, &b.QueuedAt, &b.StartedAt, &b.FinishedAt, &b.ErrorMessage, &b.RequestedBy, &b.CreatedAt)
+	enrichBuildSummary(&b, nil)
 	return b, err
 }
 
@@ -358,37 +571,147 @@ func (r *Repository) ListJobsForBuildID(ctx context.Context, idOrRID string) ([]
 	if err != nil {
 		return nil, err
 	}
-	return r.listJobsForBuild(ctx, buildID)
+	jobs, err := r.listJobsForBuild(ctx, buildID)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.enrichJobs(ctx, jobs); err != nil {
+		return nil, err
+	}
+	return jobs, nil
 }
 
 func (r *Repository) GetJob(ctx context.Context, idOrRID string) (*models.Job, error) {
-	var j models.Job
-	err := r.db.QueryRow(ctx, `SELECT id, rid, build_id, job_spec_rid, state, output_transaction_rids, state_changed_at, attempt, stale_skipped, failure_reason, output_content_hash, created_at
-FROM jobs WHERE id::text=$1 OR rid=$1`, idOrRID).Scan(&j.ID, &j.RID, &j.BuildID, &j.JobSpecRID, &j.State, &j.OutputTransactionRIDs, &j.StateChangedAt, &j.Attempt, &j.StaleSkipped, &j.FailureReason, &j.OutputContentHash, &j.CreatedAt)
+	j, err := scanJob(r.db.QueryRow(ctx, jobSelectSQL+` WHERE id::text=$1 OR rid=$1`, idOrRID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	jobs := []models.Job{j}
+	if err := r.enrichJobs(ctx, jobs); err != nil {
+		return nil, err
+	}
+	j = jobs[0]
+	enrichJobSummary(&j)
 	return &j, nil
 }
 
 func (r *Repository) listJobsForBuild(ctx context.Context, buildID uuid.UUID) ([]models.Job, error) {
-	rows, err := r.db.Query(ctx, `SELECT id, rid, build_id, job_spec_rid, state, output_transaction_rids, state_changed_at, attempt, stale_skipped, failure_reason, output_content_hash, created_at FROM jobs WHERE build_id=$1 ORDER BY created_at`, buildID)
+	rows, err := r.db.Query(ctx, jobSelectSQL+` WHERE build_id=$1 ORDER BY created_at`, buildID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []models.Job{}
 	for rows.Next() {
-		var j models.Job
-		if err := rows.Scan(&j.ID, &j.RID, &j.BuildID, &j.JobSpecRID, &j.State, &j.OutputTransactionRIDs, &j.StateChangedAt, &j.Attempt, &j.StaleSkipped, &j.FailureReason, &j.OutputContentHash, &j.CreatedAt); err != nil {
+		j, err := scanJob(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, j)
 	}
 	return out, rows.Err()
+}
+
+const jobSelectSQL = `SELECT id, rid, build_id, job_spec_rid, COALESCE(logic_kind, ''), COALESCE(job_spec_content_hash, ''), input_dataset_rids, output_dataset_rids, COALESCE(input_signature, ''), COALESCE(canonical_logic_hash, ''), state, output_transaction_rids, state_changed_at, started_at, finished_at, attempt, stale_skipped, COALESCE(runtime, ''), COALESCE(worker_id, ''), row_count, file_count, output_metadata, failure_reason, output_content_hash, created_at FROM jobs`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanJob(scanner rowScanner) (models.Job, error) {
+	var j models.Job
+	var rowCount, fileCount sql.NullInt64
+	err := scanner.Scan(&j.ID, &j.RID, &j.BuildID, &j.JobSpecRID, &j.LogicKind, &j.JobSpecContentHash, &j.InputDatasetRIDs, &j.OutputDatasetRIDs, &j.InputSignature, &j.CanonicalLogicHash, &j.State, &j.OutputTransactionRIDs, &j.StateChangedAt, &j.StartedAt, &j.FinishedAt, &j.Attempt, &j.StaleSkipped, &j.Runtime, &j.WorkerID, &rowCount, &fileCount, &j.OutputMetadata, &j.FailureReason, &j.OutputContentHash, &j.CreatedAt)
+	if err != nil {
+		return models.Job{}, err
+	}
+	if rowCount.Valid {
+		j.RowCount = &rowCount.Int64
+	}
+	if fileCount.Valid {
+		j.FileCount = &fileCount.Int64
+	}
+	return j, nil
+}
+
+func (r *Repository) enrichBuildEnvelope(ctx context.Context, env *models.BuildEnvelope) error {
+	if env == nil {
+		return nil
+	}
+	if err := r.enrichJobs(ctx, env.Jobs); err != nil {
+		return err
+	}
+	env.StatusCounts = map[string]int{}
+	for _, job := range env.Jobs {
+		env.StatusCounts[job.ExecutionStatus]++
+		for _, dep := range job.DependsOnJobSpecRIDs {
+			env.JobDAG = append(env.JobDAG, models.JobDAGEdge{JobSpecRID: job.JobSpecRID, DependsOnJobSpecRID: dep, JobID: job.ID})
+		}
+	}
+	sort.SliceStable(env.JobDAG, func(i, j int) bool {
+		if env.JobDAG[i].JobSpecRID == env.JobDAG[j].JobSpecRID {
+			return env.JobDAG[i].DependsOnJobSpecRID < env.JobDAG[j].DependsOnJobSpecRID
+		}
+		return env.JobDAG[i].JobSpecRID < env.JobDAG[j].JobSpecRID
+	})
+	enrichBuildSummary(&env.Build, env.Jobs)
+	return nil
+}
+
+func (r *Repository) enrichJobs(ctx context.Context, jobs []models.Job) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	buildID := jobs[0].BuildID
+	deps, err := r.dependenciesForBuild(ctx, buildID)
+	if err != nil {
+		return err
+	}
+	outputs, err := r.outputTransactionsForBuild(ctx, buildID)
+	if err != nil {
+		return err
+	}
+	for i := range jobs {
+		jobs[i].DependsOnJobSpecRIDs = sortedUniqueStrings(deps[jobs[i].ID])
+		jobs[i].OutputTransactions = append([]models.JobOutputTransaction(nil), outputs[jobs[i].ID]...)
+		enrichJobSummary(&jobs[i])
+	}
+	return nil
+}
+
+func enrichBuildSummary(build *models.Build, jobs []models.Job) {
+	if build == nil {
+		return
+	}
+	build.ExecutionStatus = models.NormalizeBuildExecutionStatus(build.State, jobs)
+	build.DurationMillis = models.DurationMillisBetween(build.StartedAt, build.FinishedAt)
+}
+
+func enrichJobSummary(job *models.Job) {
+	if job == nil {
+		return
+	}
+	job.ExecutionStatus = models.NormalizeJobExecutionStatus(job.State, job.StaleSkipped, job.FailureReason)
+	job.DurationMillis = models.DurationMillisBetween(job.StartedAt, job.FinishedAt)
+}
+
+func sortedUniqueStrings(values []string) []string {
+	out := append([]string(nil), values...)
+	sort.Strings(out)
+	compact := out[:0]
+	var last string
+	for _, value := range out {
+		value = strings.TrimSpace(value)
+		if value == "" || value == last {
+			continue
+		}
+		compact = append(compact, value)
+		last = value
+	}
+	return compact
 }
 
 func (r *Repository) LoadPlan(ctx context.Context, buildID uuid.UUID) (executor.Plan, error) {
@@ -423,6 +746,18 @@ func (r *Repository) LoadPlan(ctx context.Context, buildID uuid.UUID) (executor.
 			"job_spec_rid": job.JobSpecRID,
 			"force_build":  forceBuild,
 		}
+		if strings.TrimSpace(job.InputSignature) != "" {
+			metadata["input_signature"] = job.InputSignature
+		}
+		if strings.TrimSpace(job.CanonicalLogicHash) != "" {
+			metadata["canonical_logic_hash"] = job.CanonicalLogicHash
+		}
+		if signature := jobStalenessSignature(job); signature != "" {
+			metadata["staleness_signature"] = signature
+		}
+		if job.StaleSkipped {
+			metadata["staleness_skip_reason"] = "fresh"
+		}
 		if spec, ok := specs[job.JobSpecRID]; ok {
 			if spec.LogicKind != "" {
 				metadata["logic_kind"] = spec.LogicKind
@@ -440,9 +775,21 @@ func (r *Repository) LoadPlan(ctx context.Context, buildID uuid.UUID) (executor.
 				metadata["output_dataset_id"] = spec.OutputDatasetRIDs[0]
 			}
 		}
-		plan.Nodes = append(plan.Nodes, executor.Node{ID: job.JobSpecRID, JobID: job.ID, DependsOn: deps[job.ID], Outputs: outputs, MaxAttempts: 1, Metadata: metadata})
+		plan.Nodes = append(plan.Nodes, executor.Node{ID: job.JobSpecRID, JobID: job.ID, DependsOn: deps[job.ID], Outputs: outputs, MaxAttempts: 1, StaleSkipped: job.StaleSkipped, Metadata: metadata})
 	}
 	return plan, nil
+}
+
+func jobStalenessSignature(job models.Job) string {
+	if strings.TrimSpace(job.InputSignature) == "" && strings.TrimSpace(job.CanonicalLogicHash) == "" {
+		return ""
+	}
+	raw, _ := json.Marshal(map[string]string{
+		"input_signature":      strings.TrimSpace(job.InputSignature),
+		"canonical_logic_hash": strings.TrimSpace(job.CanonicalLogicHash),
+	})
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 type jobSpecMetadata struct {
@@ -461,6 +808,7 @@ func (r *Repository) jobSpecsByRID(ctx context.Context, buildID uuid.UUID) (map[
 	rows, err := r.db.Query(ctx, `SELECT js.rid, js.logic_kind, js.logic_payload, js.inputs, js.output_dataset_rids
 FROM jobs j
 JOIN job_specs js ON js.rid = j.job_spec_rid
+  OR replace(js.rid, 'ri.foundry.main.job_spec.', 'ri.foundry.main.jobspec.') = j.job_spec_rid
 WHERE j.build_id = $1`, buildID)
 	if err != nil {
 		return nil, err
@@ -535,6 +883,36 @@ func (r *Repository) outputsForJob(ctx context.Context, jobID uuid.UUID) ([]exec
 			return nil, err
 		}
 		out = append(out, tx)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) outputTransactionsForBuild(ctx context.Context, buildID uuid.UUID) (map[uuid.UUID][]models.JobOutputTransaction, error) {
+	rows, err := r.db.Query(ctx, `SELECT jo.job_id, jo.output_dataset_rid, jo.transaction_rid, jo.committed, jo.aborted
+FROM job_outputs jo
+JOIN jobs j ON j.id=jo.job_id
+WHERE j.build_id=$1
+ORDER BY jo.job_id, jo.output_dataset_rid`, buildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[uuid.UUID][]models.JobOutputTransaction{}
+	for rows.Next() {
+		var jobID uuid.UUID
+		var tx models.JobOutputTransaction
+		if err := rows.Scan(&jobID, &tx.OutputDatasetRID, &tx.TransactionRID, &tx.Committed, &tx.Aborted); err != nil {
+			return nil, err
+		}
+		switch {
+		case tx.Committed:
+			tx.Status = "committed"
+		case tx.Aborted:
+			tx.Status = "aborted"
+		default:
+			tx.Status = "open"
+		}
+		out[jobID] = append(out[jobID], tx)
 	}
 	return out, rows.Err()
 }
@@ -813,9 +1191,103 @@ func (r *Repository) Abort(ctx context.Context, tx executor.OutputTransaction) e
 }
 
 // Commit implements executor.OutputCommitter for already-opened output rows.
-func (r *Repository) Commit(ctx context.Context, tx executor.OutputTransaction, _ executor.NodeResult) error {
+func (r *Repository) Commit(ctx context.Context, tx executor.OutputTransaction, result executor.NodeResult) error {
 	_, err := r.db.Exec(ctx, `UPDATE job_outputs SET committed=TRUE WHERE output_dataset_rid=$1 AND transaction_rid=$2`, tx.DatasetRID, tx.TransactionRID)
+	if err != nil {
+		return err
+	}
+	rowCount := resultMetadataInt64(result.Metadata, "row_count", "rows_affected")
+	fileCount := resultMetadataInt64(result.Metadata, "file_count", "files_written")
+	runtime := firstNonEmptyString(resultMetadataString(result.Metadata, "runtime"), resultMetadataString(result.Metadata, "preferred_runtime"))
+	workerID := firstNonEmptyString(resultMetadataString(result.Metadata, "worker_id"), resultMetadataString(result.Metadata, "engine"))
+	outputMeta := compactOutputMetadata(result.Metadata)
+	_, err = r.db.Exec(ctx, `UPDATE jobs
+SET output_content_hash=COALESCE(NULLIF($3, ''), output_content_hash),
+    runtime=COALESCE(NULLIF($4, ''), runtime),
+    worker_id=COALESCE(NULLIF($5, ''), worker_id),
+    row_count=COALESCE($6, row_count),
+    file_count=CASE WHEN $7::bigint IS NULL THEN COALESCE(file_count, 0) + 1 ELSE $7 END,
+    output_metadata=COALESCE(output_metadata, '{}'::jsonb) || COALESCE($8::jsonb, '{}'::jsonb)
+WHERE id IN (
+    SELECT job_id FROM job_outputs
+    WHERE output_dataset_rid=$1 AND transaction_rid=$2
+)`, tx.DatasetRID, tx.TransactionRID, result.OutputContentHash, runtime, workerID, rowCount, fileCount, outputMeta)
 	return err
+}
+
+func resultMetadataString(metadata map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if metadata == nil {
+			return ""
+		}
+		switch value := metadata[key].(type) {
+		case string:
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				return trimmed
+			}
+		case fmt.Stringer:
+			if trimmed := strings.TrimSpace(value.String()); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+func resultMetadataInt64(metadata map[string]any, keys ...string) *int64 {
+	for _, key := range keys {
+		if metadata == nil {
+			return nil
+		}
+		switch value := metadata[key].(type) {
+		case int:
+			v := int64(value)
+			return &v
+		case int64:
+			v := value
+			return &v
+		case int32:
+			v := int64(value)
+			return &v
+		case uint64:
+			v := int64(value)
+			return &v
+		case uint32:
+			v := int64(value)
+			return &v
+		case float64:
+			v := int64(value)
+			return &v
+		case json.Number:
+			if parsed, err := value.Int64(); err == nil {
+				return &parsed
+			}
+		}
+	}
+	return nil
+}
+
+func compactOutputMetadata(metadata map[string]any) json.RawMessage {
+	if len(metadata) == 0 {
+		return nil
+	}
+	filtered := map[string]any{}
+	for key, value := range metadata {
+		switch key {
+		case "data_rows", "sample_rows", "stdout", "stderr":
+			continue
+		default:
+			filtered[key] = value
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(filtered)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 // Record implements executor.AuditSink. It mirrors Rust transition_job_in_tx by
@@ -824,7 +1296,10 @@ func (r *Repository) Commit(ctx context.Context, tx executor.OutputTransaction, 
 // transition (build-terminal events and per-output commit/abort markers are
 // dropped — those are surfaced via build_events / job_outputs flags instead).
 func (r *Repository) Record(ctx context.Context, event executor.AuditEvent) error {
-	if event.JobID == uuid.Nil || event.From == "" || event.To == "" || event.From == event.To {
+	if event.JobID == uuid.Nil {
+		return r.recordBuildEvent(ctx, event)
+	}
+	if event.From == "" || event.To == "" || event.From == event.To {
 		return nil
 	}
 	from := string(event.From)
@@ -832,8 +1307,17 @@ func (r *Repository) Record(ctx context.Context, event executor.AuditEvent) erro
 	reason := event.Reason
 	var tag pgconn.CommandTag
 	var err error
-	if isFailureState(event.To) {
-		tag, err = r.db.Exec(ctx, `UPDATE jobs SET state=$2, state_changed_at=NOW(), failure_reason=$3, attempt=GREATEST(attempt, $5) WHERE id=$1 AND state=$4`, event.JobID, to, reason, from, event.Attempt)
+	if event.To == executor.NodeRunPending || event.To == executor.NodeRunning {
+		_ = r.markBuildRunning(ctx, event.BuildID)
+	}
+	if event.To == executor.NodeCompleted && strings.EqualFold(strings.TrimSpace(event.Reason), "ignored because fresh") {
+		tag, err = r.db.Exec(ctx, `UPDATE jobs SET state=$2, state_changed_at=NOW(), started_at=COALESCE(started_at, NOW()), finished_at=COALESCE(finished_at, NOW()), stale_skipped=TRUE, failure_reason=NULL, attempt=GREATEST(attempt, $4) WHERE id=$1 AND state=$3`, event.JobID, to, from, event.Attempt)
+	} else if isFailureState(event.To) {
+		tag, err = r.db.Exec(ctx, `UPDATE jobs SET state=$2, state_changed_at=NOW(), finished_at=COALESCE(finished_at, NOW()), failure_reason=$3, attempt=GREATEST(attempt, $5) WHERE id=$1 AND state=$4`, event.JobID, to, reason, from, event.Attempt)
+	} else if event.To == executor.NodeRunning {
+		tag, err = r.db.Exec(ctx, `UPDATE jobs SET state=$2, state_changed_at=NOW(), started_at=COALESCE(started_at, NOW()), attempt=GREATEST(attempt, $4) WHERE id=$1 AND state=$3`, event.JobID, to, from, event.Attempt)
+	} else if event.To == executor.NodeCompleted {
+		tag, err = r.db.Exec(ctx, `UPDATE jobs SET state=$2, state_changed_at=NOW(), finished_at=COALESCE(finished_at, NOW()), attempt=GREATEST(attempt, $4) WHERE id=$1 AND state=$3`, event.JobID, to, from, event.Attempt)
 	} else {
 		tag, err = r.db.Exec(ctx, `UPDATE jobs SET state=$2, state_changed_at=NOW(), attempt=GREATEST(attempt, $4) WHERE id=$1 AND state=$3`, event.JobID, to, from, event.Attempt)
 	}
@@ -844,6 +1328,50 @@ func (r *Repository) Record(ctx context.Context, event executor.AuditEvent) erro
 		return nil
 	}
 	_, err = r.db.Exec(ctx, `INSERT INTO job_state_transitions (job_id, from_state, to_state, reason) VALUES ($1,$2,$3,$4)`, event.JobID, from, to, reason)
+	return err
+}
+
+func (r *Repository) recordBuildEvent(ctx context.Context, event executor.AuditEvent) error {
+	if event.BuildID == uuid.Nil || event.To == "" {
+		return nil
+	}
+	to := string(event.To)
+	switch models.BuildState(to) {
+	case models.BuildCompleted:
+		_, err := r.db.Exec(ctx, `UPDATE builds SET state=$2, finished_at=COALESCE(finished_at, NOW()) WHERE id=$1`, event.BuildID, to)
+		if err != nil {
+			return err
+		}
+		return r.releaseBuildLocks(ctx, event.BuildID)
+	case models.BuildFailed, models.BuildAborted:
+		_, err := r.db.Exec(ctx, `UPDATE builds SET state=$2, error_message=COALESCE(NULLIF($3, ''), error_message), finished_at=COALESCE(finished_at, NOW()) WHERE id=$1`, event.BuildID, to, event.Reason)
+		if err != nil {
+			return err
+		}
+		return r.releaseBuildLocks(ctx, event.BuildID)
+	case models.BuildRunning:
+		return r.markBuildRunning(ctx, event.BuildID)
+	default:
+		return nil
+	}
+}
+
+func (r *Repository) markBuildRunning(ctx context.Context, buildID uuid.UUID) error {
+	if buildID == uuid.Nil {
+		return nil
+	}
+	_, err := r.db.Exec(ctx, `UPDATE builds
+SET state='BUILD_RUNNING',
+    started_at=COALESCE(started_at, NOW())
+WHERE id=$1 AND state IN ('BUILD_RESOLUTION','BUILD_QUEUED')`, buildID)
+	return err
+}
+
+func (r *Repository) releaseBuildLocks(ctx context.Context, buildID uuid.UUID) error {
+	if buildID == uuid.Nil {
+		return nil
+	}
+	_, err := r.db.Exec(ctx, `DELETE FROM build_input_locks WHERE build_id=$1`, buildID)
 	return err
 }
 
@@ -859,7 +1387,7 @@ func (r *Repository) ListDatasetBuilds(ctx context.Context, datasetRID string, l
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := r.db.Query(ctx, `SELECT DISTINCT b.id, b.rid, b.pipeline_rid, b.build_branch, b.job_spec_fallback, b.state, b.trigger_kind, b.force_build, b.abort_policy, b.queued_at, b.started_at, b.finished_at, b.error_message, b.requested_by, b.created_at
+	rows, err := r.db.Query(ctx, `SELECT DISTINCT b.id, b.rid, b.pipeline_rid, b.build_branch, b.job_spec_fallback, b.target_dataset_rids, b.state, b.trigger_kind, b.force_build, b.abort_policy, b.queued_at, b.started_at, b.finished_at, b.error_message, b.requested_by, b.created_at
 FROM builds b
 JOIN jobs j ON j.build_id=b.id
 JOIN job_outputs jo ON jo.job_id=j.id
@@ -905,7 +1433,11 @@ func (r *Repository) GetJobOutputs(ctx context.Context, jobRID string) (*handler
 		}
 		out.Outputs = append(out.Outputs, row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out.NormalizeAtomicity()
+	return out, nil
 }
 
 func (r *Repository) GetJobInputResolutions(ctx context.Context, jobRID string) (json.RawMessage, error) {
@@ -946,8 +1478,13 @@ func (r *Repository) PublishJobSpec(ctx context.Context, kind string, req handle
 		keyOutput = outputs[0]
 	}
 	var existing handler.PublishedJobSpec
-	err := r.db.QueryRow(ctx, `SELECT rid, logic_kind, content_hash FROM job_specs WHERE pipeline_rid=$1 AND branch_name=$2 AND logic_kind=$3 AND output_dataset_rids=$4 AND content_hash=$5 ORDER BY created_at DESC LIMIT 1`, req.PipelineRID, req.BranchName, kind, outputs, contentHash).Scan(&existing.RID, &existing.LogicKind, &existing.ContentHash)
+	err := r.db.QueryRow(ctx, `SELECT rid, pipeline_rid, branch_name, logic_kind, output_dataset_rids, content_hash
+FROM job_specs
+WHERE pipeline_rid=$1 AND branch_name=$2 AND logic_kind=$3 AND output_dataset_rids=$4 AND content_hash=$5
+ORDER BY created_at DESC
+LIMIT 1`, req.PipelineRID, req.BranchName, kind, outputs, contentHash).Scan(&existing.RID, &existing.PipelineRID, &existing.BranchName, &existing.LogicKind, &existing.OutputDatasetRIDs, &existing.ContentHash)
 	if err == nil {
+		existing.Immutable = true
 		return existing, nil
 	}
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -971,7 +1508,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, id, rid, req.PipelineRID, req.BranchNa
 	if err != nil {
 		return handler.PublishedJobSpec{}, err
 	}
-	jobSpecJSON, _ := json.Marshal(map[string]any{"logic_kind": kind, "logic_payload": json.RawMessage(payload), "output_dataset_rids": outputs})
+	jobSpecJSON, _ := json.Marshal(map[string]any{"rid": rid, "logic_kind": kind, "logic_payload": json.RawMessage(payload), "output_dataset_rids": outputs})
 	publisher, _ := uuid.Parse(createdBy)
 	if publisher == uuid.Nil {
 		publisher = uuid.Nil
@@ -990,7 +1527,7 @@ ON CONFLICT (pipeline_rid, branch_name, output_dataset_rid) DO UPDATE SET
 			return handler.PublishedJobSpec{}, err
 		}
 	}
-	return handler.PublishedJobSpec{RID: rid, LogicKind: kind, ContentHash: contentHash}, nil
+	return handler.PublishedJobSpec{RID: rid, PipelineRID: req.PipelineRID, BranchName: req.BranchName, LogicKind: kind, OutputDatasetRIDs: outputs, ContentHash: contentHash, Immutable: true}, nil
 }
 
 func (r *Repository) AppendLogByRID(ctx context.Context, jobRID string, level livellogs.LogLevel, message string, params json.RawMessage) (livellogs.LogEntry, error) {
@@ -1015,6 +1552,10 @@ func deriveJobSpecHash(kind string, req handler.CreateJobSpecRequest) string {
 	h.Write([]byte(req.BranchName))
 	h.Write([]byte("|"))
 	h.Write(req.LogicPayload)
+	if inputsRaw, err := json.Marshal(req.Inputs); err == nil {
+		h.Write([]byte("|"))
+		h.Write(inputsRaw)
+	}
 	for _, output := range req.OutputDatasetRIDs {
 		h.Write([]byte("|"))
 		h.Write([]byte(output))

@@ -1,5 +1,10 @@
 # Policy evaluation flows
 
+> **Sensitive admin surface.** Evaluation flows wire the seven control
+> layers together. See the [Security overview](../security-overview.md),
+> the [Shared responsibility model](../shared-responsibility-model.md),
+> and the [Foundry public-docs parity policy](../../reference/foundry-public-docs-parity-policy.md).
+
 Policy evaluation is where abstract authorization models become operational decisions.
 
 ## Repository signals

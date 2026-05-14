@@ -1,5 +1,13 @@
 # Audit and traceability
 
+> **Sensitive admin surface.** Audit data is itself sensitive and is gated
+> by separate permissions. Read the [Security overview](./security-overview.md)
+> for how audit fits with the other control layers and the
+> [Shared responsibility model](./shared-responsibility-model.md) for who
+> delivers, retains, and reviews audit events. Anything modeled on a
+> Foundry concept must follow the
+> [Foundry public-docs parity policy](../reference/foundry-public-docs-parity-policy.md).
+
 Auditability is a core platform feature, not an afterthought.
 
 ## Repository signals

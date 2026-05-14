@@ -1,5 +1,13 @@
 # Policies and authorization
 
+> **Sensitive admin surface.** Policy and role administration is the layer
+> that turns identity into authorization decisions. Read the
+> [Security overview](./security-overview.md) for how this layer composes
+> with the other six, and the
+> [Shared responsibility model](./shared-responsibility-model.md) for which
+> roles can configure what. Anything modeled on a Foundry concept must
+> follow the [Foundry public-docs parity policy](../reference/foundry-public-docs-parity-policy.md).
+
 Authorization in OpenFoundry is broader than role checks alone.
 
 ## Repository signals

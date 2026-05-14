@@ -7,9 +7,11 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import type { Core, ElementDefinition, EventObject, StylesheetStyle } from 'cytoscape';
 
 import { CytoscapeCanvas } from '@components/CytoscapeCanvas';
+import { ScheduleSidebar } from '@/lib/components/lineage/ScheduleSidebar';
 import { loadJobSpecStatus, previewDataset, type DatasetPreviewResponse } from '@/lib/api/datasets';
 import {
   getDatasetLineageImpact,
@@ -393,6 +395,7 @@ const IconRefresh = () => (
 // =============================================================================
 
 export function LineagePage() {
+  const navigate = useNavigate();
   const [graph, setGraph] = useState<LineageGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -833,7 +836,9 @@ export function LineagePage() {
               <RightRailDrawerContent
                 tool={activeRightTool}
                 graph={graph}
+                selectedNode={selectedNode}
                 onClose={() => setActiveRightTool(null)}
+                onCreateForDataset={(datasetRid) => navigate(`/schedules/new?event_target=${encodeURIComponent(datasetRid)}`)}
                 onPick={(id) => {
                   const node = graph?.nodes.find((n) => n.id === id) ?? null;
                   setSelectedNode(node);
@@ -1256,10 +1261,12 @@ function RightRailButton({ active, title, onClick, children }: RightRailButtonPr
 interface RightRailDrawerContentProps {
   tool: 'search' | 'list' | 'tools' | 'calendar' | 'clipboard';
   graph: LineageGraph | null;
+  selectedNode: LineageNode | null;
   onClose: () => void;
+  onCreateForDataset: (datasetRid: string) => void;
   onPick: (id: string) => void;
 }
-function RightRailDrawerContent({ tool, graph, onClose, onPick }: RightRailDrawerContentProps) {
+function RightRailDrawerContent({ tool, graph, selectedNode, onClose, onCreateForDataset, onPick }: RightRailDrawerContentProps) {
   const [q, setQ] = useState('');
   const filtered = useMemo(() => {
     const list = graph?.nodes ?? [];
@@ -1321,9 +1328,10 @@ function RightRailDrawerContent({ tool, graph, onClose, onPick }: RightRailDrawe
         </p>
       )}
       {tool === 'calendar' && (
-        <p className="of-text-muted" style={{ fontSize: 12 }}>
-          Schedule view coming soon.
-        </p>
+        <ScheduleSidebar
+          selectedDatasetRids={selectedNode?.kind === 'dataset' ? [metadataString(selectedNode.metadata ?? {}, 'rid') || selectedNode.id] : []}
+          onCreateForDataset={onCreateForDataset}
+        />
       )}
       {tool === 'clipboard' && (
         <p className="of-text-muted" style={{ fontSize: 12 }}>
@@ -1468,40 +1476,72 @@ function PreviewTab({ selectedNode, datasetPreview, datasetPreviewLoading }: Pre
       </div>
     );
   }
-  if (datasetPreviewLoading) return <div style={tabHint}>Loading dataset preview…</div>;
+  const metadata = selectedNode.metadata ?? {};
+  const datasetPath = metadataString(metadata, 'path') || metadataString(metadata, 'folder_path');
+  const displayName = metadataString(metadata, 'display_name') || selectedNode.label;
+  const datasetHref = datasetHrefForNode(selectedNode);
+  const previewHeader = (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px', borderBottom: '1px solid var(--border-default)' }}>
+      <div style={{ minWidth: 0 }}>
+        <strong style={{ display: 'block', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</strong>
+        <span className="of-text-muted" style={{ display: 'block', marginTop: 2, fontFamily: 'var(--font-mono)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {datasetPath || selectedNode.id}
+        </span>
+      </div>
+      <Link to={datasetHref} className="of-button" style={{ flex: '0 0 auto', fontSize: 11 }}>
+        Open dataset
+      </Link>
+    </div>
+  );
+  if (datasetPreviewLoading) {
+    return (
+      <div style={{ display: 'grid', gridTemplateRows: 'max-content 1fr', height: '100%' }}>
+        {previewHeader}
+        <div style={tabHint}>Loading dataset preview…</div>
+      </div>
+    );
+  }
   if (!datasetPreview || !datasetPreview.rows || datasetPreview.rows.length === 0) {
-    return <div style={tabHint}>No preview rows available for this dataset.</div>;
+    return (
+      <div style={{ display: 'grid', gridTemplateRows: 'max-content 1fr', height: '100%' }}>
+        {previewHeader}
+        <div style={tabHint}>No preview rows available for this dataset.</div>
+      </div>
+    );
   }
   const columns = datasetPreview.columns ?? [];
   const rows = datasetPreview.rows;
 
   return (
-    <div style={{ overflow: 'auto', height: '100%' }}>
-      <table style={previewTable}>
-        <thead>
-          <tr>
-            {columns.map((col) => (
-              <th key={col.name} style={previewTh}>
-                {col.name}
-                <div style={{ fontSize: 10, color: 'var(--text-soft)', fontWeight: 400 }}>
-                  {col.field_type ?? col.data_type ?? ''}
-                </div>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, idx) => (
-            <tr key={idx}>
+    <div style={{ display: 'grid', gridTemplateRows: 'max-content 1fr', height: '100%' }}>
+      {previewHeader}
+      <div style={{ overflow: 'auto', minHeight: 0 }}>
+        <table style={previewTable}>
+          <thead>
+            <tr>
               {columns.map((col) => (
-                <td key={col.name} style={previewTd}>
-                  {formatPreviewCell(row[col.name])}
-                </td>
+                <th key={col.name} style={previewTh}>
+                  {col.name}
+                  <div style={{ fontSize: 10, color: 'var(--text-soft)', fontWeight: 400 }}>
+                    {col.field_type ?? col.data_type ?? ''}
+                  </div>
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row, idx) => (
+              <tr key={idx}>
+                {columns.map((col) => (
+                  <td key={col.name} style={previewTd}>
+                    {formatPreviewCell(row[col.name])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1510,6 +1550,23 @@ function formatPreviewCell(value: unknown): string {
   if (value === null || value === undefined) return '∅';
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === 'string' && value.trim() ? value : '';
+}
+
+function datasetHrefForNode(node: LineageNode) {
+  const links = node.metadata?.links;
+  if (links && typeof links === 'object' && !Array.isArray(links)) {
+    const linkMap = links as Record<string, unknown>;
+    for (const key of ['preview', 'self']) {
+      const value = linkMap[key];
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+  }
+  return `/datasets/${encodeURIComponent(node.id)}`;
 }
 
 interface CodeTabProps {

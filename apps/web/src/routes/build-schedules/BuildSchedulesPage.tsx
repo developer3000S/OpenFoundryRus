@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
 import {
+  deleteSchedule,
   getScheduleVersionDiff,
   listScheduleRuns,
   listScheduleVersions,
@@ -151,6 +152,7 @@ function ScheduleCard({
   onPause,
   onResume,
   onRunNow,
+  onDelete,
 }: {
   schedule: Schedule;
   selected: boolean;
@@ -160,6 +162,7 @@ function ScheduleCard({
   onPause: () => void;
   onResume: () => void;
   onRunNow: () => void;
+  onDelete: () => void;
 }) {
   const timeTrigger = getTimeTrigger(schedule.trigger);
   return (
@@ -267,6 +270,9 @@ function ScheduleCard({
         </button>
         <button type="button" className="of-button" onClick={onRunNow} disabled={busy}>
           Run now
+        </button>
+        <button type="button" className="of-button" onClick={onDelete} disabled={busy}>
+          Delete
         </button>
         <Link to={`/schedules/${schedule.rid}`} className="of-button">
           Metrics
@@ -499,6 +505,9 @@ export function BuildSchedulesPage() {
           <Link to="/build-schedules/sweep" className="of-button">
             Sweep schedules
           </Link>
+          <Link to="/schedules/new" className="of-button">
+            New schedule
+          </Link>
           {selectedSchedule && (
             <button type="button" className="of-button of-button--primary" onClick={() => setEditingSchedule(selectedSchedule)}>
               Edit selected
@@ -695,6 +704,14 @@ export function BuildSchedulesPage() {
                 onRunNow={() =>
                   void withScheduleAction(schedule, () => runScheduleNow(schedule.rid), () => {
                     if (selectedScheduleRid === schedule.rid) void refreshRuns(schedule.rid);
+                  })
+                }
+                onDelete={() =>
+                  void withScheduleAction(schedule, async () => {
+                    if (!window.confirm(`Delete schedule "${schedule.name}"?`)) return null;
+                    await deleteSchedule(schedule.rid);
+                    await refreshSchedules();
+                    return null;
                   })
                 }
               />

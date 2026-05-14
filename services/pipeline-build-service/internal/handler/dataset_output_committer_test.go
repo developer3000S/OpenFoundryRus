@@ -85,3 +85,15 @@ func TestDatasetServiceOutputCommitterSkipsNonDatasetRIDs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"out.alpha"}, metadataCommitter.datasets)
 }
+
+func TestDatasetServiceOutputCommitterRejectsLogicalViewOutputs(t *testing.T) {
+	metadataCommitter := &recordingCommitter{}
+	committer := DatasetServiceOutputCommitter{BaseURL: "http://127.0.0.1:1", Metadata: metadataCommitter}
+	err := committer.Commit(context.Background(), executor.OutputTransaction{
+		DatasetRID:     uuid.NewString(),
+		TransactionRID: "txn",
+		OutputKind:     "logical_view",
+	}, executor.NodeResult{OutputContentHash: "hash"})
+	require.ErrorContains(t, err, "logical_view_output_forbidden")
+	require.Empty(t, metadataCommitter.datasets)
+}

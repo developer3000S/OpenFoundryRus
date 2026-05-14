@@ -4,6 +4,7 @@ export interface Dataset {
   id: string;
   rid?: string;
   name: string;
+  display_name?: string;
   description: string;
   format: string;
   storage_path: string;
@@ -16,6 +17,18 @@ export interface Dataset {
   metadata?: Record<string, unknown> | null;
   health_status?: string | null;
   current_view_id?: string | null;
+  parent_folder_rid?: string;
+  folder_path?: string;
+  project_id?: string;
+  project_rid?: string;
+  path?: string;
+  resource_visibility?: 'private' | 'shared' | 'organization' | 'public' | string;
+  deleted_at?: string | null;
+  links?: {
+    self: string;
+    preview: string;
+    lineage: string;
+  };
   created_at: string;
   updated_at: string;
 }
@@ -43,16 +56,30 @@ export interface ListDatasetsParams {
 
 export interface CreateDatasetParams {
   name: string;
+  display_name?: string;
   description?: string;
   format?: string;
   tags?: string[];
+  parent_folder_rid?: string;
+  folder_path?: string;
+  project_id?: string;
+  project_rid?: string;
+  path?: string;
+  resource_visibility?: 'private' | 'shared' | 'organization' | 'public' | string;
 }
 
 export interface UpdateDatasetParams {
   name?: string;
+  display_name?: string;
   description?: string;
   owner_id?: string;
   tags?: string[];
+  parent_folder_rid?: string;
+  folder_path?: string;
+  project_id?: string;
+  project_rid?: string;
+  path?: string;
+  resource_visibility?: 'private' | 'shared' | 'organization' | 'public' | string;
 }
 
 export interface DatasetVersion {
@@ -69,6 +96,7 @@ export interface DatasetVersion {
 
 export interface DatasetPreviewResponse {
   dataset_id: string;
+  view_id?: string | null;
   version?: number;
   size_bytes?: number;
   format?: string;
@@ -87,6 +115,16 @@ export interface DatasetPreviewResponse {
   total_rows?: number;
   warnings?: string[];
   errors?: string[];
+  parse_errors?: Array<{
+    file_path: string;
+    row: number;
+    column?: number;
+    field?: string;
+    kind: string;
+    message: string;
+    value?: string;
+  }>;
+  sampled?: boolean;
   message?: string;
 }
 
@@ -117,7 +155,7 @@ export type DatasetFieldType =
   | { type: 'DATE' }
   | { type: 'TIMESTAMP' }
   | { type: 'DECIMAL'; precision?: number; scale?: number }
-  | { type: 'ARRAY'; arraySubType?: DatasetField }
+  | { type: 'ARRAY'; arraySubType?: DatasetField; arraySubtype?: DatasetField }
   | { type: 'MAP'; mapKeyType?: DatasetField; mapValueType?: DatasetField }
   | { type: 'STRUCT'; subSchemas?: DatasetField[] };
 
@@ -131,6 +169,7 @@ export interface DatasetField {
   scale?: number;
   // Array
   arraySubType?: DatasetField;
+  arraySubtype?: DatasetField;
   // Map
   mapKeyType?: DatasetField;
   mapValueType?: DatasetField;
@@ -143,10 +182,22 @@ export interface DatasetCsvOptions {
   quote: string;
   escape: string;
   header: boolean;
-  null_value: string;
+  nullValue?: string;
+  null_value?: string;
+  dateFormat?: string;
+  timestampFormat?: string;
   date_format?: string;
   timestamp_format?: string;
   charset: string;
+  encoding?: string;
+  skipLines?: number;
+  jaggedRowBehavior?: 'FILL_NULLS' | 'DROP_EXTRA' | 'ERROR' | string;
+  parseErrorBehavior?: 'NULL' | 'SKIP_ROW' | 'ERROR' | string;
+  filePathColumn?: boolean;
+  importedAtColumn?: boolean;
+  rowNumberColumn?: boolean;
+  dynamicTyping?: boolean;
+  warnings?: string[];
 }
 
 export interface DatasetCustomMetadata {
@@ -167,6 +218,42 @@ export interface DatasetSchemaResponse {
   content_hash: string;
   created_at: string;
   unchanged?: boolean;
+}
+
+export interface FoundryDatasetSchemaResponse {
+  branchName: string;
+  endTransactionRid: string;
+  schema: { fieldSchemaList: DatasetField[] };
+  versionId: string;
+  customMetadata?: DatasetCustomMetadata | null;
+}
+
+export interface DatasetSchemaInferenceRequest {
+  branchName?: string;
+  dataframeReader?: DatasetFileFormat | 'CSV' | 'JSON' | 'TEXT' | string;
+  endTransactionRid?: string;
+  format?: 'CSV' | 'JSON' | 'JSONL' | 'NDJSON' | 'TSV' | string;
+  paths?: string[];
+  sampleText?: string;
+  samples?: unknown[];
+  parserOptions?: Partial<DatasetCsvOptions>;
+  apply?: boolean;
+  maxRows?: number;
+  manualSchema?: DatasetSchemaPayload;
+}
+
+export interface DatasetSchemaInferenceResponse {
+  branchName: string;
+  dataframeReader: string;
+  fileFormat: string;
+  paths?: string[];
+  sources?: Array<{ path?: string; bytes?: number; rowCount?: number; mediaType?: string }>;
+  schema: { fieldSchemaList: DatasetField[] };
+  datasetSchema: DatasetSchemaPayload;
+  parserOptions: DatasetCsvOptions;
+  warnings?: string[];
+  sampleRows: number;
+  applied?: FoundryDatasetSchemaResponse | null;
 }
 
 export interface DatasetBranch {
@@ -332,15 +419,57 @@ export interface DatasetFilesystemResponse {
 
 export interface DatasetTransaction {
   id: string;
+  rid?: string;
+  transaction_rid?: string;
   dataset_id: string;
+  branch_id?: string;
   view_id?: string | null;
   operation: string;
+  tx_type?: string;
+  transactionType?: string;
   branch_name?: string | null;
   status: string;
   summary: string;
   metadata: Record<string, unknown>;
+  providence?: Record<string, unknown>;
+  started_by?: string | null;
   created_at: string;
+  started_at?: string;
+  createdTime?: string;
   committed_at?: string | null;
+  aborted_at?: string | null;
+  closedTime?: string | null;
+}
+
+interface DatasetTransactionsPage {
+  data: DatasetTransaction[];
+  next_cursor?: string | null;
+  has_more: boolean;
+}
+
+export interface StartDatasetTransactionParams {
+  transactionType: 'SNAPSHOT' | 'APPEND' | 'UPDATE' | 'DELETE' | string;
+  summary?: string;
+  provenance?: Record<string, unknown>;
+  providence?: Record<string, unknown>;
+}
+
+function normalizeDatasetTransaction(tx: DatasetTransaction): DatasetTransaction {
+  const operation = tx.operation || tx.tx_type || tx.transactionType || 'SNAPSHOT';
+  const createdAt = tx.created_at || tx.started_at || tx.createdTime || '';
+  const closedTime = tx.closedTime ?? null;
+  return {
+    ...tx,
+    operation,
+    tx_type: tx.tx_type || operation,
+    transactionType: tx.transactionType || operation,
+    transaction_rid: tx.transaction_rid || tx.rid,
+    created_at: createdAt,
+    started_at: tx.started_at || createdAt,
+    committed_at: tx.committed_at ?? (tx.status === 'COMMITTED' ? closedTime : null),
+    aborted_at: tx.aborted_at ?? (tx.status === 'ABORTED' ? closedTime : null),
+    closedTime,
+  };
 }
 
 export interface CreateDatasetBranchParams {
@@ -602,14 +731,49 @@ export function getDataset(id: string) {
   return api.get<Dataset>(`/datasets/${id}`);
 }
 
-export function previewDataset(datasetId: string, params?: { limit?: number; offset?: number; version?: number; branch?: string }) {
+export function previewDataset(datasetId: string, params?: {
+  limit?: number;
+  offset?: number;
+  version?: number;
+  branch?: string;
+  transaction_id?: string | null;
+  columns?: string[];
+  filter?: string;
+  sort?: string[];
+  sample?: boolean;
+  sample_size?: number;
+  sample_seed?: number;
+}) {
   const query = new URLSearchParams();
   if (params?.limit) query.set('limit', String(params.limit));
   if (params?.offset) query.set('offset', String(params.offset));
   if (params?.version !== undefined) query.set('version', String(params.version));
   if (params?.branch) query.set('branch', params.branch);
+  if (params?.transaction_id) query.set('transaction_id', params.transaction_id);
+  if (params?.columns && params.columns.length > 0) query.set('columns', params.columns.join(','));
+  if (params?.filter) query.set('filter', params.filter);
+  if (params?.sort && params.sort.length > 0) query.set('sort', params.sort.join(','));
+  if (params?.sample) query.set('sample', 'true');
+  if (params?.sample_size) query.set('sample_size', String(params.sample_size));
+  if (params?.sample_seed !== undefined) query.set('sample_seed', String(params.sample_seed));
   const qs = query.toString();
-  return api.get<DatasetPreviewResponse>(`/datasets/${datasetId}/preview${qs ? `?${qs}` : ''}`);
+  return api.get<DatasetPreviewResponse>(`/datasets/${datasetId}/preview${qs ? `?${qs}` : ''}`).then(normalizePreviewResponse);
+}
+
+function normalizePreviewResponse(response: DatasetPreviewResponse): DatasetPreviewResponse {
+  const rawColumns = (response.columns ?? []) as Array<string | { name: string; field_type?: string; data_type?: string; nullable?: boolean }>;
+  const columnNames = rawColumns.map((column) => (typeof column === 'string' ? column : column.name));
+  const columns = rawColumns.map((column) => (typeof column === 'string' ? { name: column } : column));
+  const rawRows = (response.rows ?? []) as unknown[];
+  const rows = Array.isArray(rawRows)
+    ? rawRows.map((row) => {
+      if (Array.isArray(row)) {
+        return Object.fromEntries(columnNames.map((column, index) => [column, row[index]]));
+      }
+      return row as Record<string, unknown>;
+    })
+    : [];
+  return { ...response, columns, rows };
 }
 
 export function getDatasetSchema(datasetId: string) {
@@ -622,6 +786,31 @@ export function getDatasetSchemaForBranch(datasetId: string, branch: string) {
   const qs = query.toString();
   return api.get<DatasetSchema | DatasetSchemaResponse>(
     `/datasets/${datasetId}/schema${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export function inferDatasetSchema(datasetId: string, params: DatasetSchemaInferenceRequest) {
+  return api.post<DatasetSchemaInferenceResponse>(
+    `/datasets/${encodeURIComponent(datasetId)}/schema:infer`,
+    params,
+  );
+}
+
+export function putDatasetSchemaForBranch(
+  datasetId: string,
+  branch: string,
+  schema: DatasetSchemaPayload,
+  parserOptions?: Partial<DatasetCsvOptions>,
+) {
+  return api.put<FoundryDatasetSchemaResponse>(
+    `/datasets/${encodeURIComponent(datasetId)}/schema`,
+    {
+      branchName: branch,
+      dataframeReader: schema.file_format,
+      customMetadata: schema.custom_metadata ?? undefined,
+      parserOptions,
+      schema: { fieldSchemaList: schema.fields },
+    },
   );
 }
 
@@ -709,12 +898,20 @@ export interface DatasetBackingFile {
   id: string;
   dataset_id: string;
   transaction_id: string;
+  transaction_rid?: string;
   logical_path: string;
+  path?: string;
   physical_uri: string;
   size_bytes: number;
+  media_type?: string | null;
+  content_type?: string | null;
   sha256?: string | null;
+  row_count_hint?: number | null;
+  storage_location?: Record<string, unknown> | null;
   created_at: string;
   modified_at: string;
+  updated_time?: string;
+  deleted_at?: string | null;
   status: DatasetBackingFileStatus;
 }
 
@@ -723,6 +920,7 @@ export interface DatasetFilesResponse {
   branch: string;
   total: number;
   files: DatasetBackingFile[];
+  data?: DatasetBackingFile[];
 }
 
 export interface ListDatasetFilesParams {
@@ -743,12 +941,90 @@ export function listDatasetFiles(datasetId: string, params: ListDatasetFilesPara
   );
 }
 
+export function getDatasetFileMetadata(datasetId: string, fileId: string) {
+  return api.get<DatasetBackingFile>(
+    `/datasets/${datasetId}/files/${encodeURIComponent(fileId)}`,
+  );
+}
+
+export function getDatasetFileMetadataByPath(datasetId: string, path: string, branch?: string) {
+  const query = new URLSearchParams({ path });
+  if (branch) query.set('branch', branch);
+  return api.get<DatasetBackingFile>(
+    `/datasets/${datasetId}/files/metadata?${query.toString()}`,
+  );
+}
+
 /** Return the absolute URL the browser should follow to download a
  *  file. The DVS endpoint returns a 302 to a presigned URL; the browser
  *  follows it transparently when this URL is used as the `href` of an
  *  `<a>` or assigned to `window.location`. */
 export function datasetFileDownloadUrl(datasetId: string, fileId: string): string {
   return `/api/v1/datasets/${datasetId}/files/${fileId}/download`;
+}
+
+export function datasetFileContentByPathUrl(datasetId: string, path: string, branch?: string): string {
+  const query = new URLSearchParams({ path });
+  if (branch) query.set('branch', branch);
+  return `/api/v1/datasets/${datasetId}/files/content?${query.toString()}`;
+}
+
+export interface UploadTransactionFileContentResponse {
+  path: string;
+  logical_path: string;
+  transaction_id: string;
+  transaction_rid: string;
+  physical_uri: string;
+  size_bytes: number;
+  media_type: string;
+  sha256: string;
+  row_count_hint?: number | null;
+  storage_location?: Record<string, unknown> | null;
+  updated_time: string;
+}
+
+export interface DeleteTransactionFileContentResponse {
+  path: string;
+  logical_path: string;
+  transaction_id: string;
+  transaction_rid: string;
+  operation: 'REMOVE';
+  updated_time: string;
+}
+
+export async function uploadTransactionFileContent(
+  datasetId: string,
+  transactionId: string,
+  path: string,
+  file: Blob,
+  params: { mediaType?: string; rowCountHint?: number; operation?: 'ADD' | 'REPLACE' } = {},
+) {
+  const query = new URLSearchParams({ path });
+  if (params.rowCountHint !== undefined) query.set('row_count_hint', String(params.rowCountHint));
+  if (params.operation) query.set('operation', params.operation);
+  const response = await fetch(
+    `/api/v1/datasets/${datasetId}/transactions/${transactionId}/files/content?${query.toString()}`,
+    {
+      method: 'POST',
+      headers: {
+        ...api.authorizationHeaders(),
+        'Content-Type': params.mediaType || file.type || 'application/octet-stream',
+      },
+      body: file,
+    },
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error?.error ?? error?.message ?? response.statusText);
+  }
+  return response.json() as Promise<UploadTransactionFileContentResponse>;
+}
+
+export function deleteTransactionFile(datasetId: string, transactionId: string, path: string) {
+  const query = new URLSearchParams({ path });
+  return api.delete<DeleteTransactionFileContentResponse>(
+    `/datasets/${datasetId}/transactions/${transactionId}/files?${query.toString()}`,
+  );
 }
 
 export interface DatasetStorageDetails {
@@ -789,6 +1065,14 @@ export function deleteDataset(id: string) {
   return api.delete(`/datasets/${id}`);
 }
 
+export function hardDeleteDataset(id: string) {
+  return api.delete(`/datasets/${id}?hard=true`);
+}
+
+export function restoreDataset(id: string) {
+  return api.post<Dataset>(`/datasets/${id}:restore`, {});
+}
+
 export function startDatasetBuild(datasetId: string, params: DatasetBuildParams = {}) {
   return api.post<DatasetBuildResponse>(`/datasets/${datasetId}/builds`, params);
 }
@@ -801,8 +1085,74 @@ export function getVersions(datasetId: string) {
   return api.get<DatasetVersion[]>(`/datasets/${datasetId}/versions`);
 }
 
-export function listDatasetTransactions(datasetId: string) {
-  return api.get<DatasetTransaction[]>(`/datasets/${datasetId}/transactions`);
+export async function listDatasetTransactions(datasetId: string, params: { branch?: string } = {}) {
+  const query = new URLSearchParams();
+  if (params.branch) query.set('branch', params.branch);
+  const qs = query.toString();
+  const response = await api.get<DatasetTransaction[] | DatasetTransactionsPage>(
+    `/datasets/${datasetId}/transactions${qs ? `?${qs}` : ''}`,
+  );
+  const rows = Array.isArray(response) ? response : response.data;
+  return rows.map(normalizeDatasetTransaction);
+}
+
+export interface IncrementalTransactionBoundary {
+  index: number;
+  transaction_id: string;
+  transaction_rid: string;
+  tx_type: string;
+  started_at: string;
+  committed_at?: string | null;
+  file_count: number;
+  size_bytes: number;
+}
+
+export interface IncrementalViewBoundary {
+  start: IncrementalTransactionBoundary;
+  end: IncrementalTransactionBoundary;
+  start_reason: string;
+  transaction_count: number;
+  counts: Record<string, number>;
+  append_only: boolean;
+  has_update: boolean;
+  has_delete: boolean;
+  has_snapshot: boolean;
+}
+
+export interface IncrementalReadinessWarning {
+  code: string;
+  severity: string;
+  message: string;
+  transaction_id?: string;
+  transaction_rid?: string;
+}
+
+export interface DatasetIncrementalReadiness {
+  dataset_id: string;
+  dataset_rid: string;
+  branch: string;
+  mode: 'empty' | 'append_only' | 'snapshot_based' | 'update_bearing' | 'delete_bearing' | 'mixed' | string;
+  classification: string;
+  incremental_ready: boolean;
+  append_only: boolean;
+  total_committed: number;
+  transaction_counts: Record<string, number>;
+  first_snapshot?: IncrementalTransactionBoundary | null;
+  latest_snapshot?: IncrementalTransactionBoundary | null;
+  current_view_start?: IncrementalTransactionBoundary | null;
+  current_view_end?: IncrementalTransactionBoundary | null;
+  view_boundaries: IncrementalViewBoundary[];
+  warnings?: IncrementalReadinessWarning[];
+  computed_at: string;
+}
+
+export function getDatasetIncrementalReadiness(datasetId: string, params: { branch?: string } = {}) {
+  const query = new URLSearchParams();
+  if (params.branch) query.set('branch', params.branch);
+  const qs = query.toString();
+  return api.get<DatasetIncrementalReadiness>(
+    `/datasets/${encodeURIComponent(datasetId)}/incremental-readiness${qs ? `?${qs}` : ''}`,
+  );
 }
 
 export function listBranches(datasetId: string) {
@@ -1206,6 +1556,22 @@ export function listBranchAncestry(datasetRid: string, branchName: string) {
   );
 }
 
+/// `POST /datasets/{rid}/branches/{branch}/transactions`.
+export function startTransaction(
+  datasetRid: string,
+  branchName: string,
+  params: StartDatasetTransactionParams,
+) {
+  return api.post<DatasetTransaction>(
+    `/datasets/${encodeURIComponent(datasetRid)}/branches/${encodeURIComponent(branchName)}/transactions`,
+    {
+      transactionType: params.transactionType,
+      summary: params.summary,
+      providence: params.providence ?? params.provenance ?? {},
+    },
+  ).then(normalizeDatasetTransaction);
+}
+
 /// `POST /datasets/{rid}/branches/{branch}/transactions/{txn}:commit`.
 export function commitTransaction(
   datasetRid: string,
@@ -1217,7 +1583,7 @@ export function commitTransaction(
       branchName,
     )}/transactions/${encodeURIComponent(transactionId)}:commit`,
     {},
-  );
+  ).then(normalizeDatasetTransaction);
 }
 
 /// `POST /datasets/{rid}/branches/{branch}/transactions/{txn}:abort`.
@@ -1231,7 +1597,7 @@ export function abortTransaction(
       branchName,
     )}/transactions/${encodeURIComponent(transactionId)}:abort`,
     {},
-  );
+  ).then(normalizeDatasetTransaction);
 }
 
 /// `GET /datasets/{rid}/job-specs?on_branch=<branch>` — queries the

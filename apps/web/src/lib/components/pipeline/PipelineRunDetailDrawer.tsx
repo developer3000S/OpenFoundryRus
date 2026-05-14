@@ -364,9 +364,14 @@ export function PipelineRunDetailDrawer({
                       </select>
                     </label>
                     {selectedDatasetId && (
-                      <a className="of-button" href={`/lineage?dataset=${encodeURIComponent(selectedDatasetId)}`} style={{ fontSize: 11 }}>
-                        Open lineage
-                      </a>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <a className="of-button" href={`/datasets/${encodeURIComponent(selectedDatasetId)}`} style={{ fontSize: 11 }}>
+                          Open dataset
+                        </a>
+                        <a className="of-button" href={`/lineage?dataset=${encodeURIComponent(selectedDatasetId)}`} style={{ fontSize: 11 }}>
+                          Open lineage
+                        </a>
+                      </div>
                     )}
                   </div>
                   {selectedDatasetId ? (

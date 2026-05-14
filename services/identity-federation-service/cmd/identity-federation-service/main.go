@@ -98,10 +98,11 @@ func main() {
 	mfa := &handlers.MFA{JWT: jwt, Repo: r, Issuer: issuer}
 	wa := &handlers.WebAuthn{JWT: jwt, Repo: r, Service: waService, Issuer: issuer}
 	sso := &handlers.SSO{Repo: r, OIDC: oidcSvc, Issuer: issuer}
+	ssoAdmin := handlers.NewSsoAdmin(r, nil)
 	rbac := &handlers.RBAC{Repo: r}
 	metrics := observability.NewMetrics()
 
-	srv := server.New(cfg, jwt, auth, mfa, wa, sso, rbac, metrics, probes.Postgres("primary", pool))
+	srv := server.New(cfg, jwt, auth, mfa, wa, sso, ssoAdmin, rbac, metrics, probes.Postgres("primary", pool))
 	if err := server.Run(ctx, srv, log); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("server exited with error", slog.String("error", err.Error()))
 		os.Exit(1)

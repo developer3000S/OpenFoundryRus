@@ -21,10 +21,15 @@ func TestTransactionTypeMatrixMatchesRustViewReplay(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, view, 3)
 
-	require.NoError(t, validateCommit(models.TransactionTypeUpdate, []stagedFileRow{{LogicalPath: "A", PhysicalPath: "phys/A.v1", SizeBytes: 11, Op: models.FileOperationReplace}}, view))
-	view, err = applyTransaction(view, models.TransactionTypeUpdate, []stagedFileRow{{LogicalPath: "A", PhysicalPath: "phys/A.v1", SizeBytes: 11, Op: models.FileOperationReplace}})
+	updateRows := []stagedFileRow{
+		{LogicalPath: "A", PhysicalPath: "phys/A.v1", SizeBytes: 11, Op: models.FileOperationReplace},
+		{LogicalPath: "D", PhysicalPath: "phys/D.v0", SizeBytes: 40, Op: models.FileOperationAdd},
+	}
+	require.NoError(t, validateCommit(models.TransactionTypeUpdate, updateRows, view))
+	view, err = applyTransaction(view, models.TransactionTypeUpdate, updateRows)
 	require.NoError(t, err)
 	require.Equal(t, int64(11), view["A"].SizeBytes)
+	require.Equal(t, int64(40), view["D"].SizeBytes)
 
 	require.NoError(t, validateCommit(models.TransactionTypeDelete, []stagedFileRow{{LogicalPath: "B", Op: models.FileOperationRemove}}, view))
 	view, err = applyTransaction(view, models.TransactionTypeDelete, []stagedFileRow{{LogicalPath: "B", Op: models.FileOperationRemove}})
@@ -32,6 +37,13 @@ func TestTransactionTypeMatrixMatchesRustViewReplay(t *testing.T) {
 	require.NotContains(t, view, "B")
 	require.Contains(t, view, "A")
 	require.Contains(t, view, "C")
+	require.Contains(t, view, "D")
+
+	require.NoError(t, validateCommit(models.TransactionTypeSnapshot, []stagedFileRow{{LogicalPath: "E", PhysicalPath: "phys/E.v0", SizeBytes: 50, Op: models.FileOperationAdd}}, view))
+	view, err = applyTransaction(view, models.TransactionTypeSnapshot, []stagedFileRow{{LogicalPath: "E", PhysicalPath: "phys/E.v0", SizeBytes: 50, Op: models.FileOperationAdd}})
+	require.NoError(t, err)
+	require.Len(t, view, 1)
+	require.Equal(t, int64(50), view["E"].SizeBytes)
 }
 
 func TestTransactionCommitValidationMatchesRustErrors(t *testing.T) {
@@ -47,6 +59,10 @@ func TestTransactionCommitValidationMatchesRustErrors(t *testing.T) {
 	)
 	require.ErrorIs(t,
 		validateCommit(models.TransactionTypeDelete, []stagedFileRow{{LogicalPath: "new", PhysicalPath: "phys/new", SizeBytes: 2, Op: models.FileOperationAdd}}, current),
+		ErrValidation,
+	)
+	require.ErrorIs(t,
+		validateCommit(models.TransactionTypeUpdate, []stagedFileRow{{LogicalPath: "existing", Op: models.FileOperationRemove}}, current),
 		ErrValidation,
 	)
 	require.ErrorIs(t,

@@ -42,18 +42,18 @@ type LineageNode struct {
 
 // LineageGraphEdge mirrors LineageGraphEdge.
 type LineageGraphEdge struct {
-	ID                uuid.UUID       `json:"id"`
-	Source            uuid.UUID       `json:"source"`
-	SourceKind        string          `json:"source_kind"`
-	Target            uuid.UUID       `json:"target"`
-	TargetKind        string          `json:"target_kind"`
-	RelationKind      string          `json:"relation_kind"`
-	PipelineID        *uuid.UUID      `json:"pipeline_id"`
-	WorkflowID        *uuid.UUID      `json:"workflow_id"`
-	NodeID            *string         `json:"node_id"`
-	StepID            *string         `json:"step_id"`
-	EffectiveMarking  string          `json:"effective_marking"`
-	Metadata          json.RawMessage `json:"metadata"`
+	ID               uuid.UUID       `json:"id"`
+	Source           uuid.UUID       `json:"source"`
+	SourceKind       string          `json:"source_kind"`
+	Target           uuid.UUID       `json:"target"`
+	TargetKind       string          `json:"target_kind"`
+	RelationKind     string          `json:"relation_kind"`
+	PipelineID       *uuid.UUID      `json:"pipeline_id"`
+	WorkflowID       *uuid.UUID      `json:"workflow_id"`
+	NodeID           *string         `json:"node_id"`
+	StepID           *string         `json:"step_id"`
+	EffectiveMarking string          `json:"effective_marking"`
+	Metadata         json.RawMessage `json:"metadata"`
 }
 
 // LineagePathHop mirrors LineagePathHop.
@@ -68,15 +68,15 @@ type LineagePathHop struct {
 
 // LineageImpactItem mirrors LineageImpactItem.
 type LineageImpactItem struct {
-	ID                       uuid.UUID        `json:"id"`
-	Kind                     string           `json:"kind"`
-	Label                    string           `json:"label"`
-	Distance                 int              `json:"distance"`
-	Marking                  string           `json:"marking"`
-	EffectiveMarking         string           `json:"effective_marking"`
-	RequiresAcknowledgement  bool             `json:"requires_acknowledgement"`
-	Metadata                 json.RawMessage  `json:"metadata"`
-	Path                     []LineagePathHop `json:"path"`
+	ID                      uuid.UUID        `json:"id"`
+	Kind                    string           `json:"kind"`
+	Label                   string           `json:"label"`
+	Distance                int              `json:"distance"`
+	Marking                 string           `json:"marking"`
+	EffectiveMarking        string           `json:"effective_marking"`
+	RequiresAcknowledgement bool             `json:"requires_acknowledgement"`
+	Metadata                json.RawMessage  `json:"metadata"`
+	Path                    []LineagePathHop `json:"path"`
 }
 
 // LineageBuildCandidate mirrors LineageBuildCandidate.
@@ -96,20 +96,20 @@ type LineageBuildCandidate struct {
 
 // LineageImpactAnalysis mirrors LineageImpactAnalysis.
 type LineageImpactAnalysis struct {
-	Root               LineageNode             `json:"root"`
-	PropagatedMarking  string                  `json:"propagated_marking"`
-	Upstream           []LineageImpactItem     `json:"upstream"`
-	Downstream         []LineageImpactItem     `json:"downstream"`
-	BuildCandidates    []LineageBuildCandidate `json:"build_candidates"`
+	Root              LineageNode             `json:"root"`
+	PropagatedMarking string                  `json:"propagated_marking"`
+	Upstream          []LineageImpactItem     `json:"upstream"`
+	Downstream        []LineageImpactItem     `json:"downstream"`
+	BuildCandidates   []LineageBuildCandidate `json:"build_candidates"`
 }
 
 // LineageBuildRequest mirrors the POST body for trigger_dataset_lineage_builds.
 type LineageBuildRequest struct {
-	IncludeWorkflows               bool            `json:"include_workflows,omitempty"`
-	DryRun                         bool            `json:"dry_run,omitempty"`
-	AcknowledgeSensitiveLineage    bool            `json:"acknowledge_sensitive_lineage,omitempty"`
-	MaxDepth                       *int            `json:"max_depth,omitempty"`
-	Context                        json.RawMessage `json:"context,omitempty"`
+	IncludeWorkflows            bool            `json:"include_workflows,omitempty"`
+	DryRun                      bool            `json:"dry_run,omitempty"`
+	AcknowledgeSensitiveLineage bool            `json:"acknowledge_sensitive_lineage,omitempty"`
+	MaxDepth                    *int            `json:"max_depth,omitempty"`
+	Context                     json.RawMessage `json:"context,omitempty"`
 }
 
 // LineageBuildTriggerResult mirrors LineageBuildTriggerResult.
@@ -124,13 +124,13 @@ type LineageBuildTriggerResult struct {
 
 // LineageBuildResult mirrors LineageBuildResult.
 type LineageBuildResult struct {
-	Root                          LineageNode                 `json:"root"`
-	DryRun                        bool                        `json:"dry_run"`
-	AcknowledgedSensitiveLineage  bool                        `json:"acknowledged_sensitive_lineage"`
-	PropagatedMarking             string                      `json:"propagated_marking"`
-	Candidates                    []LineageBuildCandidate     `json:"candidates"`
-	Triggered                     []LineageBuildTriggerResult `json:"triggered"`
-	Skipped                       []LineageBuildTriggerResult `json:"skipped"`
+	Root                         LineageNode                 `json:"root"`
+	DryRun                       bool                        `json:"dry_run"`
+	AcknowledgedSensitiveLineage bool                        `json:"acknowledged_sensitive_lineage"`
+	PropagatedMarking            string                      `json:"propagated_marking"`
+	Candidates                   []LineageBuildCandidate     `json:"candidates"`
+	Triggered                    []LineageBuildTriggerResult `json:"triggered"`
+	Skipped                      []LineageBuildTriggerResult `json:"skipped"`
 }
 
 // WorkflowLineageSyncRequest mirrors the workflow sync POST body.
@@ -201,15 +201,28 @@ type LineageRelationRecord struct {
 // DatasetMetadata mirrors the wire-format response of the
 // dataset-service /internal/datasets/{id}/metadata endpoint.
 type DatasetMetadata struct {
-	ID             uuid.UUID `json:"id"`
-	Name           string    `json:"name"`
-	Format         string    `json:"format"`
-	Marking        string    `json:"marking"`
-	Tags           []string  `json:"tags"`
-	CurrentVersion int32     `json:"current_version"`
-	ActiveBranch   string    `json:"active_branch"`
-	OwnerID        uuid.UUID `json:"owner_id"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                 uuid.UUID `json:"id"`
+	RID                string    `json:"rid"`
+	Name               string    `json:"name"`
+	DisplayName        string    `json:"display_name"`
+	Format             string    `json:"format"`
+	Marking            string    `json:"marking"`
+	Tags               []string  `json:"tags"`
+	CurrentVersion     int32     `json:"current_version"`
+	ActiveBranch       string    `json:"active_branch"`
+	OwnerID            uuid.UUID `json:"owner_id"`
+	ParentFolderRID    string    `json:"parent_folder_rid"`
+	FolderPath         string    `json:"folder_path"`
+	ProjectID          string    `json:"project_id"`
+	ProjectRID         string    `json:"project_rid"`
+	Path               string    `json:"path"`
+	ResourceVisibility string    `json:"resource_visibility"`
+	Links              struct {
+		Self    string `json:"self"`
+		Preview string `json:"preview"`
+		Lineage string `json:"lineage"`
+	} `json:"links"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // NodeKind enumerates the valid entity_kind / source_kind / target_kind
@@ -251,10 +264,10 @@ type NodeKey struct {
 // Relation kind constants — kept identical to the Rust ones so callers
 // across both runtimes can still compare on equality.
 const (
-	RelationKindDerives        = "derives"
-	RelationKindColumnDerives  = "column_derives"
-	RelationKindConsumes       = "consumes"
-	RelationKindProduces       = "produces"
-	MetadataSourceColumnKey    = "source_column"
-	MetadataTargetColumnKey    = "target_column"
+	RelationKindDerives       = "derives"
+	RelationKindColumnDerives = "column_derives"
+	RelationKindConsumes      = "consumes"
+	RelationKindProduces      = "produces"
+	MetadataSourceColumnKey   = "source_column"
+	MetadataTargetColumnKey   = "target_column"
 )

@@ -2,6 +2,8 @@ package repo
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,8 +85,10 @@ func (r *Repo) GetCatalogFacets(ctx context.Context) (*models.CatalogFacets, err
 func (r *Repo) GetInternalDatasetMetadata(ctx context.Context, datasetID uuid.UUID) (*models.InternalDatasetMetadata, error) {
 	var out models.InternalDatasetMetadata
 	var storagePath string
-	err := r.Pool.QueryRow(ctx, `SELECT id, name, format, tags, current_version, active_branch, owner_id, updated_at, storage_path
-		FROM datasets WHERE id = $1`, datasetID).Scan(&out.ID, &out.Name, &out.Format, &out.Tags, &out.CurrentVersion, &out.ActiveBranch, &out.OwnerID, &out.UpdatedAt, &storagePath)
+	err := r.Pool.QueryRow(ctx, `SELECT id, rid, name, format, tags, current_version, active_branch, owner_id,
+		parent_folder_rid, folder_path, project_id, project_rid, path, resource_visibility,
+		updated_at, storage_path
+		FROM datasets WHERE id = $1 AND deleted_at IS NULL`, datasetID).Scan(&out.ID, &out.RID, &out.Name, &out.Format, &out.Tags, &out.CurrentVersion, &out.ActiveBranch, &out.OwnerID, &out.ParentFolderRID, &out.FolderPath, &out.ProjectID, &out.ProjectRID, &out.Path, &out.ResourceVisibility, &out.UpdatedAt, &storagePath)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -109,13 +113,16 @@ func (r *Repo) GetInternalDatasetMetadata(ctx context.Context, datasetID uuid.UU
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	out.DisplayName = out.Name
+	out.Links = datasetLinks(out.ID)
 	return &out, nil
 }
 
 func (r *Repo) GetCatalogDataset(ctx context.Context, datasetID uuid.UUID) (*models.CatalogDataset, error) {
 	row := r.Pool.QueryRow(ctx, `SELECT id, name, description, format, storage_path, size_bytes, row_count,
 		owner_id, tags, current_version, active_branch, metadata, health_status, current_view_id,
-		created_at, updated_at FROM datasets WHERE id = $1`, datasetID)
+		rid, parent_folder_rid, folder_path, project_id, project_rid, path, resource_visibility,
+		deleted_at, created_at, updated_at FROM datasets WHERE id = $1 AND deleted_at IS NULL`, datasetID)
 	v, err := scanCatalogDataset(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -124,8 +131,50 @@ func (r *Repo) GetCatalogDataset(ctx context.Context, datasetID uuid.UUID) (*mod
 }
 
 func (r *Repo) PatchDatasetMetadata(ctx context.Context, datasetID uuid.UUID, body *models.DatasetMetadataPatch) (*models.CatalogDataset, error) {
+	current, err := r.GetCatalogDataset(ctx, datasetID)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil {
+		return nil, ErrNotFound
+	}
+	name := current.Name
+	if body.Name != nil {
+		name = strings.TrimSpace(*body.Name)
+	} else if body.DisplayName != nil {
+		name = strings.TrimSpace(*body.DisplayName)
+	}
+	parentFolderRID := current.ParentFolderRID
+	if next := firstNonEmpty(body.ParentFolderRID, body.ParentFolderRid); next != "" {
+		parentFolderRID = next
+	}
+	folderPath := current.FolderPath
+	if body.FolderPath != nil {
+		folderPath = normalizeFolderPath(*body.FolderPath)
+	}
+	projectID := current.ProjectID
+	if next := firstNonEmpty(body.ProjectID); next != "" {
+		projectID = next
+	}
+	projectRID := current.ProjectRID
+	if next := firstNonEmpty(body.ProjectRID); next != "" {
+		projectRID = next
+	}
+	visibility := current.ResourceVisibility
+	if next := firstNonEmpty(body.ResourceVisibility, body.Visibility); next != "" {
+		visibility = strings.ToLower(next)
+	}
+	resourcePath := current.Path
+	if body.Path != nil {
+		if normalized := normalizeResourcePath(*body.Path); normalized != "" {
+			resourcePath = normalized
+			folderPath = parentPath(normalized)
+		}
+	} else if body.Name != nil || body.DisplayName != nil || body.FolderPath != nil {
+		resourcePath = BuildDatasetResourcePath(folderPath, name)
+	}
 	row := r.Pool.QueryRow(ctx, `UPDATE datasets SET
-		name = COALESCE($2, name),
+		name = $2,
 		description = COALESCE($3, description),
 		owner_id = COALESCE($4, owner_id),
 		tags = COALESCE($5, tags),
@@ -133,12 +182,20 @@ func (r *Repo) PatchDatasetMetadata(ctx context.Context, datasetID uuid.UUID, bo
 		metadata = COALESCE($7::jsonb, metadata),
 		health_status = COALESCE($8, health_status),
 		current_view_id = COALESCE($9, current_view_id),
+		parent_folder_rid = $10,
+		folder_path = $11,
+		project_id = $12,
+		project_rid = $13,
+		path = $14,
+		resource_visibility = $15,
 		updated_at = NOW()
-		WHERE id = $1
+		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, name, description, format, storage_path, size_bytes, row_count,
 		owner_id, tags, current_version, active_branch, metadata, health_status, current_view_id,
-		created_at, updated_at`, datasetID, body.Name, body.Description, body.OwnerID, body.Tags, body.Format,
-		nullableRaw(body.Metadata), body.HealthStatus, body.CurrentViewID)
+		rid, parent_folder_rid, folder_path, project_id, project_rid, path, resource_visibility,
+		deleted_at, created_at, updated_at`, datasetID, name, body.Description, body.OwnerID, body.Tags, body.Format,
+		nullableRaw(body.Metadata), body.HealthStatus, body.CurrentViewID,
+		parentFolderRID, folderPath, projectID, projectRID, resourcePath, visibility)
 	v, err := scanCatalogDataset(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -362,9 +419,9 @@ func parseTransactionRID(input string) (uuid.UUID, error) {
 }
 
 func (r *Repo) CreateRuntimeBranch(ctx context.Context, datasetID uuid.UUID, body *models.CreateBranchBody, actor uuid.UUID) (*models.RuntimeBranch, error) {
-	name := strings.TrimSpace(body.Name)
-	if name == "" {
-		return nil, fmt.Errorf("%w: branch name is required", ErrValidation)
+	name, err := normalizeBranchName(body.Name)
+	if err != nil {
+		return nil, err
 	}
 	var datasetRID string
 	if err := r.Pool.QueryRow(ctx, `SELECT rid FROM datasets WHERE id = $1`, datasetID).Scan(&datasetRID); err != nil {
@@ -399,7 +456,7 @@ func (r *Repo) CreateRuntimeBranch(ctx context.Context, datasetID uuid.UUID, bod
 			return nil, err
 		}
 		if status != string(models.TransactionStatusCommitted) {
-			return nil, fmt.Errorf("%w: source transaction must be COMMITTED", ErrConflict)
+			return nil, fmt.Errorf("%w: source transaction must be COMMITTED", ErrValidation)
 		}
 		parentID = &branchID
 		headID = &txnID
@@ -421,6 +478,7 @@ func (r *Repo) CreateRuntimeBranch(ctx context.Context, datasetID uuid.UUID, bod
 			}
 			parentID = &parent.ID
 			headID = parent.HeadTransactionID
+			createdFrom = parent.HeadTransactionID
 			if len(fallback) == 0 {
 				fallback = []string{parent.Name}
 			}
@@ -472,6 +530,9 @@ func (r *Repo) DeleteBranchReparentChildren(ctx context.Context, datasetID uuid.
 	}
 	if row.IsDefault || row.ParentBranchID == nil {
 		return fmt.Errorf("%w: cannot delete root/default branch", ErrValidation)
+	}
+	if err := r.ensureBranchDeletable(ctx, datasetID, row.ID, row.Name, row.ParentBranchID, row.IsDefault); err != nil {
+		return err
 	}
 	if _, err := r.Pool.Exec(ctx, `UPDATE dataset_branches SET parent_branch_id = $3, updated_at = NOW()
 		WHERE dataset_id = $1 AND parent_branch_id = $2 AND deleted_at IS NULL`, datasetID, row.ID, reparentTo); err != nil {
@@ -554,8 +615,14 @@ func (r *Repo) PreviewDeleteBranch(ctx context.Context, datasetID uuid.UUID, bra
 }
 
 func (r *Repo) DeleteRuntimeBranch(ctx context.Context, datasetID uuid.UUID, branch string) (*models.BranchDeleteResponse, error) {
+	if _, err := normalizeBranchName(branch); err != nil {
+		return nil, err
+	}
 	target, err := r.GetRuntimeBranch(ctx, datasetID, branch)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.ensureBranchDeletable(ctx, datasetID, target.ID, target.Name, target.ParentBranchID, false); err != nil {
 		return nil, err
 	}
 	children, err := r.directChildren(ctx, target.ID)
@@ -590,6 +657,39 @@ func (r *Repo) DeleteRuntimeBranch(ctx context.Context, datasetID uuid.UUID, bra
 		items = append(items, models.BranchDeleteChildReparent{ChildBranch: child.Name, ChildBranchRID: "ri.foundry.main.branch." + child.ID.String(), NewParent: parentName, NewParentRID: parentRID})
 	}
 	return &models.BranchDeleteResponse{Branch: target.Name, BranchRID: target.RID, Reparented: items}, nil
+}
+
+func (r *Repo) ensureBranchDeletable(ctx context.Context, datasetID uuid.UUID, branchID uuid.UUID, branchName string, parentBranchID *uuid.UUID, isDefault bool) error {
+	if parentBranchID == nil || isDefault {
+		return fmt.Errorf("%w: cannot delete root/default branch", ErrPreconditionFailed)
+	}
+	var activeBranch string
+	if err := r.Pool.QueryRow(ctx, `SELECT active_branch FROM datasets WHERE id = $1 AND deleted_at IS NULL`, datasetID).Scan(&activeBranch); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if strings.TrimSpace(activeBranch) == branchName {
+		return fmt.Errorf("%w: cannot delete active dataset branch", ErrPreconditionFailed)
+	}
+	var retentionPolicy string
+	var hasOpen bool
+	if err := r.Pool.QueryRow(ctx, `SELECT retention_policy,
+		EXISTS(SELECT 1 FROM dataset_transactions WHERE branch_id = $1 AND status = 'OPEN')
+		FROM dataset_branches WHERE id = $1 AND dataset_id = $2 AND deleted_at IS NULL`, branchID, datasetID).Scan(&retentionPolicy, &hasOpen); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if retentionPolicy == string(models.RetentionPolicyForever) {
+		return fmt.Errorf("%w: cannot delete FOREVER retention branch", ErrPreconditionFailed)
+	}
+	if hasOpen {
+		return fmt.Errorf("%w: cannot delete branch with OPEN transaction", ErrPreconditionFailed)
+	}
+	return nil
 }
 
 func (r *Repo) ReparentRuntimeBranch(ctx context.Context, datasetID uuid.UUID, branch string, newParent *string) (*models.RuntimeBranch, error) {
@@ -796,19 +896,43 @@ func (r *Repo) ReplaceFallbacks(ctx context.Context, branchID uuid.UUID, fallbac
 }
 
 func (r *Repo) StartTransaction(ctx context.Context, datasetID uuid.UUID, branchID uuid.UUID, branchName string, txType models.TransactionType, summary string, providence models.JSONValue, startedBy uuid.UUID) (*models.RuntimeTransaction, error) {
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
 	var openExists bool
-	if err := r.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM dataset_transactions WHERE branch_id = $1 AND status = 'OPEN')`, branchID).Scan(&openExists); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM dataset_transactions WHERE branch_id = $1 AND status = 'OPEN')`, branchID).Scan(&openExists); err != nil {
 		return nil, err
 	}
 	if openExists {
 		return nil, ErrConflict
 	}
-	row := r.Pool.QueryRow(ctx, `INSERT INTO dataset_transactions
+	txnID := uuid.New()
+	row := tx.QueryRow(ctx, `INSERT INTO dataset_transactions
 		(id, dataset_id, branch_id, branch_name, tx_type, status, summary, metadata, providence, started_by)
 		VALUES ($1,$2,$3,$4,$5,'OPEN',$6,'{}'::jsonb,$7::jsonb,$8)
 		RETURNING id, dataset_id, branch_id, branch_name, tx_type, status, summary, metadata, providence, started_by, started_at, committed_at, aborted_at`,
-		uuid.New(), datasetID, branchID, branchName, txType, summary, defaultRawObject(providence), startedBy)
-	return scanRuntimeTransaction(row)
+		txnID, datasetID, branchID, branchName, txType, summary, defaultRawObject(providence), startedBy)
+	out, err := scanRuntimeTransaction(row)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE dataset_branches
+		SET head_transaction_id = $2, last_activity_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND dataset_id = $3 AND deleted_at IS NULL`, branchID, txnID, datasetID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	committed = true
+	return out, nil
 }
 
 func (r *Repo) StageTransactionFiles(ctx context.Context, datasetID uuid.UUID, transactionID uuid.UUID, files []models.StageTransactionFile) error {
@@ -826,14 +950,26 @@ func (r *Repo) StageTransactionFiles(ctx context.Context, datasetID uuid.UUID, t
 		if op == "" {
 			op = models.FileOperationAdd
 		}
+		mediaType := firstNonEmpty(file.MediaType, file.ContentType)
+		storageLocation := file.StorageLocation
+		if len(storageLocation) == 0 {
+			storageLocation = []byte(`{}`)
+		}
 		_, err := r.Pool.Exec(ctx, `INSERT INTO dataset_transaction_files
-			(transaction_id, logical_path, physical_path, size_bytes, op)
-			VALUES ($1, $2, $3, $4, $5)
+			(transaction_id, logical_path, physical_path, physical_uri, size_bytes, op,
+			 media_type, sha256, row_count_hint, storage_location)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
 			ON CONFLICT (transaction_id, logical_path) DO UPDATE
 			SET physical_path = EXCLUDED.physical_path,
+			    physical_uri = EXCLUDED.physical_uri,
 			    size_bytes = EXCLUDED.size_bytes,
-			    op = EXCLUDED.op`,
-			transactionID, file.LogicalPath, file.PhysicalPath, file.SizeBytes, op)
+			    op = EXCLUDED.op,
+			    media_type = EXCLUDED.media_type,
+			    sha256 = EXCLUDED.sha256,
+			    row_count_hint = EXCLUDED.row_count_hint,
+			    storage_location = EXCLUDED.storage_location`,
+			transactionID, file.LogicalPath, file.PhysicalPath, file.PhysicalURI, file.SizeBytes, op,
+			mediaType, file.SHA256, file.RowCountHint, storageLocation)
 		if err != nil {
 			return err
 		}
@@ -879,6 +1015,226 @@ func (r *Repo) ListRuntimeTransactions(ctx context.Context, datasetID uuid.UUID,
 		out = append(out, *v)
 	}
 	return out, rows.Err()
+}
+
+type incrementalTransactionRecord struct {
+	ID          uuid.UUID
+	TxType      models.TransactionType
+	StartedAt   time.Time
+	CommittedAt *time.Time
+	FileCount   int64
+	SizeBytes   int64
+}
+
+func (r *Repo) GetDatasetIncrementalReadiness(ctx context.Context, datasetID uuid.UUID, branch string) (*models.DatasetIncrementalReadiness, error) {
+	dataset, err := r.GetDataset(ctx, datasetID)
+	if err != nil {
+		return nil, err
+	}
+	if dataset == nil {
+		return nil, ErrNotFound
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		branch = strings.TrimSpace(dataset.ActiveBranch)
+	}
+	if branch == "" {
+		branch = "main"
+	}
+	rows, err := r.Pool.Query(ctx, `SELECT t.id, t.tx_type, t.started_at, t.committed_at,
+			COALESCE(files.file_count, 0), COALESCE(files.size_bytes, 0)
+		FROM dataset_transactions t
+		LEFT JOIN (
+			SELECT transaction_id, COUNT(*) AS file_count, COALESCE(SUM(size_bytes), 0) AS size_bytes
+			FROM dataset_transaction_files
+			GROUP BY transaction_id
+		) files ON files.transaction_id = t.id
+		WHERE t.dataset_id = $1 AND t.branch_name = $2 AND t.status = 'COMMITTED'
+		ORDER BY COALESCE(t.committed_at, t.started_at) ASC, t.started_at ASC, t.id ASC`, datasetID, branch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	txns := []incrementalTransactionRecord{}
+	for rows.Next() {
+		var v incrementalTransactionRecord
+		if err := rows.Scan(&v.ID, &v.TxType, &v.StartedAt, &v.CommittedAt, &v.FileCount, &v.SizeBytes); err != nil {
+			return nil, err
+		}
+		txns = append(txns, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return computeIncrementalReadiness(*dataset, branch, txns), nil
+}
+
+func computeIncrementalReadiness(dataset models.Dataset, branch string, txns []incrementalTransactionRecord) *models.DatasetIncrementalReadiness {
+	counts := map[string]int{
+		string(models.TransactionTypeSnapshot): 0,
+		string(models.TransactionTypeAppend):   0,
+		string(models.TransactionTypeUpdate):   0,
+		string(models.TransactionTypeDelete):   0,
+	}
+	out := &models.DatasetIncrementalReadiness{
+		DatasetID:         dataset.ID,
+		DatasetRID:        dataset.RID,
+		Branch:            branch,
+		Mode:              models.IncrementalModeEmpty,
+		Classification:    models.IncrementalModeEmpty,
+		IncrementalReady:  false,
+		AppendOnly:        false,
+		TotalCommitted:    len(txns),
+		TransactionCounts: counts,
+		ViewBoundaries:    []models.IncrementalViewBoundary{},
+		ComputedAt:        time.Now().UTC(),
+	}
+	if out.DatasetRID == "" {
+		out.DatasetRID = "ri.foundry.main.dataset." + dataset.ID.String()
+	}
+	if len(txns) == 0 {
+		out.Warnings = append(out.Warnings, models.IncrementalReadinessWarning{
+			Code:     "no_committed_transactions",
+			Severity: "info",
+			Message:  "No committed transactions exist on this branch yet, so incremental readiness cannot be established.",
+		})
+		return out
+	}
+	boundaries := make([]models.IncrementalTransactionBoundary, len(txns))
+	for i, txn := range txns {
+		boundary := incrementalBoundary(i, txn)
+		boundaries[i] = boundary
+		counts[string(txn.TxType)]++
+		if txn.TxType == models.TransactionTypeSnapshot {
+			if out.FirstSnapshot == nil {
+				snap := boundary
+				out.FirstSnapshot = &snap
+			}
+			snap := boundary
+			out.LatestSnapshot = &snap
+		}
+		if txn.TxType == models.TransactionTypeUpdate || txn.TxType == models.TransactionTypeDelete {
+			txnID := txn.ID
+			rid := boundary.TransactionRID
+			code := "update_breaks_append_only"
+			message := "UPDATE transactions replace files and break append-only incremental assumptions."
+			if txn.TxType == models.TransactionTypeDelete {
+				code = "delete_breaks_append_only"
+				message = "DELETE transactions remove files from the current view and break append-only incremental assumptions."
+			}
+			out.Warnings = append(out.Warnings, models.IncrementalReadinessWarning{
+				Code:           code,
+				Severity:       "warning",
+				Message:        message,
+				TransactionID:  &txnID,
+				TransactionRID: &rid,
+			})
+		}
+	}
+	out.CurrentViewStart = &boundaries[0]
+	out.CurrentViewEnd = &boundaries[len(boundaries)-1]
+	if out.LatestSnapshot != nil {
+		start := *out.LatestSnapshot
+		out.CurrentViewStart = &start
+	}
+	out.ViewBoundaries = incrementalViewBoundaries(txns, boundaries)
+	if counts[string(models.TransactionTypeSnapshot)] > 1 {
+		out.Warnings = append(out.Warnings, models.IncrementalReadinessWarning{
+			Code:     "snapshot_resets_incremental_view",
+			Severity: "info",
+			Message:  "Multiple SNAPSHOT transactions were found; each snapshot starts a new current view boundary.",
+		})
+	}
+	out.Mode = classifyIncrementalMode(counts)
+	out.Classification = out.Mode
+	out.AppendOnly = out.Mode == models.IncrementalModeAppendOnly
+	out.IncrementalReady = out.AppendOnly
+	return out
+}
+
+func incrementalBoundary(index int, txn incrementalTransactionRecord) models.IncrementalTransactionBoundary {
+	return models.IncrementalTransactionBoundary{
+		Index:          index,
+		TransactionID:  txn.ID,
+		TransactionRID: "ri.foundry.main.transaction." + txn.ID.String(),
+		TxType:         txn.TxType,
+		StartedAt:      txn.StartedAt,
+		CommittedAt:    txn.CommittedAt,
+		FileCount:      txn.FileCount,
+		SizeBytes:      txn.SizeBytes,
+	}
+}
+
+func incrementalViewBoundaries(txns []incrementalTransactionRecord, boundaries []models.IncrementalTransactionBoundary) []models.IncrementalViewBoundary {
+	if len(txns) == 0 {
+		return []models.IncrementalViewBoundary{}
+	}
+	start := 0
+	reason := "earliest_transaction"
+	out := []models.IncrementalViewBoundary{}
+	for i, txn := range txns {
+		if txn.TxType == models.TransactionTypeSnapshot {
+			if i > start {
+				out = append(out, summarizeIncrementalWindow(txns[start:i], boundaries[start], boundaries[i-1], reason))
+			}
+			start = i
+			reason = "snapshot"
+		}
+	}
+	out = append(out, summarizeIncrementalWindow(txns[start:], boundaries[start], boundaries[len(boundaries)-1], reason))
+	return out
+}
+
+func summarizeIncrementalWindow(txns []incrementalTransactionRecord, start models.IncrementalTransactionBoundary, end models.IncrementalTransactionBoundary, reason string) models.IncrementalViewBoundary {
+	counts := map[string]int{
+		string(models.TransactionTypeSnapshot): 0,
+		string(models.TransactionTypeAppend):   0,
+		string(models.TransactionTypeUpdate):   0,
+		string(models.TransactionTypeDelete):   0,
+	}
+	out := models.IncrementalViewBoundary{Start: start, End: end, StartReason: reason, TransactionCount: len(txns), Counts: counts, AppendOnly: true}
+	for _, txn := range txns {
+		counts[string(txn.TxType)]++
+		switch txn.TxType {
+		case models.TransactionTypeUpdate:
+			out.HasUpdate = true
+			out.AppendOnly = false
+		case models.TransactionTypeDelete:
+			out.HasDelete = true
+			out.AppendOnly = false
+		case models.TransactionTypeSnapshot:
+			out.HasSnapshot = true
+			if reason != "snapshot" {
+				out.AppendOnly = false
+			}
+		}
+	}
+	return out
+}
+
+func classifyIncrementalMode(counts map[string]int) string {
+	snapshots := counts[string(models.TransactionTypeSnapshot)]
+	appends := counts[string(models.TransactionTypeAppend)]
+	updates := counts[string(models.TransactionTypeUpdate)]
+	deletes := counts[string(models.TransactionTypeDelete)]
+	switch {
+	case updates > 0 && deletes > 0:
+		return models.IncrementalModeMixed
+	case updates > 0:
+		return models.IncrementalModeUpdateBearing
+	case deletes > 0:
+		return models.IncrementalModeDeleteBearing
+	case snapshots > 1:
+		return models.IncrementalModeSnapshotBased
+	case snapshots == 1 && appends == 0:
+		return models.IncrementalModeSnapshotBased
+	case appends > 0:
+		return models.IncrementalModeAppendOnly
+	case snapshots > 0:
+		return models.IncrementalModeSnapshotBased
+	default:
+		return models.IncrementalModeEmpty
+	}
 }
 
 type txnRowForCommit struct {
@@ -1026,19 +1382,29 @@ func (r *Repo) AbortTransaction(ctx context.Context, datasetID uuid.UUID, txnID 
 	if row == nil || row.DatasetID != datasetID {
 		return ErrNotFound
 	}
-	switch row.Status {
-	case models.TransactionStatusOpen:
-		if _, err := tx.Exec(ctx, `UPDATE dataset_transactions
-			SET status = 'ABORTED', aborted_at = COALESCE(aborted_at, NOW())
-			WHERE id = $1 AND dataset_id = $2`, txnID, datasetID); err != nil {
-			return err
-		}
-	case models.TransactionStatusAborted:
-		// Rust treats aborting an already aborted transaction as idempotent.
-	case models.TransactionStatusCommitted:
+	if row.Status != models.TransactionStatusOpen {
 		return ErrInvalidTransition
-	default:
+	}
+	cmd, err := tx.Exec(ctx, `UPDATE dataset_transactions
+		SET status = 'ABORTED', aborted_at = COALESCE(aborted_at, NOW())
+		WHERE id = $1 AND dataset_id = $2 AND status = 'OPEN'`, txnID, datasetID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
 		return ErrInvalidTransition
+	}
+	if _, err := tx.Exec(ctx, `UPDATE dataset_branches
+		SET head_transaction_id = (
+			SELECT t.id FROM dataset_transactions t
+			WHERE t.branch_id = dataset_branches.id
+			  AND t.status IN ('OPEN', 'COMMITTED')
+			ORDER BY COALESCE(t.committed_at, t.started_at) DESC, t.started_at DESC
+			LIMIT 1
+		),
+		updated_at = NOW()
+		WHERE id = $1 AND dataset_id = $2`, row.BranchID, datasetID); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return err
@@ -1136,6 +1502,14 @@ func validateCommit(txType models.TransactionType, staged []stagedFileRow, curre
 			return fmt.Errorf("%w: APPEND cannot modify files already present in the current view; count=%d paths=%s", ErrConflict, len(paths), strings.Join(paths, ","))
 		}
 	case models.TransactionTypeUpdate:
+		for _, f := range staged {
+			if f.Op == models.FileOperationRemove {
+				paths = append(paths, f.LogicalPath)
+			}
+		}
+		if len(paths) > 0 {
+			return fmt.Errorf("%w: UPDATE cannot stage REMOVE ops; use DELETE transactions; count=%d paths=%s", ErrValidation, len(paths), strings.Join(paths, ","))
+		}
 		return nil
 	case models.TransactionTypeDelete:
 		for _, f := range staged {
@@ -1175,9 +1549,7 @@ func applyTransaction(view map[string]viewFileRow, txType models.TransactionType
 		}
 	case models.TransactionTypeUpdate:
 		for _, f := range files {
-			if f.Op == models.FileOperationRemove {
-				delete(out, f.LogicalPath)
-			} else {
+			if f.Op != models.FileOperationRemove {
 				out[f.LogicalPath] = viewFileRow{PhysicalPath: f.PhysicalPath, SizeBytes: f.SizeBytes}
 			}
 		}
@@ -1224,56 +1596,119 @@ func (r *Repo) ListViews(ctx context.Context, datasetID uuid.UUID) ([]models.Dat
 		if err != nil {
 			return nil, err
 		}
+		if err := r.hydrateLogicalViewMetadata(ctx, datasetID, v); err != nil {
+			return nil, err
+		}
 		out = append(out, *v)
 	}
 	return out, rows.Err()
 }
 
 func (r *Repo) CreateView(ctx context.Context, datasetID uuid.UUID, body *models.CreateDatasetViewRequest) (*models.DatasetView, error) {
+	kind := normalizedDatasetViewKind(body)
+	materialized := true
+	if kind == models.DatasetViewKindLogical {
+		materialized = false
+	}
+	if body.Materialized != nil {
+		materialized = *body.Materialized
+	}
+	autoRebuild := false
+	if body.RefreshOnSourceUpdate != nil {
+		autoRebuild = *body.RefreshOnSourceUpdate
+	}
+	if body.AutoRebuild != nil {
+		autoRebuild = *body.AutoRebuild
+	}
+	refreshOnSourceUpdate := autoRebuild
+	if body.RefreshOnSourceUpdate != nil {
+		refreshOnSourceUpdate = *body.RefreshOnSourceUpdate
+	}
+	if kind == models.DatasetViewKindLogical {
+		materialized = false
+		refreshOnSourceUpdate = true
+		autoRebuild = true
+	}
+	primaryKey, err := normalizePrimaryKey(append(append([]string{}, body.PrimaryKey...), body.PrimaryKeys...))
+	if err != nil {
+		return nil, err
+	}
+	primaryKeyRaw, err := json.Marshal(primaryKey)
+	if err != nil {
+		return nil, err
+	}
 	row := r.Pool.QueryRow(ctx, `INSERT INTO dataset_views
-		(id, dataset_id, name, description, sql_text, source_branch, source_version, materialized, refresh_on_source_update)
-		VALUES ($1,$2,$3,COALESCE($4,''),$5,$6,$7,COALESCE($8,false),COALESCE($9,false))
+		(id, dataset_id, name, description, sql_text, source_branch, source_version, materialized, refresh_on_source_update, view_kind, primary_key, auto_rebuild, transform_input_only, format, storage_path, metadata)
+		VALUES ($1,$2,$3,COALESCE($4,''),$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16::jsonb)
 		ON CONFLICT (dataset_id, name) DO UPDATE SET description = EXCLUDED.description,
 		sql_text = EXCLUDED.sql_text, source_branch = EXCLUDED.source_branch, source_version = EXCLUDED.source_version,
-		materialized = EXCLUDED.materialized, refresh_on_source_update = EXCLUDED.refresh_on_source_update, updated_at = NOW()
+		materialized = EXCLUDED.materialized, refresh_on_source_update = EXCLUDED.refresh_on_source_update,
+		view_kind = EXCLUDED.view_kind, primary_key = EXCLUDED.primary_key, auto_rebuild = EXCLUDED.auto_rebuild,
+		transform_input_only = EXCLUDED.transform_input_only, format = EXCLUDED.format, storage_path = EXCLUDED.storage_path,
+		metadata = EXCLUDED.metadata, updated_at = NOW()
 		RETURNING id, dataset_id, name, description, sql_text, source_branch, source_version, materialized,
-		refresh_on_source_update, format, current_version, storage_path, row_count, schema_fields,
+		refresh_on_source_update, view_kind, primary_key, auto_rebuild, transform_input_only, format, current_version, storage_path, row_count, schema_fields,
 		last_refreshed_at, created_at, updated_at`, uuid.New(), datasetID, body.Name, body.Description, body.SQL,
-		body.SourceBranch, body.SourceVersion, body.Materialized, body.RefreshOnSourceUpdate)
+		body.SourceBranch, body.SourceVersion, materialized, refreshOnSourceUpdate, kind, primaryKeyRaw, autoRebuild, kind == models.DatasetViewKindLogical, viewFormatForKind(kind), storagePathForViewKind(kind), viewMetadataForKind(kind))
 	v, err := scanDatasetView(row)
 	if IsConflict(err) {
 		return nil, ErrConflict
 	}
-	return v, err
+	if err != nil {
+		return nil, err
+	}
+	if len(body.BackingDatasets) > 0 {
+		backing, err := r.ReplaceViewBackingDatasets(ctx, datasetID, v.ID, body.BackingDatasets)
+		if err != nil {
+			return nil, err
+		}
+		v.BackingDatasets = backing
+	}
+	if len(primaryKey) > 0 {
+		v.PrimaryKey = primaryKey
+	}
+	return v, r.hydrateLogicalViewMetadata(ctx, datasetID, v)
 }
 
 func (r *Repo) GetCurrentView(ctx context.Context, datasetID uuid.UUID, branch string) (*models.ViewOut, error) {
-	row := r.Pool.QueryRow(ctx, `SELECT v.id, v.dataset_id, b.id, b.head_transaction_id,
-		$2::text AS requested_branch, b.name AS resolved_branch, b.fallback_chain, NOW() AS computed_at,
-		COUNT(df.id)::int AS file_count, COALESCE(SUM(df.size_bytes),0)::bigint AS size_bytes
-		FROM dataset_branches b JOIN dataset_views v ON v.dataset_id = b.dataset_id
-		LEFT JOIN dataset_files df ON df.dataset_id = b.dataset_id AND df.deleted_at IS NULL
-		WHERE b.dataset_id = $1 AND b.name = $2 AND b.deleted_at IS NULL
-		GROUP BY v.id, v.dataset_id, b.id, b.head_transaction_id, b.name, b.fallback_chain
-		ORDER BY v.created_at DESC LIMIT 1`, datasetID, branch)
-	v, err := scanViewOutHeader(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		branch = "master"
+	}
+	v, err := r.computeViewAt(ctx, datasetID, branch, viewCutoff{})
+	if errors.Is(err, ErrNotFound) && branch == "master" {
+		v, err = r.computeViewAt(ctx, datasetID, "main", viewCutoff{})
 	}
 	if err != nil {
 		return nil, err
 	}
-	files, err := r.ListViewFiles(ctx, datasetID, v.ID)
-	if err != nil {
-		return nil, err
-	}
-	v.Files = files
 	return v, nil
 }
 
+func (r *Repo) latestDatasetViewID(ctx context.Context, datasetID uuid.UUID) (uuid.UUID, error) {
+	var id uuid.UUID
+	if err := r.Pool.QueryRow(ctx, `SELECT id FROM dataset_views WHERE dataset_id = $1 ORDER BY created_at DESC LIMIT 1`, datasetID).Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, nil
+		}
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
 func (r *Repo) ListViewFiles(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID) ([]models.RuntimeViewFile, error) {
-	rows, err := r.Pool.Query(ctx, `SELECT logical_path, physical_uri AS physical_path, size_bytes, transaction_id AS introduced_by
-		FROM dataset_files WHERE dataset_id = $1 AND deleted_at IS NULL ORDER BY logical_path`, datasetID)
+	backing, err := r.ListViewBackingDatasets(ctx, datasetID, viewID)
+	if err != nil {
+		return nil, err
+	}
+	if len(backing) > 0 {
+		return []models.RuntimeViewFile{}, nil
+	}
+	rows, err := r.Pool.Query(ctx, `SELECT vf.logical_path, vf.physical_path, vf.size_bytes, vf.introduced_by
+		FROM dataset_view_files vf
+		JOIN dataset_views v ON v.id = vf.view_id
+		WHERE vf.view_id = $1 AND v.dataset_id = $2
+		ORDER BY vf.logical_path`, viewID, datasetID)
 	if err != nil {
 		return nil, err
 	}
@@ -1289,6 +1724,203 @@ func (r *Repo) ListViewFiles(ctx context.Context, datasetID uuid.UUID, viewID uu
 	return out, rows.Err()
 }
 
+func (r *Repo) ListViewBackingDatasets(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID) ([]models.ViewBackingDataset, error) {
+	exists, err := r.DatasetViewBelongsToDataset(ctx, datasetID, viewID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	rows, err := r.Pool.Query(ctx, `SELECT b.dataset_id, COALESCE(NULLIF(b.dataset_rid, ''), d.rid, 'ri.foundry.main.dataset.' || b.dataset_id::text),
+			b.branch, b.alias, b.position, b.schema_version_id, b.created_at, b.updated_at
+		FROM dataset_view_backing_datasets b
+		JOIN datasets d ON d.id = b.dataset_id
+		WHERE b.view_id = $1
+		ORDER BY b.position ASC, b.created_at ASC`, viewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.ViewBackingDataset{}
+	for rows.Next() {
+		var v models.ViewBackingDataset
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&v.DatasetID, &v.DatasetRID, &v.Branch, &v.Alias, &v.Position, &v.SchemaVersionID, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		v.CreatedAt = &createdAt
+		v.UpdatedAt = &updatedAt
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) ReplaceViewBackingDatasets(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, backing []models.ViewBackingDatasetInput) ([]models.ViewBackingDataset, error) {
+	resolved, err := r.resolveViewBackingInputs(ctx, backing)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := r.lockDatasetView(ctx, tx, datasetID, viewID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM dataset_view_backing_datasets WHERE view_id = $1`, viewID); err != nil {
+		return nil, err
+	}
+	for i, item := range resolved {
+		if _, err := tx.Exec(ctx, `INSERT INTO dataset_view_backing_datasets
+				(view_id, dataset_id, dataset_rid, branch, alias, position, schema_version_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
+			ON CONFLICT (view_id, dataset_id, branch) DO UPDATE
+				SET dataset_rid = EXCLUDED.dataset_rid,
+				    alias = EXCLUDED.alias,
+				    position = EXCLUDED.position,
+				    schema_version_id = EXCLUDED.schema_version_id,
+				    updated_at = NOW()`, viewID, item.DatasetID, item.DatasetRID, item.Branch, item.Alias, int32(i), item.SchemaVersionID); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE dataset_views
+		SET view_kind = 'logical', materialized = FALSE, refresh_on_source_update = TRUE,
+		    auto_rebuild = TRUE, transform_input_only = TRUE, storage_path = NULL,
+		    metadata = COALESCE(metadata, '{}'::jsonb) || '{"kind":"logical_view","stores_files":false,"auto_rebuild":true}'::jsonb,
+		    updated_at = NOW()
+		WHERE id = $1 AND dataset_id = $2`, viewID, datasetID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return r.ListViewBackingDatasets(ctx, datasetID, viewID)
+}
+
+func (r *Repo) AddViewBackingDatasets(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, backing []models.ViewBackingDatasetInput) ([]models.ViewBackingDataset, error) {
+	resolved, err := r.resolveViewBackingInputs(ctx, backing)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := r.lockDatasetView(ctx, tx, datasetID, viewID); err != nil {
+		return nil, err
+	}
+	var start int32
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM dataset_view_backing_datasets WHERE view_id = $1`, viewID).Scan(&start); err != nil {
+		return nil, err
+	}
+	for i, item := range resolved {
+		if _, err := tx.Exec(ctx, `INSERT INTO dataset_view_backing_datasets
+				(view_id, dataset_id, dataset_rid, branch, alias, position, schema_version_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
+			ON CONFLICT (view_id, dataset_id, branch) DO UPDATE
+				SET dataset_rid = EXCLUDED.dataset_rid,
+				    alias = EXCLUDED.alias,
+				    position = EXCLUDED.position,
+				    schema_version_id = EXCLUDED.schema_version_id,
+				    updated_at = NOW()`, viewID, item.DatasetID, item.DatasetRID, item.Branch, item.Alias, start+int32(i), item.SchemaVersionID); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE dataset_views
+		SET view_kind = 'logical', materialized = FALSE, refresh_on_source_update = TRUE,
+		    auto_rebuild = TRUE, transform_input_only = TRUE, storage_path = NULL, updated_at = NOW()
+		WHERE id = $1 AND dataset_id = $2`, viewID, datasetID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return r.ListViewBackingDatasets(ctx, datasetID, viewID)
+}
+
+func (r *Repo) RemoveViewBackingDatasets(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, backing []models.ViewBackingDatasetInput) ([]models.ViewBackingDataset, error) {
+	resolved, err := r.resolveViewBackingInputs(ctx, backing)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := r.lockDatasetView(ctx, tx, datasetID, viewID); err != nil {
+		return nil, err
+	}
+	for _, item := range resolved {
+		if strings.TrimSpace(item.Branch) == "" {
+			if _, err := tx.Exec(ctx, `DELETE FROM dataset_view_backing_datasets WHERE view_id = $1 AND dataset_id = $2`, viewID, item.DatasetID); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM dataset_view_backing_datasets WHERE view_id = $1 AND dataset_id = $2 AND branch = $3`, viewID, item.DatasetID, item.Branch); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE dataset_view_backing_datasets b
+		SET position = ranked.position
+		FROM (
+			SELECT dataset_id, branch, ROW_NUMBER() OVER (ORDER BY position ASC, created_at ASC) - 1 AS position
+			FROM dataset_view_backing_datasets
+			WHERE view_id = $1
+		) ranked
+		WHERE b.view_id = $1 AND b.dataset_id = ranked.dataset_id AND b.branch = ranked.branch`, viewID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE dataset_views SET updated_at = NOW() WHERE id = $1 AND dataset_id = $2`, viewID, datasetID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return r.ListViewBackingDatasets(ctx, datasetID, viewID)
+}
+
+func (r *Repo) PutViewPrimaryKey(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, primaryKey []string) ([]string, error) {
+	normalized, err := normalizePrimaryKey(primaryKey)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, err
+	}
+	tag, err := r.Pool.Exec(ctx, `UPDATE dataset_views
+		SET primary_key = $3::jsonb,
+		    view_kind = CASE WHEN view_kind = 'logical' OR $3::jsonb <> '[]'::jsonb THEN 'logical' ELSE view_kind END,
+		    transform_input_only = CASE WHEN view_kind = 'logical' OR $3::jsonb <> '[]'::jsonb THEN TRUE ELSE transform_input_only END,
+		    updated_at = NOW()
+		WHERE dataset_id = $1 AND id = $2`, datasetID, viewID, raw)
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return normalized, nil
+}
+
+func (r *Repo) GetViewPrimaryKey(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID) ([]string, error) {
+	var raw []byte
+	if err := r.Pool.QueryRow(ctx, `SELECT COALESCE(primary_key, '[]'::jsonb) FROM dataset_views WHERE dataset_id = $1 AND id = $2`, datasetID, viewID).Scan(&raw); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	out := []string{}
+	_ = json.Unmarshal(raw, &out)
+	return out, nil
+}
+
 func (r *Repo) GetDatasetView(ctx context.Context, datasetID uuid.UUID, viewOrName string) (*models.DatasetView, error) {
 	var row pgx.Row
 	if id, err := uuid.Parse(viewOrName); err == nil {
@@ -1300,7 +1932,10 @@ func (r *Repo) GetDatasetView(ctx context.Context, datasetID uuid.UUID, viewOrNa
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	return v, err
+	if err != nil {
+		return nil, err
+	}
+	return v, r.hydrateLogicalViewMetadata(ctx, datasetID, v)
 }
 
 func (r *Repo) RefreshDatasetView(ctx context.Context, datasetID uuid.UUID, viewOrName string) (*models.DatasetView, error) {
@@ -1321,7 +1956,7 @@ func (r *Repo) RefreshDatasetView(ctx context.Context, datasetID uuid.UUID, view
 	row := tx.QueryRow(ctx, `UPDATE dataset_views SET last_refreshed_at = NOW(), updated_at = NOW()
 		WHERE dataset_id = $1 AND id = $2
 		RETURNING id, dataset_id, name, description, sql_text, source_branch, source_version, materialized,
-		refresh_on_source_update, format, current_version, storage_path, row_count, schema_fields,
+		refresh_on_source_update, view_kind, primary_key, auto_rebuild, transform_input_only, format, current_version, storage_path, row_count, schema_fields,
 		last_refreshed_at, created_at, updated_at`, datasetID, view.ID)
 	updated, err := scanDatasetView(row)
 	if err != nil {
@@ -1330,18 +1965,19 @@ func (r *Repo) RefreshDatasetView(ctx context.Context, datasetID uuid.UUID, view
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	_ = r.hydrateLogicalViewMetadata(ctx, datasetID, updated)
 	return updated, nil
 }
 
-func (r *Repo) GetViewAt(ctx context.Context, datasetID uuid.UUID, branch string, at *time.Time, transactionID *uuid.UUID) (*models.ViewOut, error) {
-	if transactionID != nil {
-		txnAt, err := r.committedTransactionTime(ctx, datasetID, branch, *transactionID)
+func (r *Repo) GetViewAt(ctx context.Context, datasetID uuid.UUID, branch string, at *time.Time, transactionID *uuid.UUID, version *int32) (*models.ViewOut, error) {
+	if version != nil {
+		txnID, err := r.transactionIDForDatasetVersion(ctx, datasetID, *version)
 		if err != nil {
 			return nil, err
 		}
-		at = &txnAt
+		transactionID = &txnID
 	}
-	return r.computeViewAt(ctx, datasetID, branch, at)
+	return r.computeViewAt(ctx, datasetID, branch, viewCutoff{At: at, TransactionID: transactionID})
 }
 
 func (r *Repo) CompareViews(ctx context.Context, datasetID uuid.UUID, baseBranch string, targetBranch string, baseTransaction *uuid.UUID, targetTransaction *uuid.UUID) (*models.CompareOut, error) {
@@ -1351,27 +1987,19 @@ func (r *Repo) CompareViews(ctx context.Context, datasetID uuid.UUID, baseBranch
 	if strings.TrimSpace(targetBranch) == "" {
 		targetBranch = baseBranch
 	}
-	var baseAt *time.Time
+	baseCutoff := viewCutoff{}
 	if baseTransaction != nil {
-		at, err := r.committedTransactionTime(ctx, datasetID, baseBranch, *baseTransaction)
-		if err != nil {
-			return nil, err
-		}
-		baseAt = &at
+		baseCutoff.TransactionID = baseTransaction
 	}
-	var targetAt *time.Time
+	targetCutoff := viewCutoff{}
 	if targetTransaction != nil {
-		at, err := r.committedTransactionTime(ctx, datasetID, targetBranch, *targetTransaction)
-		if err != nil {
-			return nil, err
-		}
-		targetAt = &at
+		targetCutoff.TransactionID = targetTransaction
 	}
-	base, err := r.computeViewAt(ctx, datasetID, baseBranch, baseAt)
+	base, err := r.computeViewAt(ctx, datasetID, baseBranch, baseCutoff)
 	if err != nil {
 		return nil, err
 	}
-	target, err := r.computeViewAt(ctx, datasetID, targetBranch, targetAt)
+	target, err := r.computeViewAt(ctx, datasetID, targetBranch, targetCutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -1399,6 +2027,21 @@ func (r *Repo) committedTransactionTime(ctx context.Context, datasetID uuid.UUID
 	return startedAt, nil
 }
 
+func (r *Repo) transactionIDForDatasetVersion(ctx context.Context, datasetID uuid.UUID, version int32) (uuid.UUID, error) {
+	var txnID *uuid.UUID
+	err := r.Pool.QueryRow(ctx, `SELECT transaction_id FROM dataset_versions WHERE dataset_id = $1 AND version = $2`, datasetID, version).Scan(&txnID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrNotFound
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if txnID == nil || *txnID == uuid.Nil {
+		return uuid.Nil, fmt.Errorf("%w: dataset version is not backed by a transaction", ErrValidation)
+	}
+	return *txnID, nil
+}
+
 type viewTransactionRecord struct {
 	ID          uuid.UUID
 	TxType      string
@@ -1406,14 +2049,22 @@ type viewTransactionRecord struct {
 	CommittedAt *time.Time
 }
 
-func (r *Repo) computeViewAt(ctx context.Context, datasetID uuid.UUID, branch string, at *time.Time) (*models.ViewOut, error) {
+type viewCutoff struct {
+	At            *time.Time
+	TransactionID *uuid.UUID
+}
+
+func (r *Repo) computeViewAt(ctx context.Context, datasetID uuid.UUID, branch string, cutoff viewCutoff) (*models.ViewOut, error) {
 	requested, err := r.GetRuntimeBranch(ctx, datasetID, branch)
 	if err != nil {
 		return nil, err
 	}
-	target, fallbackChain, txns, err := r.resolveBranchView(ctx, datasetID, requested, at)
+	target, fallbackChain, txns, err := r.resolveBranchView(ctx, datasetID, requested, cutoff)
 	if err != nil {
 		return nil, err
+	}
+	if cutoff.TransactionID != nil && !viewTransactionsContain(txns, *cutoff.TransactionID) {
+		return nil, ErrNotFound
 	}
 
 	entries := make([]domain.TransactionEntry, 0, len(txns))
@@ -1439,7 +2090,7 @@ func (r *Repo) computeViewAt(ctx context.Context, datasetID uuid.UUID, branch st
 		})
 	}
 
-	view := domain.ComputeView(entries, at)
+	view := domain.ComputeView(entries, nil)
 	files := make([]models.RuntimeViewFile, 0, len(view))
 	var sizeBytes int64
 	for i := range view {
@@ -1454,10 +2105,88 @@ func (r *Repo) computeViewAt(ctx context.Context, datasetID uuid.UUID, branch st
 	}
 
 	headTxnID := uuid.Nil
+	viewID := uuid.Nil
 	if len(txns) > 0 {
 		headTxnID = txns[len(txns)-1].ID
+		if id, cacheErr := r.cacheViewManifest(ctx, datasetID, target.ID, headTxnID, branch, target.Name, fallbackChain, files, sizeBytes); cacheErr == nil {
+			viewID = id
+		}
 	}
-	return &models.ViewOut{ID: uuid.Nil, DatasetID: datasetID, BranchID: target.ID, HeadTransactionID: headTxnID, RequestedBranch: branch, ResolvedBranch: target.Name, FallbackChain: fallbackChain, ComputedAt: time.Now().UTC(), FileCount: int32(len(files)), SizeBytes: sizeBytes, Files: files}, nil
+	return &models.ViewOut{ID: viewID, DatasetID: datasetID, BranchID: target.ID, HeadTransactionID: headTxnID, RequestedBranch: branch, ResolvedBranch: target.Name, FallbackChain: fallbackChain, ComputedAt: time.Now().UTC(), FileCount: int32(len(files)), SizeBytes: sizeBytes, Files: files}, nil
+}
+
+func (r *Repo) cacheViewManifest(ctx context.Context, datasetID uuid.UUID, branchID uuid.UUID, headTxnID uuid.UUID, requestedBranch string, resolvedBranch string, fallbackChain []string, files []models.RuntimeViewFile, sizeBytes int64) (uuid.UUID, error) {
+	tx, err := r.Pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	metadata, err := models.MarshalJSONValue(map[string]any{
+		"kind":             "transaction_history_manifest",
+		"requested_branch": requestedBranch,
+		"resolved_branch":  resolvedBranch,
+		"fallback_chain":   fallbackChain,
+		"reconstructable":  true,
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	viewID := uuid.New()
+	name := viewManifestName(resolvedBranch, headTxnID)
+	description := "Cached dataset view manifest"
+	sqlText := ""
+	format := "manifest"
+	schema := models.JSONValue(`[]`)
+	row := tx.QueryRow(ctx, `INSERT INTO dataset_views
+		(id, dataset_id, name, description, sql_text, source_branch, materialized, refresh_on_source_update,
+		 format, current_version, row_count, schema_fields, last_refreshed_at, branch_id, head_transaction_id,
+		 computed_at, file_count, size_bytes, metadata, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,true,false,$7,0,0,$8,NOW(),$9,$10,NOW(),$11,$12,$13::jsonb,NOW(),NOW())
+		ON CONFLICT (dataset_id, branch_id, head_transaction_id) DO UPDATE
+		   SET computed_at = EXCLUDED.computed_at,
+		       file_count = EXCLUDED.file_count,
+		       size_bytes = EXCLUDED.size_bytes,
+		       metadata = EXCLUDED.metadata,
+		       last_refreshed_at = EXCLUDED.last_refreshed_at,
+		       updated_at = NOW()
+		RETURNING id`, viewID, datasetID, name, description, sqlText, resolvedBranch, format, schema, branchID, headTxnID, int32(len(files)), sizeBytes, metadata)
+	if err := row.Scan(&viewID); err != nil {
+		return uuid.Nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM dataset_view_files WHERE view_id = $1`, viewID); err != nil {
+		return uuid.Nil, err
+	}
+	for _, file := range files {
+		if _, err := tx.Exec(ctx, `INSERT INTO dataset_view_files
+			(view_id, logical_path, physical_path, size_bytes, introduced_by)
+			VALUES ($1,$2,$3,$4,$5)
+			ON CONFLICT (view_id, logical_path) DO UPDATE
+			   SET physical_path = EXCLUDED.physical_path,
+			       size_bytes = EXCLUDED.size_bytes,
+			       introduced_by = EXCLUDED.introduced_by`,
+			viewID, file.LogicalPath, file.PhysicalPath, file.SizeBytes, file.IntroducedBy); err != nil {
+			return uuid.Nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, err
+	}
+	committed = true
+	return viewID, nil
+}
+
+func viewManifestName(branch string, headTxnID uuid.UUID) string {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		branch = "branch"
+	}
+	return "__manifest__" + branch + "__" + headTxnID.String()
 }
 
 func effectiveCommittedAt(txn viewTransactionRecord) time.Time {
@@ -1478,7 +2207,7 @@ func fileOpKindFromOperation(op models.FileOperation) domain.FileOpKind {
 	}
 }
 
-func (r *Repo) resolveBranchView(ctx context.Context, datasetID uuid.UUID, requested *models.RuntimeBranch, at *time.Time) (*models.RuntimeBranch, []string, []viewTransactionRecord, error) {
+func (r *Repo) resolveBranchView(ctx context.Context, datasetID uuid.UUID, requested *models.RuntimeBranch, cutoff viewCutoff) (*models.RuntimeBranch, []string, []viewTransactionRecord, error) {
 	current := requested
 	fallbackChain := []string{}
 	seen := map[string]struct{}{}
@@ -1487,11 +2216,14 @@ func (r *Repo) resolveBranchView(ctx context.Context, datasetID uuid.UUID, reque
 			return nil, nil, nil, fmt.Errorf("%w: fallback chain contains a cycle", ErrValidation)
 		}
 		seen[current.Name] = struct{}{}
-		txns, err := r.listCommittedBranchTransactions(ctx, current.ID, at)
+		txns, ancestry, err := r.branchViewTransactions(ctx, datasetID, current, cutoff, map[uuid.UUID]struct{}{})
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		if len(txns) > 0 {
+		if len(ancestry) > 0 {
+			fallbackChain = append(fallbackChain, ancestry...)
+		}
+		if len(txns) > 0 && (cutoff.TransactionID == nil || viewTransactionsContain(txns, *cutoff.TransactionID)) {
 			return current, fallbackChain, txns, nil
 		}
 		fallbacks, err := r.ListFallbacks(ctx, current.ID)
@@ -1510,12 +2242,96 @@ func (r *Repo) resolveBranchView(ctx context.Context, datasetID uuid.UUID, reque
 	}
 }
 
+func (r *Repo) branchViewTransactions(ctx context.Context, datasetID uuid.UUID, branch *models.RuntimeBranch, cutoff viewCutoff, seen map[uuid.UUID]struct{}) ([]viewTransactionRecord, []string, error) {
+	if _, ok := seen[branch.ID]; ok {
+		return nil, nil, fmt.Errorf("%w: branch ancestry contains a cycle", ErrValidation)
+	}
+	seen[branch.ID] = struct{}{}
+	base := []viewTransactionRecord{}
+	ancestry := []string{}
+	if branch.ParentBranchID != nil {
+		parent, err := r.getRuntimeBranchByID(ctx, datasetID, *branch.ParentBranchID)
+		if err != nil {
+			return nil, nil, err
+		}
+		sourceTxn := branch.CreatedFromTransactionID
+		if sourceTxn == nil {
+			sourceTxn = inheritedHeadTransaction(branch, parent)
+		}
+		if sourceTxn != nil && *sourceTxn != uuid.Nil {
+			parentCutoff := viewCutoff{TransactionID: sourceTxn}
+			parentTxns, parentAncestry, err := r.branchViewTransactions(ctx, datasetID, parent, parentCutoff, seen)
+			if err != nil {
+				return nil, nil, err
+			}
+			ancestry = append(ancestry, parent.Name)
+			ancestry = append(ancestry, parentAncestry...)
+			base = append(base, parentTxns...)
+		}
+	}
+	if cutoff.TransactionID != nil && viewTransactionsContain(base, *cutoff.TransactionID) {
+		return base, ancestry, nil
+	}
+	txns, err := r.listCommittedBranchTransactions(ctx, branch.ID, cutoff.At)
+	if err != nil {
+		return nil, nil, err
+	}
+	if cutoff.TransactionID != nil {
+		if trimmed, ok := trimTransactionsToCutoff(txns, *cutoff.TransactionID); ok {
+			txns = trimmed
+		}
+	}
+	out := make([]viewTransactionRecord, 0, len(base)+len(txns))
+	out = append(out, base...)
+	out = append(out, txns...)
+	return out, ancestry, nil
+}
+
+func inheritedHeadTransaction(branch *models.RuntimeBranch, parent *models.RuntimeBranch) *uuid.UUID {
+	if branch.HeadTransactionID == nil || parent.HeadTransactionID == nil {
+		return nil
+	}
+	if *branch.HeadTransactionID != *parent.HeadTransactionID {
+		return nil
+	}
+	return branch.HeadTransactionID
+}
+
+func trimTransactionsToCutoff(txns []viewTransactionRecord, txnID uuid.UUID) ([]viewTransactionRecord, bool) {
+	for i := range txns {
+		if txns[i].ID == txnID {
+			return txns[:i+1], true
+		}
+	}
+	return txns, false
+}
+
+func viewTransactionsContain(txns []viewTransactionRecord, txnID uuid.UUID) bool {
+	for i := range txns {
+		if txns[i].ID == txnID {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Repo) getRuntimeBranchByID(ctx context.Context, datasetID uuid.UUID, branchID uuid.UUID) (*models.RuntimeBranch, error) {
+	row := r.Pool.QueryRow(ctx, `SELECT id, rid, dataset_id, dataset_rid, name, parent_branch_id, head_transaction_id,
+		created_from_transaction_id, last_activity_at, labels, fallback_chain, created_at, updated_at
+		FROM dataset_branches WHERE dataset_id = $1 AND id = $2 AND deleted_at IS NULL`, datasetID, branchID)
+	v, err := scanRuntimeBranch(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return v, err
+}
+
 func (r *Repo) listCommittedBranchTransactions(ctx context.Context, branchID uuid.UUID, at *time.Time) ([]viewTransactionRecord, error) {
 	rows, err := r.Pool.Query(ctx, `SELECT id, tx_type, started_at, committed_at
 		FROM dataset_transactions
 		WHERE branch_id = $1 AND status = 'COMMITTED'
 		  AND ($2::timestamptz IS NULL OR COALESCE(committed_at, started_at) <= $2)
-		ORDER BY COALESCE(committed_at, started_at) ASC, started_at ASC`, branchID, at)
+		ORDER BY COALESCE(committed_at, started_at) ASC, started_at ASC, id ASC`, branchID, at)
 	if err != nil {
 		return nil, err
 	}
@@ -1604,6 +2420,7 @@ func (r *Repo) GetViewSchema(ctx context.Context, viewID uuid.UUID) (*models.Sch
 }
 
 func (r *Repo) PutViewSchema(ctx context.Context, viewID uuid.UUID, datasetID uuid.UUID, branch *string, schema models.DatasetSchema, contentHash string) (*models.SchemaResponse, error) {
+	schema = models.NormalizeDatasetSchema(schema)
 	schemaJSON, err := models.MarshalJSONValue(schema)
 	if err != nil {
 		return nil, err
@@ -1617,10 +2434,240 @@ func (r *Repo) PutViewSchema(ctx context.Context, viewID uuid.UUID, datasetID uu
 	return scanSchemaResponse(row)
 }
 
+func (r *Repo) GetDatasetSchema(ctx context.Context, datasetID uuid.UUID, branch string, endTransactionID *uuid.UUID, versionID *string) (*models.FoundryDatasetSchemaResponse, error) {
+	branch = r.datasetDefaultBranch(ctx, datasetID, branch)
+	if versionID != nil && strings.TrimSpace(*versionID) != "" {
+		row, err := r.schemaRowByVersion(ctx, datasetID, strings.TrimSpace(*versionID))
+		if err != nil {
+			return nil, err
+		}
+		return foundrySchemaResponseFromRow(*row, branch), nil
+	}
+	view, err := r.GetViewAt(ctx, datasetID, branch, nil, endTransactionID, nil)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.schemaRowForView(ctx, datasetID, view.ID, view.BranchID, view.HeadTransactionID, branch)
+	if err != nil {
+		return nil, err
+	}
+	out := foundrySchemaResponseFromRow(*row, view.ResolvedBranch)
+	if view.HeadTransactionID != uuid.Nil {
+		out.EndTransactionRID = models.TransactionRID(view.HeadTransactionID)
+	}
+	return out, nil
+}
+
+func (r *Repo) PutDatasetSchema(ctx context.Context, datasetID uuid.UUID, branch string, endTransactionID *uuid.UUID, dataframeReader string, schema models.DatasetSchema) (*models.FoundryDatasetSchemaResponse, error) {
+	branch = r.datasetDefaultBranch(ctx, datasetID, branch)
+	schema = models.NormalizeDatasetSchema(schema)
+	if errs := models.ValidateDatasetSchema(schema); len(errs) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrValidation, strings.Join(errs, "; "))
+	}
+	view, err := r.GetViewAt(ctx, datasetID, branch, nil, endTransactionID, nil)
+	if err != nil {
+		return nil, err
+	}
+	if view.HeadTransactionID == uuid.Nil {
+		return nil, fmt.Errorf("%w: dataset view not found", ErrNotFound)
+	}
+	raw, err := models.MarshalJSONValue(schema)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(raw)
+	contentHash := hex.EncodeToString(sum[:])
+	versionID := schemaVersionID(datasetID, view.HeadTransactionID, contentHash)
+	reader := models.NormalizeDataframeReader(dataframeReader)
+	row := r.Pool.QueryRow(ctx, `INSERT INTO dataset_view_schemas
+		(view_id, dataset_id, branch, end_transaction_id, schema_json, file_format, custom_metadata,
+		 content_hash, schema_version_id, dataframe_reader, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,$8,$9,$10,NOW(),NOW())
+		ON CONFLICT (view_id) DO UPDATE
+		   SET dataset_id = EXCLUDED.dataset_id,
+		       branch = EXCLUDED.branch,
+		       end_transaction_id = EXCLUDED.end_transaction_id,
+		       schema_json = EXCLUDED.schema_json,
+		       file_format = EXCLUDED.file_format,
+		       custom_metadata = EXCLUDED.custom_metadata,
+		       content_hash = EXCLUDED.content_hash,
+		       schema_version_id = EXCLUDED.schema_version_id,
+		       dataframe_reader = EXCLUDED.dataframe_reader,
+		       updated_at = NOW()
+		RETURNING view_id, dataset_id, branch, end_transaction_id, schema_json, content_hash, schema_version_id, created_at`,
+		view.ID, datasetID, view.ResolvedBranch, view.HeadTransactionID, raw, schema.FileFormat, nullableRaw(schemaCustomMetadata(schema)), contentHash, versionID, reader)
+	schemaRow, err := scanFoundrySchemaRow(row)
+	if err != nil {
+		return nil, err
+	}
+	return foundrySchemaResponseFromRow(*schemaRow, view.ResolvedBranch), nil
+}
+
+func (r *Repo) ListDatasetSchemaHistory(ctx context.Context, datasetID uuid.UUID, branch string, limit int) ([]models.SchemaEvolutionEntry, error) {
+	branch = r.datasetDefaultBranch(ctx, datasetID, branch)
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	rows, err := r.Pool.Query(ctx, `SELECT s.view_id, COALESCE(NULLIF(s.branch,''), v.source_branch, $2) AS branch,
+		COALESCE(s.end_transaction_id, v.head_transaction_id) AS end_transaction_id,
+		s.schema_json, s.content_hash, COALESCE(s.schema_version_id::text, s.content_hash) AS version_id, s.created_at
+		FROM dataset_view_schemas s
+		JOIN dataset_views v ON v.id = s.view_id
+		WHERE s.dataset_id = $1
+		  AND ($2 = '' OR s.branch = $2 OR v.source_branch = $2)
+		ORDER BY s.created_at ASC, v.computed_at ASC
+		LIMIT $3`, datasetID, branch, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.SchemaEvolutionEntry{}
+	lastHash := ""
+	for rows.Next() {
+		row, err := scanFoundrySchemaRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		entry := models.SchemaEvolutionEntry{
+			ViewID:            row.ViewID,
+			BranchName:        row.Branch,
+			EndTransactionRID: models.TransactionRID(row.EndTransactionID),
+			VersionID:         row.VersionID,
+			Schema:            models.FoundrySchemaFromDatasetSchema(row.Schema),
+			ContentHash:       row.ContentHash,
+			Changed:           lastHash == "" || lastHash != row.ContentHash,
+			CreatedAt:         row.CreatedAt,
+		}
+		lastHash = row.ContentHash
+		out = append(out, entry)
+	}
+	return out, rows.Err()
+}
+
+type foundrySchemaRow struct {
+	ViewID           uuid.UUID
+	Branch           string
+	EndTransactionID uuid.UUID
+	Schema           models.DatasetSchema
+	ContentHash      string
+	VersionID        string
+	CreatedAt        time.Time
+}
+
+func (r *Repo) schemaRowByVersion(ctx context.Context, datasetID uuid.UUID, versionID string) (*foundrySchemaRow, error) {
+	row := r.Pool.QueryRow(ctx, `SELECT s.view_id, COALESCE(NULLIF(s.branch,''), v.source_branch, '') AS branch,
+		COALESCE(s.end_transaction_id, v.head_transaction_id) AS end_transaction_id,
+		s.schema_json, s.content_hash, COALESCE(s.schema_version_id::text, s.content_hash) AS version_id, s.created_at
+		FROM dataset_view_schemas s
+		JOIN dataset_views v ON v.id = s.view_id
+		WHERE s.dataset_id = $1 AND COALESCE(s.schema_version_id::text, s.content_hash) = $2
+		ORDER BY s.created_at DESC
+		LIMIT 1`, datasetID, versionID)
+	out, err := scanFoundrySchemaRow(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return out, err
+}
+
+func (r *Repo) schemaRowForView(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, branchID uuid.UUID, headTransactionID uuid.UUID, branch string) (*foundrySchemaRow, error) {
+	if viewID != uuid.Nil {
+		row := r.Pool.QueryRow(ctx, `SELECT s.view_id, COALESCE(NULLIF(s.branch,''), v.source_branch, $3) AS branch,
+			COALESCE(s.end_transaction_id, v.head_transaction_id) AS end_transaction_id,
+			s.schema_json, s.content_hash, COALESCE(s.schema_version_id::text, s.content_hash) AS version_id, s.created_at
+			FROM dataset_view_schemas s
+			JOIN dataset_views v ON v.id = s.view_id
+			WHERE s.view_id = $1 AND s.dataset_id = $2`, viewID, datasetID, branch)
+		out, err := scanFoundrySchemaRow(row)
+		if err == nil {
+			return out, nil
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+	if headTransactionID == uuid.Nil {
+		return nil, ErrNotFound
+	}
+	row := r.Pool.QueryRow(ctx, `WITH target AS (
+			SELECT COALESCE(committed_at, started_at) AS at
+			FROM dataset_transactions
+			WHERE id = $4 AND dataset_id = $1 AND status = 'COMMITTED'
+		)
+		SELECT s.view_id, COALESCE(NULLIF(s.branch,''), v.source_branch, $3) AS branch,
+			COALESCE(s.end_transaction_id, v.head_transaction_id) AS end_transaction_id,
+			s.schema_json, s.content_hash, COALESCE(s.schema_version_id::text, s.content_hash) AS version_id, s.created_at
+		FROM dataset_view_schemas s
+		JOIN dataset_views v ON v.id = s.view_id
+		JOIN dataset_transactions t ON t.id = COALESCE(s.end_transaction_id, v.head_transaction_id)
+		WHERE s.dataset_id = $1
+		  AND (v.branch_id = $2 OR s.branch = $3 OR v.source_branch = $3 OR $2 = '00000000-0000-0000-0000-000000000000'::uuid)
+		  AND COALESCE(t.committed_at, t.started_at) <= (SELECT at FROM target)
+		ORDER BY COALESCE(t.committed_at, t.started_at) DESC, s.created_at DESC
+		LIMIT 1`, datasetID, branchID, branch, headTransactionID)
+	out, err := scanFoundrySchemaRow(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return out, err
+}
+
+func scanFoundrySchemaRow(r rowLikeT) (*foundrySchemaRow, error) {
+	out := &foundrySchemaRow{}
+	var raw []byte
+	if err := r.Scan(&out.ViewID, &out.Branch, &out.EndTransactionID, &raw, &out.ContentHash, &out.VersionID, &out.CreatedAt); err != nil {
+		return nil, err
+	}
+	if err := models.UnmarshalJSONValue(raw, &out.Schema); err != nil {
+		return nil, err
+	}
+	out.Schema = models.NormalizeDatasetSchema(out.Schema)
+	return out, nil
+}
+
+func foundrySchemaResponseFromRow(row foundrySchemaRow, fallbackBranch string) *models.FoundryDatasetSchemaResponse {
+	branch := strings.TrimSpace(row.Branch)
+	if branch == "" {
+		branch = fallbackBranch
+	}
+	return &models.FoundryDatasetSchemaResponse{
+		BranchName:        branch,
+		EndTransactionRID: models.TransactionRID(row.EndTransactionID),
+		Schema:            models.FoundrySchemaFromDatasetSchema(row.Schema),
+		VersionID:         row.VersionID,
+		CustomMetadata:    row.Schema.CustomMetadata,
+	}
+}
+
+func schemaVersionID(datasetID uuid.UUID, endTransactionID uuid.UUID, contentHash string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(datasetID.String()+"\x00"+endTransactionID.String()+"\x00"+contentHash)).String()
+}
+
+func schemaCustomMetadata(schema models.DatasetSchema) models.JSONValue {
+	if schema.CustomMetadata == nil {
+		return nil
+	}
+	raw, err := models.MarshalJSONValue(schema.CustomMetadata)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
 func (r *Repo) GetCurrentSchema(ctx context.Context, datasetID uuid.UUID, branch string) (*models.SchemaResponse, error) {
 	view, err := r.GetCurrentView(ctx, datasetID, branch)
-	if err == nil && view != nil {
-		return r.GetViewSchema(ctx, view.ID)
+	if err == nil && view != nil && view.ID != uuid.Nil {
+		row, schemaErr := r.schemaRowForView(ctx, datasetID, view.ID, view.BranchID, view.HeadTransactionID, branch)
+		if schemaErr == nil {
+			branchName := row.Branch
+			return &models.SchemaResponse{ViewID: row.ViewID, DatasetID: datasetID, Branch: &branchName, Schema: row.Schema, ContentHash: row.ContentHash, CreatedAt: row.CreatedAt}, nil
+		}
+		if !errors.Is(schemaErr, ErrNotFound) {
+			return nil, schemaErr
+		}
 	}
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
@@ -1631,7 +2678,7 @@ func (r *Repo) GetCurrentSchema(ctx context.Context, datasetID uuid.UUID, branch
 	}
 	var fields []models.Field
 	_ = models.UnmarshalJSONValue(legacy.Fields, &fields)
-	return &models.SchemaResponse{ViewID: uuid.Nil, DatasetID: datasetID, Branch: &branch, Schema: models.DatasetSchema{Fields: fields, FileFormat: models.FileFormatParquet}, ContentHash: "legacy", CreatedAt: legacy.CreatedAt}, nil
+	return &models.SchemaResponse{ViewID: uuid.Nil, DatasetID: datasetID, Branch: &branch, Schema: models.NormalizeDatasetSchema(models.DatasetSchema{Fields: fields, FileFormat: models.FileFormatParquet}), ContentHash: "legacy", CreatedAt: legacy.CreatedAt}, nil
 }
 
 func (r *Repo) PreviewData(ctx context.Context, datasetID uuid.UUID, viewID *uuid.UUID, q models.PreviewQuery) (*models.PreviewDataResponse, error) {
@@ -1661,19 +2708,45 @@ func (r *Repo) PreviewData(ctx context.Context, datasetID uuid.UUID, viewID *uui
 			}
 		}
 	}
-	if preview, ok, err := r.previewRowsFromFileIndexMetadata(ctx, datasetID, columns, limit, offset, format); err != nil {
+	branch := r.previewBranchName(ctx, datasetID, q)
+	view, viewErr := r.GetViewAt(ctx, datasetID, branch, nil, nil, nil)
+	if errors.Is(viewErr, ErrNotFound) && branch == "master" {
+		view, viewErr = r.GetViewAt(ctx, datasetID, "main", nil, nil, nil)
+	}
+	currentPaths := map[string]struct{}{}
+	if viewErr == nil && view != nil {
+		for _, file := range view.Files {
+			currentPaths[strings.TrimLeft(file.LogicalPath, "/")] = struct{}{}
+		}
+	}
+	if preview, ok, err := r.previewRowsFromFileIndexMetadata(ctx, datasetID, columns, limit, offset, format, currentPaths, viewID == nil && viewErr == nil); err != nil {
 		return nil, err
 	} else if ok {
 		return preview, nil
 	}
 	if len(columns) == 0 {
+		columns = []string{"logical_path"}
+		outRows := [][]models.JSONValue{}
+		if viewErr == nil && view != nil {
+			start := offset
+			if start > len(view.Files) {
+				start = len(view.Files)
+			}
+			end := start + limit
+			if end > len(view.Files) {
+				end = len(view.Files)
+			}
+			for _, file := range view.Files[start:end] {
+				b, _ := models.MarshalJSONValue(file.LogicalPath)
+				outRows = append(outRows, []models.JSONValue{b})
+			}
+			return &models.PreviewDataResponse{Columns: columns, Rows: outRows, Format: format, Limit: limit, Offset: offset}, nil
+		}
 		rows, err := r.Pool.Query(ctx, `SELECT logical_path FROM dataset_files WHERE dataset_id = $1 AND deleted_at IS NULL ORDER BY logical_path LIMIT $2 OFFSET $3`, datasetID, limit, offset)
 		if err != nil {
 			return nil, err
 		}
 		defer rows.Close()
-		columns = []string{"logical_path"}
-		outRows := [][]models.JSONValue{}
 		for rows.Next() {
 			var path string
 			if err := rows.Scan(&path); err != nil {
@@ -1687,67 +2760,74 @@ func (r *Repo) PreviewData(ctx context.Context, datasetID uuid.UUID, viewID *uui
 	return &models.PreviewDataResponse{Columns: columns, Rows: [][]models.JSONValue{}, Format: format, Limit: limit, Offset: offset}, nil
 }
 
-func (r *Repo) previewRowsFromFileIndexMetadata(ctx context.Context, datasetID uuid.UUID, schemaColumns []string, limit, offset int, format string) (*models.PreviewDataResponse, bool, error) {
-	rows, err := r.Pool.Query(ctx, `SELECT metadata FROM dataset_file_index
+func (r *Repo) previewBranchName(ctx context.Context, datasetID uuid.UUID, q models.PreviewQuery) string {
+	if q.Branch != nil && strings.TrimSpace(*q.Branch) != "" {
+		return strings.TrimSpace(*q.Branch)
+	}
+	return r.datasetDefaultBranch(ctx, datasetID, "")
+}
+
+func (r *Repo) datasetDefaultBranch(ctx context.Context, datasetID uuid.UUID, branch string) string {
+	branch = strings.TrimSpace(branch)
+	if branch != "" {
+		return branch
+	}
+	var activeBranch string
+	if err := r.Pool.QueryRow(ctx, `SELECT active_branch FROM datasets WHERE id = $1 AND deleted_at IS NULL`, datasetID).Scan(&activeBranch); err == nil && strings.TrimSpace(activeBranch) != "" {
+		return strings.TrimSpace(activeBranch)
+	}
+	return "main"
+}
+
+func (r *Repo) previewRowsFromFileIndexMetadata(ctx context.Context, datasetID uuid.UUID, schemaColumns []string, limit, offset int, format string, currentPaths map[string]struct{}, enforceCurrentPaths bool) (*models.PreviewDataResponse, bool, error) {
+	rows, err := r.Pool.Query(ctx, `SELECT path, metadata FROM dataset_file_index
 		WHERE dataset_id = $1 AND metadata ? 'preview_rows'
-		ORDER BY updated_at DESC, created_at DESC LIMIT 1`, datasetID)
+		ORDER BY updated_at DESC, created_at DESC LIMIT 25`, datasetID)
 	if err != nil {
 		return nil, false, err
 	}
 	defer rows.Close()
-	if !rows.Next() {
-		return nil, false, rows.Err()
+	for rows.Next() {
+		var path string
+		var raw models.JSONValue
+		if err := rows.Scan(&path, &raw); err != nil {
+			return nil, false, err
+		}
+		if enforceCurrentPaths {
+			if _, ok := currentPaths[strings.TrimLeft(path, "/")]; !ok {
+				continue
+			}
+		}
+		var meta struct {
+			PreviewColumns []string             `json:"preview_columns"`
+			PreviewRows    [][]models.JSONValue `json:"preview_rows"`
+		}
+		if err := json.Unmarshal(raw, &meta); err != nil || len(meta.PreviewRows) == 0 {
+			continue
+		}
+		columns := append([]string(nil), schemaColumns...)
+		if len(columns) == 0 {
+			columns = append([]string(nil), meta.PreviewColumns...)
+		}
+		start := offset
+		if start > len(meta.PreviewRows) {
+			start = len(meta.PreviewRows)
+		}
+		end := start + limit
+		if end > len(meta.PreviewRows) {
+			end = len(meta.PreviewRows)
+		}
+		out := make([][]models.JSONValue, end-start)
+		for i := range out {
+			out[i] = append([]models.JSONValue(nil), meta.PreviewRows[start+i]...)
+		}
+		return &models.PreviewDataResponse{Columns: columns, Rows: out, Format: format, Limit: limit, Offset: offset}, true, nil
 	}
-	var raw models.JSONValue
-	if err := rows.Scan(&raw); err != nil {
-		return nil, false, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, err
-	}
-	var meta struct {
-		PreviewColumns []string             `json:"preview_columns"`
-		PreviewRows    [][]models.JSONValue `json:"preview_rows"`
-	}
-	if err := json.Unmarshal(raw, &meta); err != nil || len(meta.PreviewRows) == 0 {
-		return nil, false, nil
-	}
-	columns := append([]string(nil), schemaColumns...)
-	if len(columns) == 0 {
-		columns = append([]string(nil), meta.PreviewColumns...)
-	}
-	start := offset
-	if start > len(meta.PreviewRows) {
-		start = len(meta.PreviewRows)
-	}
-	end := start + limit
-	if end > len(meta.PreviewRows) {
-		end = len(meta.PreviewRows)
-	}
-	out := make([][]models.JSONValue, end-start)
-	for i := range out {
-		out[i] = append([]models.JSONValue(nil), meta.PreviewRows[start+i]...)
-	}
-	return &models.PreviewDataResponse{Columns: columns, Rows: out, Format: format, Limit: limit, Offset: offset}, true, nil
+	return nil, false, rows.Err()
 }
 
 func (r *Repo) ValidateSchema(ctx context.Context, datasetID uuid.UUID, schema models.DatasetSchema) (*models.ValidateResponse, error) {
-	errs := []string{}
-	seen := map[string]bool{}
-	for _, f := range schema.Fields {
-		name := strings.TrimSpace(f.Name)
-		if name == "" {
-			errs = append(errs, "field name is required")
-			continue
-		}
-		if seen[name] {
-			errs = append(errs, "duplicate field: "+name)
-		}
-		seen[name] = true
-	}
-	if schema.FileFormat == "" {
-		errs = append(errs, "file_format is required")
-	}
+	errs := models.ValidateDatasetSchema(schema)
 	return &models.ValidateResponse{Conforms: len(errs) == 0, Files: []models.FileValidationReport{}, SchemaErrors: errs}, nil
 }
 
@@ -1899,7 +2979,7 @@ func (r *Repo) ArchiveBranchForRetention(ctx context.Context, branchID uuid.UUID
 func (r *Repo) ResolveDatasetID(ctx context.Context, raw string) (uuid.UUID, error) {
 	if id, err := uuid.Parse(raw); err == nil {
 		var exists bool
-		if err := r.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM datasets WHERE id = $1)`, id).Scan(&exists); err != nil {
+		if err := r.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM datasets WHERE id = $1 AND deleted_at IS NULL)`, id).Scan(&exists); err != nil {
 			return uuid.Nil, err
 		}
 		if !exists {
@@ -1910,9 +2990,28 @@ func (r *Repo) ResolveDatasetID(ctx context.Context, raw string) (uuid.UUID, err
 	return r.ResolveDatasetIDByRID(ctx, raw)
 }
 
+func (r *Repo) ResolveDatasetIDIncludingDeleted(ctx context.Context, raw string) (uuid.UUID, error) {
+	if id, err := uuid.Parse(raw); err == nil {
+		var exists bool
+		if err := r.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM datasets WHERE id = $1)`, id).Scan(&exists); err != nil {
+			return uuid.Nil, err
+		}
+		if !exists {
+			return uuid.Nil, ErrNotFound
+		}
+		return id, nil
+	}
+	var id uuid.UUID
+	err := r.Pool.QueryRow(ctx, `SELECT id FROM datasets WHERE rid = $1`, raw).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrNotFound
+	}
+	return id, err
+}
+
 func (r *Repo) DatasetExists(ctx context.Context, datasetID uuid.UUID) (bool, error) {
 	var exists bool
-	err := r.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM datasets WHERE id = $1)`, datasetID).Scan(&exists)
+	err := r.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM datasets WHERE id = $1 AND deleted_at IS NULL)`, datasetID).Scan(&exists)
 	return exists, err
 }
 
@@ -1970,7 +3069,18 @@ func (r *Repo) GetDatasetRichModel(ctx context.Context, datasetID uuid.UUID) (*m
 	if err != nil || catalog == nil {
 		return nil, err
 	}
-	dataset := models.Dataset{ID: catalog.ID, Name: catalog.Name, Description: catalog.Description, Format: catalog.Format, StoragePath: catalog.StoragePath, SizeBytes: catalog.SizeBytes, RowCount: catalog.RowCount, OwnerID: catalog.OwnerID, Tags: catalog.Tags, CurrentVersion: catalog.CurrentVersion, CreatedAt: catalog.CreatedAt, UpdatedAt: catalog.UpdatedAt}
+	dataset := models.Dataset{
+		ID: catalog.ID, RID: catalog.RID, Name: catalog.Name, DisplayName: catalog.DisplayName,
+		Description: catalog.Description, Format: catalog.Format, StoragePath: catalog.StoragePath,
+		SizeBytes: catalog.SizeBytes, RowCount: catalog.RowCount, OwnerID: catalog.OwnerID,
+		Tags: catalog.Tags, CurrentVersion: catalog.CurrentVersion, ActiveBranch: catalog.ActiveBranch,
+		Metadata: catalog.Metadata, HealthStatus: catalog.HealthStatus, CurrentViewID: catalog.CurrentViewID,
+		ParentFolderRID: catalog.ParentFolderRID, FolderPath: catalog.FolderPath,
+		ProjectID: catalog.ProjectID, ProjectRID: catalog.ProjectRID, Path: catalog.Path,
+		ResourceVisibility: catalog.ResourceVisibility, DeletedAt: catalog.DeletedAt,
+		Links: catalog.Links, CreatedAt: catalog.CreatedAt, UpdatedAt: catalog.UpdatedAt,
+	}
+	hydrateDataset(&dataset)
 	schema, err := r.GetLegacyDatasetSchema(ctx, datasetID)
 	if err != nil {
 		return nil, err
@@ -2015,10 +3125,39 @@ func scanCatalogDataset(r rowLikeT) (*models.CatalogDataset, error) {
 	v := &models.CatalogDataset{}
 	var metadata []byte
 	if err := r.Scan(&v.ID, &v.Name, &v.Description, &v.Format, &v.StoragePath, &v.SizeBytes, &v.RowCount,
-		&v.OwnerID, &v.Tags, &v.CurrentVersion, &v.ActiveBranch, &metadata, &v.HealthStatus, &v.CurrentViewID, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		&v.OwnerID, &v.Tags, &v.CurrentVersion, &v.ActiveBranch, &metadata, &v.HealthStatus, &v.CurrentViewID,
+		&v.RID, &v.ParentFolderRID, &v.FolderPath, &v.ProjectID, &v.ProjectRID, &v.Path, &v.ResourceVisibility,
+		&v.DeletedAt, &v.CreatedAt, &v.UpdatedAt); err != nil {
 		return nil, err
 	}
 	v.Metadata = metadata
+	if v.RID == "" {
+		v.RID = "ri.foundry.main.dataset." + v.ID.String()
+	}
+	if v.DisplayName == "" {
+		v.DisplayName = v.Name
+	}
+	if v.ParentFolderRID == "" {
+		v.ParentFolderRID = defaultParentFolderRID
+	}
+	if v.FolderPath == "" {
+		v.FolderPath = defaultFolderPath
+	}
+	if v.ProjectID == "" {
+		v.ProjectID = defaultProjectID
+	}
+	if v.ProjectRID == "" {
+		v.ProjectRID = defaultProjectRID
+	}
+	if v.ResourceVisibility == "" {
+		v.ResourceVisibility = defaultVisibility
+	}
+	if v.Path == "" {
+		v.Path = BuildDatasetResourcePath(v.FolderPath, v.Name)
+	}
+	if v.Links == nil {
+		v.Links = datasetLinks(v.ID)
+	}
 	return v, nil
 }
 
@@ -2077,16 +3216,182 @@ func scanRuntimeTransaction(r rowLikeT) (*models.RuntimeTransaction, error) {
 	return v, nil
 }
 
+func normalizedDatasetViewKind(body *models.CreateDatasetViewRequest) string {
+	raw := strings.TrimSpace(body.Kind)
+	if raw == "" {
+		raw = strings.TrimSpace(body.ViewType)
+	}
+	raw = strings.ToLower(raw)
+	switch raw {
+	case "logical", "logical_view", "union", "union_view":
+		return models.DatasetViewKindLogical
+	case "materialized", "materialized_view", "sql", "sql_view":
+		return models.DatasetViewKindMaterialized
+	}
+	if len(body.BackingDatasets) > 0 {
+		return models.DatasetViewKindLogical
+	}
+	return models.DatasetViewKindMaterialized
+}
+
+func viewFormatForKind(kind string) string {
+	if kind == models.DatasetViewKindLogical {
+		return "logical_view"
+	}
+	return "view"
+}
+
+func storagePathForViewKind(kind string) *string {
+	if kind == models.DatasetViewKindLogical {
+		return nil
+	}
+	return nil
+}
+
+func viewMetadataForKind(kind string) string {
+	if kind == models.DatasetViewKindLogical {
+		return `{"kind":"logical_view","stores_files":false,"auto_rebuild":true,"transform_input_only":true}`
+	}
+	return `{"kind":"materialized_view"}`
+}
+
+func normalizePrimaryKey(columns []string) ([]string, error) {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, column := range columns {
+		name := strings.TrimSpace(column)
+		if name == "" {
+			continue
+		}
+		if strings.ContainsAny(name, "\x00\r\n\t") {
+			return nil, fmt.Errorf("%w: primary_key contains an invalid column name", ErrValidation)
+		}
+		key := strings.ToLower(name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, name)
+	}
+	return out, nil
+}
+
+func (r *Repo) hydrateLogicalViewMetadata(ctx context.Context, datasetID uuid.UUID, view *models.DatasetView) error {
+	if view == nil {
+		return nil
+	}
+	if view.PrimaryKey == nil {
+		view.PrimaryKey = []string{}
+	}
+	if view.Kind != models.DatasetViewKindLogical && view.Materialized && !view.TransformInputOnly {
+		return nil
+	}
+	backing, err := r.ListViewBackingDatasets(ctx, datasetID, view.ID)
+	if err != nil {
+		return err
+	}
+	view.BackingDatasets = backing
+	if len(backing) > 0 {
+		view.Kind = models.DatasetViewKindLogical
+		view.Materialized = false
+		view.TransformInputOnly = true
+		view.AutoRebuild = true
+		view.RefreshOnSourceUpdate = true
+	}
+	return nil
+}
+
+func (r *Repo) lockDatasetView(ctx context.Context, tx pgx.Tx, datasetID uuid.UUID, viewID uuid.UUID) error {
+	var id uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM dataset_views WHERE dataset_id = $1 AND id = $2 FOR UPDATE`, datasetID, viewID).Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+func (r *Repo) resolveViewBackingInputs(ctx context.Context, backing []models.ViewBackingDatasetInput) ([]models.ViewBackingDataset, error) {
+	if len(backing) == 0 {
+		return nil, fmt.Errorf("%w: backing_datasets is required", ErrValidation)
+	}
+	out := make([]models.ViewBackingDataset, 0, len(backing))
+	seen := map[string]bool{}
+	for i, input := range backing {
+		item, err := r.resolveViewBackingInput(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		key := item.DatasetID.String() + "\x00" + item.Branch
+		if seen[key] {
+			return nil, fmt.Errorf("%w: duplicate backing dataset at position %d", ErrValidation, i)
+		}
+		seen[key] = true
+		item.Position = int32(i)
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func (r *Repo) resolveViewBackingInput(ctx context.Context, input models.ViewBackingDatasetInput) (models.ViewBackingDataset, error) {
+	var id uuid.UUID
+	if input.DatasetID != nil && *input.DatasetID != uuid.Nil {
+		id = *input.DatasetID
+	} else if strings.TrimSpace(input.DatasetRID) != "" {
+		resolved, err := r.ResolveDatasetID(ctx, strings.TrimSpace(input.DatasetRID))
+		if err != nil {
+			return models.ViewBackingDataset{}, err
+		}
+		id = resolved
+	} else {
+		return models.ViewBackingDataset{}, fmt.Errorf("%w: backing dataset requires dataset_id or dataset_rid", ErrValidation)
+	}
+	dataset, err := r.GetDataset(ctx, id)
+	if err != nil {
+		return models.ViewBackingDataset{}, err
+	}
+	if dataset == nil {
+		return models.ViewBackingDataset{}, ErrNotFound
+	}
+	rid := strings.TrimSpace(input.DatasetRID)
+	if rid == "" {
+		rid = dataset.RID
+	}
+	if rid == "" {
+		rid = "ri.foundry.main.dataset." + dataset.ID.String()
+	}
+	alias := strings.TrimSpace(input.Alias)
+	if alias == "" {
+		alias = dataset.Name
+	}
+	return models.ViewBackingDataset{
+		DatasetID:       id,
+		DatasetRID:      rid,
+		Branch:          strings.TrimSpace(input.Branch),
+		Alias:           alias,
+		SchemaVersionID: input.SchemaVersionID,
+	}, nil
+}
+
 func datasetViewSelect() string {
-	return `SELECT id, dataset_id, name, description, sql_text, source_branch, source_version, materialized, refresh_on_source_update, format, current_version, storage_path, row_count, schema_fields, last_refreshed_at, created_at, updated_at FROM dataset_views`
+	return `SELECT id, dataset_id, name, description, sql_text, source_branch, source_version, materialized, refresh_on_source_update, COALESCE(view_kind, 'materialized'), COALESCE(primary_key, '[]'::jsonb), auto_rebuild, transform_input_only, format, current_version, storage_path, row_count, schema_fields, last_refreshed_at, created_at, updated_at FROM dataset_views`
 }
 func scanDatasetView(r rowLikeT) (*models.DatasetView, error) {
 	v := &models.DatasetView{}
-	var schema []byte
-	if err := r.Scan(&v.ID, &v.DatasetID, &v.Name, &v.Description, &v.SQLText, &v.SourceBranch, &v.SourceVersion, &v.Materialized, &v.RefreshOnSourceUpdate, &v.Format, &v.CurrentVersion, &v.StoragePath, &v.RowCount, &schema, &v.LastRefreshedAt, &v.CreatedAt, &v.UpdatedAt); err != nil {
+	var schema, primaryKey []byte
+	if err := r.Scan(&v.ID, &v.DatasetID, &v.Name, &v.Description, &v.SQLText, &v.SourceBranch, &v.SourceVersion, &v.Materialized, &v.RefreshOnSourceUpdate, &v.Kind, &primaryKey, &v.AutoRebuild, &v.TransformInputOnly, &v.Format, &v.CurrentVersion, &v.StoragePath, &v.RowCount, &schema, &v.LastRefreshedAt, &v.CreatedAt, &v.UpdatedAt); err != nil {
 		return nil, err
 	}
 	v.SchemaFields = schema
+	if strings.TrimSpace(v.Kind) == "" {
+		if v.Materialized {
+			v.Kind = models.DatasetViewKindMaterialized
+		} else {
+			v.Kind = models.DatasetViewKindLogical
+		}
+	}
+	_ = json.Unmarshal(primaryKey, &v.PrimaryKey)
 	return v, nil
 }
 
@@ -2133,7 +3438,7 @@ func scanDatasetHealth(r rowLikeT) (*models.DatasetHealth, error) {
 // Compare, preview, lint, health-policy, and retention-outbox parity helpers.
 func (r *Repo) ResolveDatasetIDByRID(ctx context.Context, datasetRID string) (uuid.UUID, error) {
 	var id uuid.UUID
-	err := r.Pool.QueryRow(ctx, `SELECT id FROM datasets WHERE rid = $1`, datasetRID).Scan(&id)
+	err := r.Pool.QueryRow(ctx, `SELECT id FROM datasets WHERE rid = $1 AND deleted_at IS NULL`, datasetRID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, ErrNotFound
 	}

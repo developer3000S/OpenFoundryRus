@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -34,7 +35,59 @@ func TestRustParityRoutesRequireAuth(t *testing.T) {
 		{http.MethodPatch, "/api/v1/datasets/00000000-0000-0000-0000-000000000001/quality/rules/rule-1"},
 		{http.MethodDelete, "/api/v1/datasets/00000000-0000-0000-0000-000000000001/quality/rules/rule-1"},
 		{http.MethodGet, "/api/v1/datasets/00000000-0000-0000-0000-000000000001/lint"},
+		{http.MethodGet, "/api/v1/datasets/00000000-0000-0000-0000-000000000001/branches"},
+		{http.MethodPost, "/api/v1/datasets/00000000-0000-0000-0000-000000000001/branches"},
+		{http.MethodGet, "/api/v1/datasets/00000000-0000-0000-0000-000000000001/branches/master"},
+		{http.MethodDelete, "/api/v1/datasets/00000000-0000-0000-0000-000000000001/branches/master"},
+		{http.MethodGet, "/api/v1/datasets/00000000-0000-0000-0000-000000000001/branches/master/transactions"},
 		{http.MethodGet, "/api/v1/datasets/ri.foundry.main.dataset.example/health"},
+		{http.MethodGet, "/api/v2/datasets"},
+		{http.MethodPost, "/api/v2/datasets"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example"},
+		{http.MethodPatch, "/api/v2/datasets/ri.foundry.main.dataset.example"},
+		{http.MethodDelete, "/api/v2/datasets/ri.foundry.main.dataset.example"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example:restore"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/branches"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/branches"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/branches/master"},
+		{http.MethodDelete, "/api/v2/datasets/ri.foundry.main.dataset.example/branches/master"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/branches/master/transactions"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/branches/master/transactions"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/branches/master/transactions/00000000-0000-0000-0000-000000000002"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/branches/master/transactions/00000000-0000-0000-0000-000000000002:commit"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/branches/master/transactions/00000000-0000-0000-0000-000000000002:abort"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/transactions"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/transactions:batchGet"},
+		{http.MethodPost, "/api/v2/datasets/getSchemaBatch"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/readTable"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/preview"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/schema"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/getSchema"},
+		{http.MethodPut, "/api/v2/datasets/ri.foundry.main.dataset.example/schema"},
+		{http.MethodPut, "/api/v2/datasets/ri.foundry.main.dataset.example/putSchema"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/schema:infer"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/schema:validate"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/schema/history"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/files"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/files/metadata"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/files/content"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/files/00000000-0000-0000-0000-000000000003"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/files/00000000-0000-0000-0000-000000000003/download"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/transactions/00000000-0000-0000-0000-000000000002/files"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/transactions/00000000-0000-0000-0000-000000000002/files/content"},
+		{http.MethodDelete, "/api/v2/datasets/ri.foundry.main.dataset.example/transactions/00000000-0000-0000-0000-000000000002/files"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/compare"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/views"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/views"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/views/current"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/views/at"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/views/view-1/files"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/views/view-1/schema"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/views/view-1/schema"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/views/view-1/data"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/views/view-1/preview"},
+		{http.MethodGet, "/api/v2/datasets/ri.foundry.main.dataset.example/views/view-1"},
+		{http.MethodPost, "/api/v2/datasets/ri.foundry.main.dataset.example/views/view-1:refresh"},
 		{http.MethodGet, "/internal/datasets/ri.foundry.main.dataset.example/metadata"},
 		{http.MethodGet, "/v1/datasets"},
 		{http.MethodPost, "/v1/datasets"},
@@ -67,6 +120,7 @@ func TestRustParityRoutesRequireAuth(t *testing.T) {
 		{http.MethodPost, "/v1/datasets/ri.foundry.main.dataset.example/branches/master/rollback"},
 		{http.MethodGet, "/v1/datasets/ri.foundry.main.dataset.example/branches/master/fallbacks"},
 		{http.MethodPut, "/v1/datasets/ri.foundry.main.dataset.example/branches/master/fallbacks"},
+		{http.MethodGet, "/v1/datasets/ri.foundry.main.dataset.example/branches/master/transactions"},
 		{http.MethodPost, "/v1/datasets/ri.foundry.main.dataset.example/branches/master/transactions"},
 		{http.MethodGet, "/v1/datasets/ri.foundry.main.dataset.example/branches/master/transactions/00000000-0000-0000-0000-000000000002"},
 		{http.MethodPost, "/v1/datasets/ri.foundry.main.dataset.example/branches/master/transactions/00000000-0000-0000-0000-000000000002"},
@@ -92,7 +146,11 @@ func TestRustParityRoutesRequireAuth(t *testing.T) {
 		{http.MethodGet, "/v1/datasets/ri.foundry.main.dataset.example/storage-details"},
 		{http.MethodPost, "/v1/datasets/ri.foundry.main.dataset.example/upload"},
 		{http.MethodGet, "/v1/datasets/ri.foundry.main.dataset.example/preview"},
+		{http.MethodGet, "/v1/datasets/ri.foundry.main.dataset.example/readTable"},
 		{http.MethodGet, "/v1/datasets/ri.foundry.main.dataset.example/schema"},
+		{http.MethodPut, "/v1/datasets/ri.foundry.main.dataset.example/schema"},
+		{http.MethodPost, "/v1/datasets/ri.foundry.main.dataset.example/schema:infer"},
+		{http.MethodGet, "/v1/datasets/ri.foundry.main.dataset.example/schema/history"},
 		{http.MethodPost, "/v1/datasets/ri.foundry.main.dataset.example/schema:validate"},
 		{http.MethodGet, "/v1/datasets/ri.foundry.main.dataset.example/health"},
 	}
@@ -103,6 +161,68 @@ func TestRustParityRoutesRequireAuth(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			srv.Handler.ServeHTTP(rec, req)
 			require.Equal(t, http.StatusUnauthorized, rec.Code)
+		})
+	}
+}
+
+func TestDatasetAPIV2CompatibilityScopes(t *testing.T) {
+	jwt := authmw.NewJWTConfig("dataset-versioning-router-test-secret")
+	srv := newTestServerWithJWT(t, jwt)
+
+	for _, tc := range []struct {
+		name          string
+		claims        *authmw.Claims
+		method        string
+		path          string
+		requiredScope string
+	}{
+		{
+			name:          "read requires dataset read scope",
+			claims:        testClaims(),
+			method:        http.MethodGet,
+			path:          "/api/v2/datasets",
+			requiredScope: "datasets:read",
+		},
+		{
+			name:          "write requires dataset write scope",
+			claims:        testClaimsWithPermissions("datasets:read"),
+			method:        http.MethodPost,
+			path:          "/api/v2/datasets",
+			requiredScope: "datasets:write",
+		},
+		{
+			name: "local token method scope is enforced",
+			claims: testClaimsWithSessionScope(&authmw.SessionScope{
+				AllowedMethods:      []string{http.MethodGet},
+				AllowedPathPrefixes: []string{"/api/v2/datasets"},
+			}, "datasets:write"),
+			method:        http.MethodPost,
+			path:          "/api/v2/datasets",
+			requiredScope: "datasets:write",
+		},
+		{
+			name: "local token path scope is enforced",
+			claims: testClaimsWithSessionScope(&authmw.SessionScope{
+				AllowedMethods:      []string{http.MethodGet},
+				AllowedPathPrefixes: []string{"/api/v2/datasets/allowed"},
+			}, "datasets:read"),
+			method:        http.MethodGet,
+			path:          "/api/v2/datasets",
+			requiredScope: "datasets:read",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer "+tokenForClaims(t, jwt, tc.claims))
+
+			srv.Handler.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.Equal(t, "PERMISSION_DENIED", body["code"])
+			require.Equal(t, tc.requiredScope, body["required_scope"])
 		})
 	}
 }
@@ -164,8 +284,19 @@ func newTestServerWithJWT(t *testing.T, jwt *authmw.JWTConfig) *http.Server {
 
 func tokenFor(t *testing.T, cfg *authmw.JWTConfig) string {
 	t.Helper()
+	return tokenForClaims(t, cfg, testAdminClaims())
+}
+
+func tokenForClaims(t *testing.T, cfg *authmw.JWTConfig, claims *authmw.Claims) string {
+	t.Helper()
+	tok, err := authmw.EncodeToken(cfg, claims)
+	require.NoError(t, err)
+	return tok
+}
+
+func testAdminClaims() *authmw.Claims {
 	now := time.Now()
-	claims := &authmw.Claims{
+	return &authmw.Claims{
 		Sub:   uuid.New(),
 		IAT:   now.Unix(),
 		EXP:   now.Add(time.Hour).Unix(),
@@ -174,7 +305,30 @@ func tokenFor(t *testing.T, cfg *authmw.JWTConfig) string {
 		Name:  "Route Test",
 		Roles: []string{"admin"},
 	}
-	tok, err := authmw.EncodeToken(cfg, claims)
-	require.NoError(t, err)
-	return tok
+}
+
+func testClaimsWithPermissions(permissions ...string) *authmw.Claims {
+	claims := testClaims()
+	claims.Permissions = permissions
+	return claims
+}
+
+func testClaimsWithSessionScope(scope *authmw.SessionScope, permissions ...string) *authmw.Claims {
+	claims := testClaimsWithPermissions(permissions...)
+	claims.SessionScope = scope
+	return claims
+}
+
+func testClaims() *authmw.Claims {
+	now := time.Now()
+	return &authmw.Claims{
+		Sub:         uuid.New(),
+		IAT:         now.Unix(),
+		EXP:         now.Add(time.Hour).Unix(),
+		JTI:         uuid.New(),
+		Email:       "route-test@example.com",
+		Name:        "Route Test",
+		Roles:       []string{},
+		Permissions: []string{},
+	}
 }

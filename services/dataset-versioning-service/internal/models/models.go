@@ -4,7 +4,9 @@ package models
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,45 +33,82 @@ type Page[T any] struct {
 // Dataset mirrors the `datasets` row, byte-compatible with Rust
 // `data_asset_catalog::models::dataset::Dataset`.
 type Dataset struct {
-	ID             uuid.UUID       `json:"id"`
-	Name           string          `json:"name"`
-	Description    string          `json:"description"`
-	Format         string          `json:"format"`
-	StoragePath    string          `json:"storage_path"`
-	SizeBytes      int64           `json:"size_bytes"`
-	RowCount       int64           `json:"row_count"`
-	OwnerID        uuid.UUID       `json:"owner_id"`
-	Tags           []string        `json:"tags"`
-	CurrentVersion int32           `json:"current_version"`
-	ActiveBranch   string          `json:"active_branch"`
-	Metadata       json.RawMessage `json:"metadata"`
-	HealthStatus   string          `json:"health_status"`
-	CurrentViewID  *uuid.UUID      `json:"current_view_id"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID                 uuid.UUID       `json:"id"`
+	RID                string          `json:"rid,omitempty"`
+	Name               string          `json:"name"`
+	DisplayName        string          `json:"display_name,omitempty"`
+	Description        string          `json:"description"`
+	Format             string          `json:"format"`
+	StoragePath        string          `json:"storage_path"`
+	SizeBytes          int64           `json:"size_bytes"`
+	RowCount           int64           `json:"row_count"`
+	OwnerID            uuid.UUID       `json:"owner_id"`
+	Tags               []string        `json:"tags"`
+	CurrentVersion     int32           `json:"current_version"`
+	ActiveBranch       string          `json:"active_branch"`
+	Metadata           json.RawMessage `json:"metadata"`
+	HealthStatus       string          `json:"health_status"`
+	CurrentViewID      *uuid.UUID      `json:"current_view_id"`
+	ParentFolderRID    string          `json:"parent_folder_rid,omitempty"`
+	FolderPath         string          `json:"folder_path,omitempty"`
+	ProjectID          string          `json:"project_id,omitempty"`
+	ProjectRID         string          `json:"project_rid,omitempty"`
+	Path               string          `json:"path,omitempty"`
+	ResourceVisibility string          `json:"resource_visibility,omitempty"`
+	DeletedAt          *time.Time      `json:"deleted_at,omitempty"`
+	Links              *DatasetLinks   `json:"links,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+}
+
+type DatasetLinks struct {
+	Self    string `json:"self"`
+	Preview string `json:"preview"`
+	Lineage string `json:"lineage"`
 }
 
 // CreateDatasetRequest is the body of POST /v1/datasets, mirroring Rust
 // `CreateDatasetRequest`.
 type CreateDatasetRequest struct {
-	ID           *uuid.UUID      `json:"id,omitempty"`
-	Name         string          `json:"name"`
-	Description  *string         `json:"description,omitempty"`
-	Format       *string         `json:"format,omitempty"`
-	Tags         []string        `json:"tags,omitempty"`
-	Metadata     json.RawMessage `json:"metadata,omitempty"`
-	HealthStatus *string         `json:"health_status,omitempty"`
+	ID                 *uuid.UUID      `json:"id,omitempty"`
+	Name               string          `json:"name"`
+	DisplayName        *string         `json:"display_name,omitempty"`
+	Description        *string         `json:"description,omitempty"`
+	Format             *string         `json:"format,omitempty"`
+	Tags               []string        `json:"tags,omitempty"`
+	Metadata           json.RawMessage `json:"metadata,omitempty"`
+	HealthStatus       *string         `json:"health_status,omitempty"`
+	ParentFolderRID    *string         `json:"parent_folder_rid,omitempty"`
+	ParentFolderRid    *string         `json:"parentFolderRid,omitempty"`
+	FolderPath         *string         `json:"folder_path,omitempty"`
+	ProjectID          *string         `json:"project_id,omitempty"`
+	ProjectRID         *string         `json:"project_rid,omitempty"`
+	Path               *string         `json:"path,omitempty"`
+	ResourceVisibility *string         `json:"resource_visibility,omitempty"`
+	Visibility         *string         `json:"visibility,omitempty"`
+	ActiveBranch       *string         `json:"active_branch,omitempty"`
+	DefaultBranch      *string         `json:"default_branch,omitempty"`
+	DefaultBranchName  *string         `json:"defaultBranchName,omitempty"`
 }
 
 // UpdateDatasetRequest mirrors Rust `UpdateDatasetRequest` PATCH semantics.
 type UpdateDatasetRequest struct {
-	Name          *string         `json:"name,omitempty"`
-	Description   *string         `json:"description,omitempty"`
-	OwnerID       *uuid.UUID      `json:"owner_id,omitempty"`
-	Tags          []string        `json:"tags,omitempty"`
-	Metadata      json.RawMessage `json:"metadata,omitempty"`
-	HealthStatus  *string         `json:"health_status,omitempty"`
-	CurrentViewID *uuid.UUID      `json:"current_view_id,omitempty"`
+	Name               *string         `json:"name,omitempty"`
+	DisplayName        *string         `json:"display_name,omitempty"`
+	Description        *string         `json:"description,omitempty"`
+	OwnerID            *uuid.UUID      `json:"owner_id,omitempty"`
+	Tags               []string        `json:"tags,omitempty"`
+	Metadata           json.RawMessage `json:"metadata,omitempty"`
+	HealthStatus       *string         `json:"health_status,omitempty"`
+	CurrentViewID      *uuid.UUID      `json:"current_view_id,omitempty"`
+	ParentFolderRID    *string         `json:"parent_folder_rid,omitempty"`
+	ParentFolderRid    *string         `json:"parentFolderRid,omitempty"`
+	FolderPath         *string         `json:"folder_path,omitempty"`
+	ProjectID          *string         `json:"project_id,omitempty"`
+	ProjectRID         *string         `json:"project_rid,omitempty"`
+	Path               *string         `json:"path,omitempty"`
+	ResourceVisibility *string         `json:"resource_visibility,omitempty"`
+	Visibility         *string         `json:"visibility,omitempty"`
 }
 
 // DatasetVersion mirrors the Rust DatasetVersion model.
@@ -118,9 +157,11 @@ type DatasetBranch struct {
 
 // CreateDatasetBranchRequest mirrors Rust CreateDatasetBranchRequest.
 type CreateDatasetBranchRequest struct {
-	Name          string `json:"name"`
-	SourceVersion *int32 `json:"source_version,omitempty"`
-	Description   string `json:"description,omitempty"`
+	Name           string  `json:"name"`
+	SourceVersion  *int32  `json:"source_version,omitempty"`
+	Description    string  `json:"description,omitempty"`
+	TransactionRID *string `json:"transactionRid,omitempty"`
+	TransactionRid *string `json:"transaction_rid,omitempty"`
 }
 
 // MergeDatasetBranchRequest mirrors Rust MergeDatasetBranchRequest used by the
@@ -174,17 +215,24 @@ func formatTransactionRIDOpt(id *uuid.UUID) *string {
 // DatasetFile exposes the persisted Foundry logical-to-physical backing file
 // mapping for one dataset file.
 type DatasetFile struct {
-	ID            uuid.UUID  `json:"id"`
-	DatasetID     uuid.UUID  `json:"dataset_id"`
-	TransactionID uuid.UUID  `json:"transaction_id"`
-	LogicalPath   string     `json:"logical_path"`
-	PhysicalURI   string     `json:"physical_uri"`
-	SizeBytes     int64      `json:"size_bytes"`
-	SHA256        *string    `json:"sha256,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	ModifiedAt    time.Time  `json:"modified_at"`
-	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
-	Status        string     `json:"status"`
+	ID              uuid.UUID  `json:"id"`
+	DatasetID       uuid.UUID  `json:"dataset_id"`
+	TransactionID   uuid.UUID  `json:"transaction_id"`
+	TransactionRID  string     `json:"transaction_rid,omitempty"`
+	LogicalPath     string     `json:"logical_path"`
+	Path            string     `json:"path,omitempty"`
+	PhysicalURI     string     `json:"physical_uri"`
+	SizeBytes       int64      `json:"size_bytes"`
+	MediaType       *string    `json:"media_type,omitempty"`
+	ContentType     *string    `json:"content_type,omitempty"`
+	SHA256          *string    `json:"sha256,omitempty"`
+	RowCountHint    *int64     `json:"row_count_hint,omitempty"`
+	StorageLocation JSONValue  `json:"storage_location,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	ModifiedAt      time.Time  `json:"modified_at"`
+	UpdatedTime     time.Time  `json:"updated_time"`
+	DeletedAt       *time.Time `json:"deleted_at,omitempty"`
+	Status          string     `json:"status"`
 }
 
 // ListDatasetFilesResponse is returned by GET /api/v1/datasets/{id}/files.
@@ -192,6 +240,7 @@ type ListDatasetFilesResponse struct {
 	Branch string        `json:"branch"`
 	Total  int           `json:"total"`
 	Files  []DatasetFile `json:"files"`
+	Data   []DatasetFile `json:"data,omitempty"`
 }
 
 // DownloadDatasetFileResponse contains a backend-specific presigned download
@@ -205,17 +254,51 @@ type DownloadDatasetFileResponse struct {
 // CreateDatasetFileUploadURLRequest asks the service to presign an upload into
 // a transaction-scoped logical path.
 type CreateDatasetFileUploadURLRequest struct {
-	LogicalPath string  `json:"logical_path"`
-	ContentType *string `json:"content_type,omitempty"`
-	SHA256      *string `json:"sha256,omitempty"`
+	LogicalPath  string  `json:"logical_path"`
+	ContentType  *string `json:"content_type,omitempty"`
+	MediaType    *string `json:"media_type,omitempty"`
+	SHA256       *string `json:"sha256,omitempty"`
+	SizeBytes    *int64  `json:"size_bytes,omitempty"`
+	RowCountHint *int64  `json:"row_count_hint,omitempty"`
 }
 
 // CreateDatasetFileUploadURLResponse tells the caller where to PUT bytes.
 type CreateDatasetFileUploadURLResponse struct {
-	URL         string    `json:"url"`
-	PhysicalURI string    `json:"physical_uri"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	Method      string    `json:"method"`
+	URL             string    `json:"url"`
+	PhysicalURI     string    `json:"physical_uri"`
+	LogicalPath     string    `json:"logical_path,omitempty"`
+	TransactionID   uuid.UUID `json:"transaction_id,omitempty"`
+	TransactionRID  string    `json:"transaction_rid,omitempty"`
+	MediaType       *string   `json:"media_type,omitempty"`
+	SHA256          *string   `json:"sha256,omitempty"`
+	SizeBytes       *int64    `json:"size_bytes,omitempty"`
+	RowCountHint    *int64    `json:"row_count_hint,omitempty"`
+	StorageLocation JSONValue `json:"storage_location,omitempty"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	Method          string    `json:"method"`
+}
+
+type UploadDatasetFileContentResponse struct {
+	Path            string    `json:"path"`
+	LogicalPath     string    `json:"logical_path"`
+	TransactionID   uuid.UUID `json:"transaction_id"`
+	TransactionRID  string    `json:"transaction_rid"`
+	PhysicalURI     string    `json:"physical_uri"`
+	SizeBytes       int64     `json:"size_bytes"`
+	MediaType       string    `json:"media_type"`
+	SHA256          string    `json:"sha256"`
+	RowCountHint    *int64    `json:"row_count_hint,omitempty"`
+	StorageLocation JSONValue `json:"storage_location,omitempty"`
+	UpdatedTime     time.Time `json:"updated_time"`
+}
+
+type DeleteDatasetFileContentResponse struct {
+	Path           string    `json:"path"`
+	LogicalPath    string    `json:"logical_path"`
+	TransactionID  uuid.UUID `json:"transaction_id"`
+	TransactionRID string    `json:"transaction_rid"`
+	Operation      string    `json:"operation"`
+	UpdatedTime    time.Time `json:"updated_time"`
 }
 
 // Wire token types preserved from the Rust serde contracts.
@@ -284,22 +367,32 @@ type JSONValue = json.RawMessage
 
 // Data asset catalog dataset shape includes metadata/view-health fields from Rust data_asset_catalog/models/dataset.rs.
 type CatalogDataset struct {
-	ID             uuid.UUID  `json:"id"`
-	Name           string     `json:"name"`
-	Description    string     `json:"description"`
-	Format         string     `json:"format"`
-	StoragePath    string     `json:"storage_path"`
-	SizeBytes      int64      `json:"size_bytes"`
-	RowCount       int64      `json:"row_count"`
-	OwnerID        uuid.UUID  `json:"owner_id"`
-	Tags           []string   `json:"tags"`
-	CurrentVersion int32      `json:"current_version"`
-	ActiveBranch   string     `json:"active_branch"`
-	Metadata       JSONValue  `json:"metadata"`
-	HealthStatus   string     `json:"health_status"`
-	CurrentViewID  *uuid.UUID `json:"current_view_id"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID                 uuid.UUID     `json:"id"`
+	RID                string        `json:"rid,omitempty"`
+	Name               string        `json:"name"`
+	DisplayName        string        `json:"display_name,omitempty"`
+	Description        string        `json:"description"`
+	Format             string        `json:"format"`
+	StoragePath        string        `json:"storage_path"`
+	SizeBytes          int64         `json:"size_bytes"`
+	RowCount           int64         `json:"row_count"`
+	OwnerID            uuid.UUID     `json:"owner_id"`
+	Tags               []string      `json:"tags"`
+	CurrentVersion     int32         `json:"current_version"`
+	ActiveBranch       string        `json:"active_branch"`
+	Metadata           JSONValue     `json:"metadata"`
+	HealthStatus       string        `json:"health_status"`
+	CurrentViewID      *uuid.UUID    `json:"current_view_id"`
+	ParentFolderRID    string        `json:"parent_folder_rid,omitempty"`
+	FolderPath         string        `json:"folder_path,omitempty"`
+	ProjectID          string        `json:"project_id,omitempty"`
+	ProjectRID         string        `json:"project_rid,omitempty"`
+	Path               string        `json:"path,omitempty"`
+	ResourceVisibility string        `json:"resource_visibility,omitempty"`
+	DeletedAt          *time.Time    `json:"deleted_at,omitempty"`
+	Links              *DatasetLinks `json:"links,omitempty"`
+	CreatedAt          time.Time     `json:"created_at"`
+	UpdatedAt          time.Time     `json:"updated_at"`
 }
 
 type CatalogCreateDatasetRequest struct {
@@ -443,15 +536,24 @@ type DatasetRichModel struct {
 }
 
 type DatasetMetadataPatch struct {
-	Name          *string    `json:"name"`
-	Description   *string    `json:"description"`
-	OwnerID       *uuid.UUID `json:"owner_id"`
-	Tags          []string   `json:"tags"`
-	Format        *string    `json:"format"`
-	Metadata      JSONValue  `json:"metadata"`
-	Schema        JSONValue  `json:"schema"`
-	HealthStatus  *string    `json:"health_status"`
-	CurrentViewID *uuid.UUID `json:"current_view_id"`
+	Name               *string    `json:"name"`
+	DisplayName        *string    `json:"display_name"`
+	Description        *string    `json:"description"`
+	OwnerID            *uuid.UUID `json:"owner_id"`
+	Tags               []string   `json:"tags"`
+	Format             *string    `json:"format"`
+	Metadata           JSONValue  `json:"metadata"`
+	Schema             JSONValue  `json:"schema"`
+	HealthStatus       *string    `json:"health_status"`
+	CurrentViewID      *uuid.UUID `json:"current_view_id"`
+	ParentFolderRID    *string    `json:"parent_folder_rid"`
+	ParentFolderRid    *string    `json:"parentFolderRid"`
+	FolderPath         *string    `json:"folder_path"`
+	ProjectID          *string    `json:"project_id"`
+	ProjectRID         *string    `json:"project_rid"`
+	Path               *string    `json:"path"`
+	ResourceVisibility *string    `json:"resource_visibility"`
+	Visibility         *string    `json:"visibility"`
 }
 
 type PutDatasetMarkingsRequest struct {
@@ -500,15 +602,24 @@ type PutDatasetFileIndexEntry struct {
 }
 
 type InternalDatasetMetadata struct {
-	ID             uuid.UUID   `json:"id"`
-	Name           string      `json:"name"`
-	Format         string      `json:"format"`
-	Markings       []uuid.UUID `json:"markings"`
-	Tags           []string    `json:"tags"`
-	CurrentVersion int32       `json:"current_version"`
-	ActiveBranch   string      `json:"active_branch"`
-	OwnerID        uuid.UUID   `json:"owner_id"`
-	UpdatedAt      time.Time   `json:"updated_at"`
+	ID                 uuid.UUID     `json:"id"`
+	RID                string        `json:"rid,omitempty"`
+	Name               string        `json:"name"`
+	DisplayName        string        `json:"display_name,omitempty"`
+	Format             string        `json:"format"`
+	Markings           []uuid.UUID   `json:"markings"`
+	Tags               []string      `json:"tags"`
+	CurrentVersion     int32         `json:"current_version"`
+	ActiveBranch       string        `json:"active_branch"`
+	OwnerID            uuid.UUID     `json:"owner_id"`
+	ParentFolderRID    string        `json:"parent_folder_rid,omitempty"`
+	FolderPath         string        `json:"folder_path,omitempty"`
+	ProjectID          string        `json:"project_id,omitempty"`
+	ProjectRID         string        `json:"project_rid,omitempty"`
+	Path               string        `json:"path,omitempty"`
+	ResourceVisibility string        `json:"resource_visibility,omitempty"`
+	Links              *DatasetLinks `json:"links,omitempty"`
+	UpdatedAt          time.Time     `json:"updated_at"`
 }
 
 // Branches, ancestry, retention, markings, fallback, and compare.
@@ -546,6 +657,39 @@ type RuntimeBranch struct {
 	FallbackChain            []string   `json:"fallback_chain"`
 	CreatedAt                time.Time  `json:"created_at"`
 	UpdatedAt                time.Time  `json:"updated_at"`
+}
+
+type FoundryBranch struct {
+	Name           string  `json:"name"`
+	TransactionRID *string `json:"transactionRid,omitempty"`
+}
+
+type FoundryCreateBranchRequest struct {
+	Name           string  `json:"name"`
+	TransactionRID *string `json:"transactionRid,omitempty"`
+}
+
+type FoundryListBranchesResponse struct {
+	Data          []FoundryBranch `json:"data,omitempty"`
+	NextPageToken *string         `json:"nextPageToken,omitempty"`
+}
+
+type FoundryListTransactionsResponse struct {
+	Data          []RuntimeTransactionResponse `json:"data,omitempty"`
+	NextPageToken *string                      `json:"nextPageToken,omitempty"`
+}
+
+func TransactionRID(id uuid.UUID) string {
+	return "ri.foundry.main.transaction." + id.String()
+}
+
+func FoundryBranchFromRuntime(b RuntimeBranch) FoundryBranch {
+	var rid *string
+	if b.HeadTransactionID != nil {
+		value := TransactionRID(*b.HeadTransactionID)
+		rid = &value
+	}
+	return FoundryBranch{Name: b.Name, TransactionRID: rid}
 }
 
 type BranchDeleteChildReparent struct {
@@ -812,16 +956,30 @@ func (e BranchEnvelope) Payload() json.RawMessage {
 
 // Transactions and 207 batch envelopes.
 type StartTransactionBody struct {
-	Type       TransactionType `json:"type"`
-	Providence JSONValue       `json:"providence"`
-	Summary    *string         `json:"summary"`
+	Type            TransactionType `json:"type"`
+	TransactionType TransactionType `json:"transactionType,omitempty"`
+	Providence      JSONValue       `json:"providence"`
+	Summary         *string         `json:"summary"`
+}
+
+func (b StartTransactionBody) RequestedType() TransactionType {
+	if b.TransactionType != "" {
+		return b.TransactionType
+	}
+	return b.Type
 }
 
 type StageTransactionFile struct {
-	LogicalPath  string        `json:"logical_path"`
-	PhysicalPath string        `json:"physical_path"`
-	SizeBytes    int64         `json:"size_bytes"`
-	Operation    FileOperation `json:"operation"`
+	LogicalPath     string        `json:"logical_path"`
+	PhysicalPath    string        `json:"physical_path"`
+	PhysicalURI     string        `json:"physical_uri,omitempty"`
+	SizeBytes       int64         `json:"size_bytes"`
+	MediaType       *string       `json:"media_type,omitempty"`
+	ContentType     *string       `json:"content_type,omitempty"`
+	SHA256          *string       `json:"sha256,omitempty"`
+	RowCountHint    *int64        `json:"row_count_hint,omitempty"`
+	StorageLocation JSONValue     `json:"storage_location,omitempty"`
+	Operation       FileOperation `json:"operation"`
 }
 
 type ListTxQuery struct {
@@ -843,6 +1001,122 @@ type RuntimeTransaction struct {
 	StartedAt   time.Time         `json:"started_at"`
 	CommittedAt *time.Time        `json:"committed_at"`
 	AbortedAt   *time.Time        `json:"aborted_at"`
+}
+
+type RuntimeTransactionResponse struct {
+	RID             string            `json:"rid"`
+	TransactionRID  string            `json:"transaction_rid"`
+	TransactionType TransactionType   `json:"transactionType"`
+	ID              uuid.UUID         `json:"id"`
+	DatasetID       uuid.UUID         `json:"dataset_id"`
+	BranchID        uuid.UUID         `json:"branch_id"`
+	BranchName      string            `json:"branch_name"`
+	TxType          TransactionType   `json:"tx_type"`
+	Status          TransactionStatus `json:"status"`
+	Summary         string            `json:"summary"`
+	Metadata        JSONValue         `json:"metadata"`
+	Providence      JSONValue         `json:"providence"`
+	StartedBy       *uuid.UUID        `json:"started_by"`
+	StartedAt       time.Time         `json:"started_at"`
+	CreatedTime     time.Time         `json:"createdTime"`
+	CommittedAt     *time.Time        `json:"committed_at"`
+	AbortedAt       *time.Time        `json:"aborted_at"`
+	ClosedTime      *time.Time        `json:"closedTime,omitempty"`
+}
+
+func NewRuntimeTransactionResponse(tx RuntimeTransaction) RuntimeTransactionResponse {
+	closed := tx.CommittedAt
+	if closed == nil {
+		closed = tx.AbortedAt
+	}
+	rid := "ri.foundry.main.transaction." + tx.ID.String()
+	return RuntimeTransactionResponse{
+		RID:             rid,
+		TransactionRID:  rid,
+		TransactionType: tx.TxType,
+		ID:              tx.ID,
+		DatasetID:       tx.DatasetID,
+		BranchID:        tx.BranchID,
+		BranchName:      tx.BranchName,
+		TxType:          tx.TxType,
+		Status:          tx.Status,
+		Summary:         tx.Summary,
+		Metadata:        tx.Metadata,
+		Providence:      tx.Providence,
+		StartedBy:       tx.StartedBy,
+		StartedAt:       tx.StartedAt,
+		CreatedTime:     tx.StartedAt,
+		CommittedAt:     tx.CommittedAt,
+		AbortedAt:       tx.AbortedAt,
+		ClosedTime:      closed,
+	}
+}
+
+func NewRuntimeTransactionResponses(rows []RuntimeTransaction) []RuntimeTransactionResponse {
+	out := make([]RuntimeTransactionResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, NewRuntimeTransactionResponse(row))
+	}
+	return out
+}
+
+const (
+	IncrementalModeEmpty         = "empty"
+	IncrementalModeAppendOnly    = "append_only"
+	IncrementalModeSnapshotBased = "snapshot_based"
+	IncrementalModeUpdateBearing = "update_bearing"
+	IncrementalModeDeleteBearing = "delete_bearing"
+	IncrementalModeMixed         = "mixed"
+)
+
+type IncrementalTransactionBoundary struct {
+	Index          int             `json:"index"`
+	TransactionID  uuid.UUID       `json:"transaction_id"`
+	TransactionRID string          `json:"transaction_rid"`
+	TxType         TransactionType `json:"tx_type"`
+	StartedAt      time.Time       `json:"started_at"`
+	CommittedAt    *time.Time      `json:"committed_at,omitempty"`
+	FileCount      int64           `json:"file_count"`
+	SizeBytes      int64           `json:"size_bytes"`
+}
+
+type IncrementalViewBoundary struct {
+	Start            IncrementalTransactionBoundary `json:"start"`
+	End              IncrementalTransactionBoundary `json:"end"`
+	StartReason      string                         `json:"start_reason"`
+	TransactionCount int                            `json:"transaction_count"`
+	Counts           map[string]int                 `json:"counts"`
+	AppendOnly       bool                           `json:"append_only"`
+	HasUpdate        bool                           `json:"has_update"`
+	HasDelete        bool                           `json:"has_delete"`
+	HasSnapshot      bool                           `json:"has_snapshot"`
+}
+
+type IncrementalReadinessWarning struct {
+	Code           string     `json:"code"`
+	Severity       string     `json:"severity"`
+	Message        string     `json:"message"`
+	TransactionID  *uuid.UUID `json:"transaction_id,omitempty"`
+	TransactionRID *string    `json:"transaction_rid,omitempty"`
+}
+
+type DatasetIncrementalReadiness struct {
+	DatasetID         uuid.UUID                       `json:"dataset_id"`
+	DatasetRID        string                          `json:"dataset_rid"`
+	Branch            string                          `json:"branch"`
+	Mode              string                          `json:"mode"`
+	Classification    string                          `json:"classification"`
+	IncrementalReady  bool                            `json:"incremental_ready"`
+	AppendOnly        bool                            `json:"append_only"`
+	TotalCommitted    int                             `json:"total_committed"`
+	TransactionCounts map[string]int                  `json:"transaction_counts"`
+	FirstSnapshot     *IncrementalTransactionBoundary `json:"first_snapshot,omitempty"`
+	LatestSnapshot    *IncrementalTransactionBoundary `json:"latest_snapshot,omitempty"`
+	CurrentViewStart  *IncrementalTransactionBoundary `json:"current_view_start,omitempty"`
+	CurrentViewEnd    *IncrementalTransactionBoundary `json:"current_view_end,omitempty"`
+	ViewBoundaries    []IncrementalViewBoundary       `json:"view_boundaries"`
+	Warnings          []IncrementalReadinessWarning   `json:"warnings,omitempty"`
+	ComputedAt        time.Time                       `json:"computed_at"`
 }
 
 type DatasetTransaction struct {
@@ -884,39 +1158,99 @@ type ErrorEnvelope struct {
 }
 
 // Views, files, schema, preview, and data envelopes.
+const (
+	DatasetViewKindMaterialized = "materialized"
+	DatasetViewKindLogical      = "logical"
+)
+
+type ViewBackingDataset struct {
+	DatasetID       uuid.UUID  `json:"dataset_id"`
+	DatasetRID      string     `json:"dataset_rid"`
+	Branch          string     `json:"branch,omitempty"`
+	Alias           string     `json:"alias,omitempty"`
+	Position        int32      `json:"position"`
+	SchemaVersionID *string    `json:"schema_version_id,omitempty"`
+	CreatedAt       *time.Time `json:"created_at,omitempty"`
+	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
+}
+
+type ViewBackingDatasetInput struct {
+	DatasetID       *uuid.UUID `json:"dataset_id,omitempty"`
+	DatasetRID      string     `json:"dataset_rid,omitempty"`
+	Branch          string     `json:"branch,omitempty"`
+	Alias           string     `json:"alias,omitempty"`
+	SchemaVersionID *string    `json:"schema_version_id,omitempty"`
+}
+
+type ViewBackingDatasetsRequest struct {
+	BackingDatasets []ViewBackingDatasetInput `json:"backing_datasets,omitempty"`
+	Data            []ViewBackingDatasetInput `json:"data,omitempty"`
+}
+
+type RemoveViewBackingDatasetsRequest struct {
+	BackingDatasets []ViewBackingDatasetInput `json:"backing_datasets,omitempty"`
+	Data            []ViewBackingDatasetInput `json:"data,omitempty"`
+	DatasetIDs      []uuid.UUID               `json:"dataset_ids,omitempty"`
+	DatasetRIDs     []string                  `json:"dataset_rids,omitempty"`
+}
+
+type ViewBackingDatasetsResponse struct {
+	Data       []ViewBackingDataset `json:"data"`
+	PrimaryKey []string             `json:"primary_key,omitempty"`
+}
+
+type ViewPrimaryKeyRequest struct {
+	PrimaryKey  []string `json:"primary_key,omitempty"`
+	PrimaryKeys []string `json:"primary_keys,omitempty"`
+	Columns     []string `json:"columns,omitempty"`
+}
+
 type DatasetView struct {
-	ID                    uuid.UUID  `json:"id"`
-	DatasetID             uuid.UUID  `json:"dataset_id"`
-	Name                  string     `json:"name"`
-	Description           string     `json:"description"`
-	SQLText               string     `json:"sql_text"`
-	SourceBranch          *string    `json:"source_branch"`
-	SourceVersion         *int32     `json:"source_version"`
-	Materialized          bool       `json:"materialized"`
-	RefreshOnSourceUpdate bool       `json:"refresh_on_source_update"`
-	Format                string     `json:"format"`
-	CurrentVersion        int32      `json:"current_version"`
-	StoragePath           *string    `json:"storage_path"`
-	RowCount              int64      `json:"row_count"`
-	SchemaFields          JSONValue  `json:"schema_fields"`
-	LastRefreshedAt       *time.Time `json:"last_refreshed_at"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
+	ID                    uuid.UUID            `json:"id"`
+	DatasetID             uuid.UUID            `json:"dataset_id"`
+	Name                  string               `json:"name"`
+	Description           string               `json:"description"`
+	SQLText               string               `json:"sql_text"`
+	Kind                  string               `json:"kind,omitempty"`
+	SourceBranch          *string              `json:"source_branch"`
+	SourceVersion         *int32               `json:"source_version"`
+	Materialized          bool                 `json:"materialized"`
+	RefreshOnSourceUpdate bool                 `json:"refresh_on_source_update"`
+	AutoRebuild           bool                 `json:"auto_rebuild"`
+	TransformInputOnly    bool                 `json:"transform_input_only,omitempty"`
+	Format                string               `json:"format"`
+	CurrentVersion        int32                `json:"current_version"`
+	StoragePath           *string              `json:"storage_path"`
+	RowCount              int64                `json:"row_count"`
+	SchemaFields          JSONValue            `json:"schema_fields"`
+	BackingDatasets       []ViewBackingDataset `json:"backing_datasets,omitempty"`
+	PrimaryKey            []string             `json:"primary_key,omitempty"`
+	LastRefreshedAt       *time.Time           `json:"last_refreshed_at"`
+	CreatedAt             time.Time            `json:"created_at"`
+	UpdatedAt             time.Time            `json:"updated_at"`
 }
 
 type CreateDatasetViewRequest struct {
-	Name                  string  `json:"name"`
-	Description           *string `json:"description"`
-	SQL                   string  `json:"sql"`
-	SourceBranch          *string `json:"source_branch"`
-	SourceVersion         *int32  `json:"source_version"`
-	Materialized          *bool   `json:"materialized"`
-	RefreshOnSourceUpdate *bool   `json:"refresh_on_source_update"`
+	Name                  string                    `json:"name"`
+	Description           *string                   `json:"description"`
+	SQL                   string                    `json:"sql"`
+	Kind                  string                    `json:"kind,omitempty"`
+	ViewType              string                    `json:"view_type,omitempty"`
+	SourceBranch          *string                   `json:"source_branch"`
+	SourceVersion         *int32                    `json:"source_version"`
+	Materialized          *bool                     `json:"materialized"`
+	RefreshOnSourceUpdate *bool                     `json:"refresh_on_source_update"`
+	AutoRebuild           *bool                     `json:"auto_rebuild,omitempty"`
+	BackingDatasets       []ViewBackingDatasetInput `json:"backing_datasets,omitempty"`
+	PrimaryKey            []string                  `json:"primary_key,omitempty"`
+	PrimaryKeys           []string                  `json:"primary_keys,omitempty"`
+	Schema                *DatasetSchema            `json:"schema,omitempty"`
 }
 
 type ViewAtQuery struct {
 	TS            *string    `json:"ts"`
 	TransactionID *uuid.UUID `json:"transaction_id"`
+	Version       *int32     `json:"version"`
 	Branch        string     `json:"branch"`
 }
 
@@ -965,26 +1299,53 @@ type ViewPreviewQuery struct {
 }
 
 type PreviewQuery struct {
-	Limit              *int    `json:"limit"`
-	Offset             *int    `json:"offset"`
-	Format             *string `json:"format"`
-	CSVDelimiter       *string `json:"csv_delimiter"`
-	CSVQuote           *string `json:"csv_quote"`
-	CSVEscape          *string `json:"csv_escape"`
-	CSVHeader          *bool   `json:"csv_header"`
-	CSVNullValue       *string `json:"csv_null_value"`
-	CSVCharset         *string `json:"csv_charset"`
-	CSVDateFormat      *string `json:"csv_date_format"`
-	CSVTimestampFormat *string `json:"csv_timestamp_format"`
-	CSV                *bool   `json:"csv"`
+	Branch             *string    `json:"branch"`
+	Limit              *int       `json:"limit"`
+	Offset             *int       `json:"offset"`
+	Format             *string    `json:"format"`
+	Columns            []string   `json:"columns,omitempty"`
+	Filter             *string    `json:"filter,omitempty"`
+	Sort               []string   `json:"sort,omitempty"`
+	Sample             bool       `json:"sample,omitempty"`
+	SampleSize         *int       `json:"sample_size,omitempty"`
+	SampleSeed         *int64     `json:"sample_seed,omitempty"`
+	TransactionID      *uuid.UUID `json:"transaction_id,omitempty"`
+	Version            *int32     `json:"version,omitempty"`
+	CSVDelimiter       *string    `json:"csv_delimiter"`
+	CSVQuote           *string    `json:"csv_quote"`
+	CSVEscape          *string    `json:"csv_escape"`
+	CSVHeader          *bool      `json:"csv_header"`
+	CSVNullValue       *string    `json:"csv_null_value"`
+	CSVCharset         *string    `json:"csv_charset"`
+	CSVDateFormat      *string    `json:"csv_date_format"`
+	CSVTimestampFormat *string    `json:"csv_timestamp_format"`
+	CSV                *bool      `json:"csv"`
+}
+
+type TableParseError struct {
+	FilePath string `json:"file_path"`
+	Row      int    `json:"row"`
+	Column   *int   `json:"column,omitempty"`
+	Field    string `json:"field,omitempty"`
+	Kind     string `json:"kind"`
+	Message  string `json:"message"`
+	Value    string `json:"value,omitempty"`
 }
 
 type PreviewDataResponse struct {
-	Columns []string      `json:"columns"`
-	Rows    [][]JSONValue `json:"rows"`
-	Format  string        `json:"format"`
-	Limit   int           `json:"limit"`
-	Offset  int           `json:"offset"`
+	DatasetID   uuid.UUID         `json:"dataset_id,omitempty"`
+	ViewID      *uuid.UUID        `json:"view_id,omitempty"`
+	Branch      string            `json:"branch,omitempty"`
+	Columns     []string          `json:"columns"`
+	Rows        [][]JSONValue     `json:"rows"`
+	Format      string            `json:"format"`
+	Limit       int               `json:"limit"`
+	Offset      int               `json:"offset"`
+	TotalRows   int               `json:"total_rows,omitempty"`
+	Warnings    []string          `json:"warnings,omitempty"`
+	Errors      []string          `json:"errors,omitempty"`
+	ParseErrors []TableParseError `json:"parse_errors,omitempty"`
+	Sampled     bool              `json:"sampled,omitempty"`
 }
 
 // Backing filesystem / file upload and download surfaces.
@@ -1045,27 +1406,54 @@ type StorageDetailsOut struct {
 
 // Foundry schema wire model. Field flattens the Rust tagged enum onto each field.
 type Field struct {
-	Name         string          `json:"name"`
-	Type         SchemaFieldType `json:"type"`
-	Precision    *uint8          `json:"precision,omitempty"`
-	Scale        *uint8          `json:"scale,omitempty"`
-	ArraySubType *Field          `json:"arraySubType,omitempty"`
-	MapKeyType   *Field          `json:"mapKeyType,omitempty"`
-	MapValueType *Field          `json:"mapValueType,omitempty"`
-	SubSchemas   []Field         `json:"subSchemas,omitempty"`
-	Nullable     bool            `json:"nullable"`
-	Description  *string         `json:"description,omitempty"`
+	Name           string          `json:"name"`
+	Type           SchemaFieldType `json:"type"`
+	Precision      *uint8          `json:"precision,omitempty"`
+	Scale          *uint8          `json:"scale,omitempty"`
+	ArraySubType   *Field          `json:"arraySubtype,omitempty"`
+	MapKeyType     *Field          `json:"mapKeyType,omitempty"`
+	MapValueType   *Field          `json:"mapValueType,omitempty"`
+	SubSchemas     []Field         `json:"subSchemas,omitempty"`
+	Nullable       bool            `json:"nullable"`
+	Description    *string         `json:"description,omitempty"`
+	CustomMetadata JSONValue       `json:"customMetadata,omitempty"`
+}
+
+func (f *Field) UnmarshalJSON(data []byte) error {
+	type fieldAlias Field
+	aux := struct {
+		LegacyArraySubType *Field `json:"arraySubType"`
+		*fieldAlias
+	}{
+		fieldAlias: (*fieldAlias)(f),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if f.ArraySubType == nil && aux.LegacyArraySubType != nil {
+		f.ArraySubType = aux.LegacyArraySubType
+	}
+	return nil
 }
 
 type CsvOptions struct {
-	Delimiter       string  `json:"delimiter"`
-	Quote           string  `json:"quote"`
-	Escape          string  `json:"escape"`
-	Header          bool    `json:"header"`
-	NullValue       string  `json:"nullValue"`
-	DateFormat      *string `json:"dateFormat,omitempty"`
-	TimestampFormat *string `json:"timestampFormat,omitempty"`
-	Charset         string  `json:"charset"`
+	Delimiter          string   `json:"delimiter"`
+	Quote              string   `json:"quote"`
+	Escape             string   `json:"escape"`
+	Header             bool     `json:"header"`
+	NullValue          string   `json:"nullValue"`
+	DateFormat         *string  `json:"dateFormat,omitempty"`
+	TimestampFormat    *string  `json:"timestampFormat,omitempty"`
+	Charset            string   `json:"charset"`
+	Encoding           string   `json:"encoding,omitempty"`
+	SkipLines          int      `json:"skipLines,omitempty"`
+	JaggedRowBehavior  string   `json:"jaggedRowBehavior,omitempty"`
+	ParseErrorBehavior string   `json:"parseErrorBehavior,omitempty"`
+	FilePathColumn     bool     `json:"filePathColumn,omitempty"`
+	ImportedAtColumn   bool     `json:"importedAtColumn,omitempty"`
+	RowNumberColumn    bool     `json:"rowNumberColumn,omitempty"`
+	DynamicTyping      bool     `json:"dynamicTyping,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
 }
 
 type CustomMetadata struct {
@@ -1073,9 +1461,88 @@ type CustomMetadata struct {
 }
 
 type DatasetSchema struct {
-	Fields         []Field         `json:"fields"`
-	FileFormat     string          `json:"file_format"`
-	CustomMetadata *CustomMetadata `json:"custom_metadata,omitempty"`
+	Fields          []Field         `json:"fields"`
+	FieldSchemaList []Field         `json:"fieldSchemaList,omitempty"`
+	FileFormat      string          `json:"file_format"`
+	CustomMetadata  *CustomMetadata `json:"custom_metadata,omitempty"`
+}
+
+type FoundryDatasetSchema struct {
+	FieldSchemaList []Field `json:"fieldSchemaList"`
+}
+
+type PutFoundryDatasetSchemaRequest struct {
+	BranchName        *string              `json:"branchName,omitempty"`
+	DataframeReader   *string              `json:"dataframeReader,omitempty"`
+	EndTransactionRID *string              `json:"endTransactionRid,omitempty"`
+	CustomMetadata    *CustomMetadata      `json:"customMetadata,omitempty"`
+	ParserOptions     *CsvOptions          `json:"parserOptions,omitempty"`
+	Schema            FoundryDatasetSchema `json:"schema"`
+}
+
+type FoundryDatasetSchemaResponse struct {
+	BranchName        string               `json:"branchName"`
+	EndTransactionRID string               `json:"endTransactionRid"`
+	Schema            FoundryDatasetSchema `json:"schema"`
+	VersionID         string               `json:"versionId"`
+	CustomMetadata    *CustomMetadata      `json:"customMetadata,omitempty"`
+}
+
+type InferDatasetSchemaRequest struct {
+	BranchName        *string        `json:"branchName,omitempty"`
+	DataframeReader   *string        `json:"dataframeReader,omitempty"`
+	EndTransactionRID *string        `json:"endTransactionRid,omitempty"`
+	Format            string         `json:"format,omitempty"`
+	Paths             []string       `json:"paths,omitempty"`
+	SampleText        string         `json:"sampleText,omitempty"`
+	Samples           []JSONValue    `json:"samples,omitempty"`
+	ParserOptions     *CsvOptions    `json:"parserOptions,omitempty"`
+	Apply             bool           `json:"apply,omitempty"`
+	MaxRows           int            `json:"maxRows,omitempty"`
+	ManualSchema      *DatasetSchema `json:"manualSchema,omitempty"`
+}
+
+type InferredSchemaSource struct {
+	Path      string `json:"path,omitempty"`
+	Bytes     int    `json:"bytes,omitempty"`
+	RowCount  int    `json:"rowCount,omitempty"`
+	MediaType string `json:"mediaType,omitempty"`
+}
+
+type InferDatasetSchemaResponse struct {
+	BranchName      string                        `json:"branchName"`
+	DataframeReader string                        `json:"dataframeReader"`
+	FileFormat      string                        `json:"fileFormat"`
+	Paths           []string                      `json:"paths,omitempty"`
+	Sources         []InferredSchemaSource        `json:"sources,omitempty"`
+	Schema          FoundryDatasetSchema          `json:"schema"`
+	DatasetSchema   DatasetSchema                 `json:"datasetSchema"`
+	ParserOptions   CsvOptions                    `json:"parserOptions"`
+	Warnings        []string                      `json:"warnings,omitempty"`
+	SampleRows      int                           `json:"sampleRows"`
+	Applied         *FoundryDatasetSchemaResponse `json:"applied,omitempty"`
+}
+
+type GetSchemaDatasetsBatchRequestElement struct {
+	DatasetRID        string  `json:"datasetRid"`
+	BranchName        *string `json:"branchName,omitempty"`
+	EndTransactionRID *string `json:"endTransactionRid,omitempty"`
+	VersionID         *string `json:"versionId,omitempty"`
+}
+
+type GetSchemaDatasetsBatchResponse struct {
+	Data map[string]FoundryDatasetSchemaResponse `json:"data,omitempty"`
+}
+
+type SchemaEvolutionEntry struct {
+	ViewID            uuid.UUID            `json:"view_id"`
+	BranchName        string               `json:"branchName"`
+	EndTransactionRID string               `json:"endTransactionRid"`
+	VersionID         string               `json:"versionId"`
+	Schema            FoundryDatasetSchema `json:"schema"`
+	ContentHash       string               `json:"content_hash"`
+	Changed           bool                 `json:"changed"`
+	CreatedAt         time.Time            `json:"created_at"`
 }
 
 type SchemaResponse struct {
@@ -1090,6 +1557,130 @@ type SchemaResponse struct {
 
 type PutSchemaBody struct {
 	Schema DatasetSchema `json:"schema"`
+}
+
+func NormalizeDatasetSchema(schema DatasetSchema) DatasetSchema {
+	if len(schema.Fields) == 0 && len(schema.FieldSchemaList) > 0 {
+		schema.Fields = append([]Field(nil), schema.FieldSchemaList...)
+	}
+	schema.FieldSchemaList = nil
+	schema.FileFormat = NormalizeDataframeReader(schema.FileFormat)
+	return schema
+}
+
+func DatasetSchemaFromFoundry(schema FoundryDatasetSchema, dataframeReader string) DatasetSchema {
+	return NormalizeDatasetSchema(DatasetSchema{
+		Fields:     append([]Field(nil), schema.FieldSchemaList...),
+		FileFormat: NormalizeDataframeReader(dataframeReader),
+	})
+}
+
+func FoundrySchemaFromDatasetSchema(schema DatasetSchema) FoundryDatasetSchema {
+	normalized := NormalizeDatasetSchema(schema)
+	return FoundryDatasetSchema{FieldSchemaList: append([]Field(nil), normalized.Fields...)}
+}
+
+func NormalizeDataframeReader(raw string) string {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "", "PARQUET":
+		return FileFormatParquet
+	case "AVRO":
+		return FileFormatAvro
+	case "CSV", "DATASOURCE", "TEXT":
+		return FileFormatText
+	default:
+		return strings.ToUpper(strings.TrimSpace(raw))
+	}
+}
+
+func ValidateDatasetSchema(schema DatasetSchema) []string {
+	normalized := NormalizeDatasetSchema(schema)
+	errs := []string{}
+	switch normalized.FileFormat {
+	case FileFormatParquet, FileFormatAvro, FileFormatText:
+	default:
+		errs = append(errs, "file_format must be one of PARQUET, AVRO, or TEXT")
+	}
+	seen := map[string]bool{}
+	for _, field := range normalized.Fields {
+		errs = append(errs, validateSchemaField(field, "field", true, seen)...)
+	}
+	return errs
+}
+
+func validateSchemaField(field Field, path string, requireName bool, seen map[string]bool) []string {
+	errs := []string{}
+	name := strings.TrimSpace(field.Name)
+	currentPath := path
+	if name != "" {
+		currentPath = path + "." + name
+	}
+	if requireName {
+		if name == "" {
+			errs = append(errs, path+" name is required")
+		} else if seen[name] {
+			errs = append(errs, "duplicate field: "+name)
+		}
+		seen[name] = true
+	}
+	if len(field.CustomMetadata) > 0 && !json.Valid(field.CustomMetadata) {
+		errs = append(errs, currentPath+" customMetadata must be valid JSON")
+	}
+	if len(field.CustomMetadata) > 0 {
+		var meta any
+		if err := json.Unmarshal(field.CustomMetadata, &meta); err == nil {
+			if _, ok := meta.(map[string]any); !ok {
+				errs = append(errs, currentPath+" customMetadata must be an object")
+			}
+		}
+	}
+	switch field.Type {
+	case FieldTypeBoolean, FieldTypeByte, FieldTypeShort, FieldTypeInteger, FieldTypeLong,
+		FieldTypeFloat, FieldTypeDouble, FieldTypeString, FieldTypeBinary, FieldTypeDate, FieldTypeTimestamp:
+	case FieldTypeDecimal:
+		if field.Precision == nil || *field.Precision == 0 {
+			errs = append(errs, currentPath+" DECIMAL precision is required")
+		}
+		if field.Scale == nil {
+			errs = append(errs, currentPath+" DECIMAL scale is required")
+		}
+		if field.Precision != nil && field.Scale != nil && *field.Scale > *field.Precision {
+			errs = append(errs, currentPath+" DECIMAL scale cannot exceed precision")
+		}
+	case FieldTypeArray:
+		if field.ArraySubType == nil {
+			errs = append(errs, currentPath+" ARRAY arraySubtype is required")
+		} else {
+			errs = append(errs, validateSchemaField(*field.ArraySubType, currentPath+"[]", false, map[string]bool{})...)
+		}
+	case FieldTypeMap:
+		if field.MapKeyType == nil {
+			errs = append(errs, currentPath+" MAP mapKeyType is required")
+		} else {
+			errs = append(errs, validateSchemaField(*field.MapKeyType, currentPath+"<key>", false, map[string]bool{})...)
+			switch field.MapKeyType.Type {
+			case FieldTypeBoolean, FieldTypeByte, FieldTypeShort, FieldTypeInteger, FieldTypeLong, FieldTypeString, FieldTypeDate, FieldTypeTimestamp:
+			default:
+				errs = append(errs, currentPath+" MAP mapKeyType must be a primitive key type")
+			}
+		}
+		if field.MapValueType == nil {
+			errs = append(errs, currentPath+" MAP mapValueType is required")
+		} else {
+			errs = append(errs, validateSchemaField(*field.MapValueType, currentPath+"<value>", false, map[string]bool{})...)
+		}
+	case FieldTypeStruct:
+		if len(field.SubSchemas) == 0 {
+			errs = append(errs, currentPath+" STRUCT subSchemas are required")
+		}
+		nestedSeen := map[string]bool{}
+		for _, sub := range field.SubSchemas {
+			errs = append(errs, validateSchemaField(sub, currentPath, true, nestedSeen)...)
+		}
+	default:
+		errs = append(errs, fmt.Sprintf("%s unsupported field type: %s", currentPath, field.Type))
+	}
+	return errs
 }
 
 type CommitDatasetOutputRequest struct {

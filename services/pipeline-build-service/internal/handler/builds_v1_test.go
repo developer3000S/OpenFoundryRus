@@ -65,7 +65,7 @@ func TestCreateJobSpecV1IdempotentOnContentHash(t *testing.T) {
 	repo := newFakeV1Repo()
 	restore := SetBuildQueryRepository(repo)
 	defer restore()
-	body := []byte(`{"pipeline_rid":"pipe","branch_name":"master","output_dataset_rids":["out"],"logic_payload":{"sql":"select 1"},"content_hash":"hash-A"}`)
+	body := []byte(`{"pipeline_rid":"pipe","branch_name":"master","output_dataset_rids":["out","out.audit"],"logic_payload":{"sql":"select 1"},"content_hash":"hash-A"}`)
 	rr := httptest.NewRecorder()
 	CreateJobSpecV1(rr, requestWithURLParam(http.MethodPost, "/v1/job-specs/TRANSFORM", bytes.NewReader(body), "kind", "TRANSFORM"))
 	require.Equal(t, http.StatusCreated, rr.Result().StatusCode)
@@ -79,6 +79,83 @@ func TestCreateJobSpecV1IdempotentOnContentHash(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rr.Result().Body).Decode(&second))
 	require.Equal(t, first.RID, second.RID)
 	require.Equal(t, "hash-A", second.ContentHash)
+	require.Equal(t, []string{"out", "out.audit"}, second.OutputDatasetRIDs)
+	require.True(t, second.Immutable)
+}
+
+func TestBuildAndJobResourceModelV1(t *testing.T) {
+	repo := newFakeV1Repo()
+	restore := SetBuildQueryRepository(repo)
+	defer restore()
+	buildID := uuid.New()
+	jobID := uuid.New()
+	buildRID := "ri.foundry.main.build." + buildID.String()
+	jobRID := "ri.foundry.main.job." + jobID.String()
+	repo.builds = []models.BuildEnvelope{{
+		Build: models.Build{
+			ID:                buildID,
+			RID:               buildRID,
+			PipelineRID:       "pipe",
+			BuildBranch:       "master",
+			TargetDatasetRIDs: []string{"out.alpha", "out.beta"},
+			State:             string(models.BuildResolution),
+			TriggerKind:       "MANUAL",
+			AbortPolicy:       string(models.AbortDependentOnly),
+			RequestedBy:       "u",
+			CreatedAt:         time.Unix(100, 0).UTC(),
+		},
+		Jobs: []models.Job{{
+			ID:                    jobID,
+			RID:                   jobRID,
+			BuildID:               buildID,
+			JobSpecRID:            "ri.foundry.main.job_spec.shared",
+			LogicKind:             "TRANSFORM",
+			JobSpecContentHash:    "hash-shared",
+			InputDatasetRIDs:      []string{"in.orders"},
+			OutputDatasetRIDs:     []string{"out.alpha", "out.beta"},
+			State:                 string(models.JobWaiting),
+			OutputTransactionRIDs: []string{"txn-alpha", "txn-beta"},
+			StateChangedAt:        time.Unix(101, 0).UTC(),
+			CreatedAt:             time.Unix(101, 0).UTC(),
+		}},
+	}}
+
+	rr := httptest.NewRecorder()
+	GetBuildV1(rr, requestWithURLParam(http.MethodGet, "/v1/builds/"+buildRID, nil, "rid", buildRID))
+	require.Equal(t, http.StatusOK, rr.Result().StatusCode)
+	var buildPayload models.BuildEnvelope
+	require.NoError(t, json.NewDecoder(rr.Result().Body).Decode(&buildPayload))
+	require.Equal(t, []string{"out.alpha", "out.beta"}, buildPayload.TargetDatasetRIDs)
+	require.Len(t, buildPayload.Jobs, 1)
+	require.Equal(t, []string{"out.alpha", "out.beta"}, buildPayload.Jobs[0].OutputDatasetRIDs)
+	require.Equal(t, "hash-shared", buildPayload.Jobs[0].JobSpecContentHash)
+
+	rr = httptest.NewRecorder()
+	ListBuildJobsV1(rr, requestWithURLParam(http.MethodGet, "/v1/builds/"+buildRID+"/jobs", nil, "rid", buildRID))
+	require.Equal(t, http.StatusOK, rr.Result().StatusCode)
+	var jobsPayload struct {
+		Data []models.Job `json:"data"`
+	}
+	require.NoError(t, json.NewDecoder(rr.Result().Body).Decode(&jobsPayload))
+	require.Len(t, jobsPayload.Data, 1)
+	require.Equal(t, "TRANSFORM", jobsPayload.Data[0].LogicKind)
+
+	repo.outputs[jobRID] = &JobOutputsResponse{
+		RID:   jobRID,
+		State: string(models.JobWaiting),
+		Outputs: []JobOutputRow{
+			{OutputDatasetRID: "out.alpha", TransactionRID: "txn-alpha"},
+			{OutputDatasetRID: "out.beta", TransactionRID: "txn-beta"},
+		},
+	}
+	rr = httptest.NewRecorder()
+	GetJobOutputsV1(rr, requestWithURLParam(http.MethodGet, "/v1/jobs/"+jobRID+"/outputs", nil, "rid", jobRID))
+	require.Equal(t, http.StatusOK, rr.Result().StatusCode)
+	var outputs JobOutputsResponse
+	require.NoError(t, json.NewDecoder(rr.Result().Body).Decode(&outputs))
+	require.Equal(t, "OPEN", outputs.AtomicCommitStatus)
+	require.True(t, outputs.AllOutputsUpdateTogether)
+	require.Equal(t, 2, outputs.TotalOutputs)
 }
 
 func TestJobLogsV1ListAndEmit(t *testing.T) {
@@ -105,11 +182,14 @@ func requestWithURLParam(method string, target string, body io.Reader, key strin
 }
 
 type fakeV1Repo struct {
-	builds []models.BuildEnvelope
-	specs  map[string]PublishedJobSpec
+	builds  []models.BuildEnvelope
+	outputs map[string]*JobOutputsResponse
+	specs   map[string]PublishedJobSpec
 }
 
-func newFakeV1Repo() *fakeV1Repo { return &fakeV1Repo{specs: map[string]PublishedJobSpec{}} }
+func newFakeV1Repo() *fakeV1Repo {
+	return &fakeV1Repo{outputs: map[string]*JobOutputsResponse{}, specs: map[string]PublishedJobSpec{}}
+}
 
 func (f *fakeV1Repo) ListBuilds(context.Context, models.ListBuildsQuery) ([]models.BuildEnvelope, error) {
 	return append([]models.BuildEnvelope(nil), f.builds...), nil
@@ -123,27 +203,53 @@ func (f *fakeV1Repo) GetBuild(_ context.Context, idOrRID string) (*models.BuildE
 	}
 	return nil, nil
 }
-func (f *fakeV1Repo) ListJobsForBuildID(context.Context, string) ([]models.Job, error) {
+func (f *fakeV1Repo) ListJobsForBuildID(_ context.Context, idOrRID string) ([]models.Job, error) {
+	if build, _ := f.GetBuild(context.Background(), idOrRID); build != nil {
+		return append([]models.Job(nil), build.Jobs...), nil
+	}
 	return nil, nil
 }
-func (f *fakeV1Repo) GetJob(context.Context, string) (*models.Job, error) {
+func (f *fakeV1Repo) GetJob(_ context.Context, idOrRID string) (*models.Job, error) {
+	for _, b := range f.builds {
+		for _, job := range b.Jobs {
+			if job.RID == idOrRID || job.ID.String() == idOrRID {
+				jj := job
+				return &jj, nil
+			}
+		}
+	}
 	return nil, nil
 }
 func (f *fakeV1Repo) ListDatasetBuilds(context.Context, string, int64) ([]models.Build, error) {
 	return nil, nil
 }
-func (f *fakeV1Repo) GetJobOutputs(context.Context, string) (*JobOutputsResponse, error) {
+func (f *fakeV1Repo) GetJobOutputs(_ context.Context, jobRID string) (*JobOutputsResponse, error) {
+	out := f.outputs[jobRID]
+	if out != nil {
+		cp := *out
+		cp.Outputs = append([]JobOutputRow(nil), out.Outputs...)
+		cp.NormalizeAtomicity()
+		return &cp, nil
+	}
 	return nil, nil
 }
 func (f *fakeV1Repo) GetJobInputResolutions(context.Context, string) (json.RawMessage, error) {
 	return nil, nil
 }
 func (f *fakeV1Repo) PublishJobSpec(_ context.Context, kind string, req CreateJobSpecRequest, _ string) (PublishedJobSpec, error) {
-	key := req.PipelineRID + "\x00" + req.BranchName + "\x00" + kind + "\x00" + *req.ContentHash
+	contentHash := ""
+	if req.ContentHash != nil {
+		contentHash = *req.ContentHash
+	}
+	if contentHash == "" {
+		raw, _ := json.Marshal(req)
+		contentHash = string(raw)
+	}
+	key := req.PipelineRID + "\x00" + req.BranchName + "\x00" + kind + "\x00" + contentHash
 	if found, ok := f.specs[key]; ok {
 		return found, nil
 	}
-	out := PublishedJobSpec{RID: "ri.foundry.main.job_spec." + uuid.NewString(), LogicKind: kind, ContentHash: *req.ContentHash}
+	out := PublishedJobSpec{RID: "ri.foundry.main.job_spec." + uuid.NewString(), PipelineRID: req.PipelineRID, BranchName: req.BranchName, LogicKind: kind, OutputDatasetRIDs: append([]string(nil), req.OutputDatasetRIDs...), ContentHash: contentHash, Immutable: true}
 	f.specs[key] = out
 	return out, nil
 }

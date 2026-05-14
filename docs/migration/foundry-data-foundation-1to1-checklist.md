@@ -151,126 +151,142 @@ should use OpenFoundry canonical IDs.
 
 ### Dataset resources and browsing
 
-- [ ] `DF.1` Dataset resource CRUD (`P0`, `todo`)
+- [x] `DF.1` Dataset resource CRUD (`P0`, `done`)
   - Create, get, update metadata, move/rename, soft-delete, restore, and hard-delete datasets.
   - Store stable ID, display name, path/folder/project, description, owner, created/updated timestamps, and resource visibility.
   - Expose dataset links from Pipeline Builder outputs, Data Lineage nodes, and Dataset Preview.
+  - Implementation note: Dataset rows now persist Foundry-style resource identity and placement fields (`rid`, display name, folder/project/path, visibility, soft-delete timestamp) with active-resource uniqueness. Dataset CRUD resolves UUIDs or RIDs, defaults DELETE to soft-delete, exposes restore plus explicit hard-delete, and returns stable preview/lineage links. Pipeline Builder output controls, build output tables, Data Lineage preview nodes, and Dataset Preview now link back to the dataset resource.
   - Docs: [Datasets core concepts](https://www.palantir.com/docs/foundry/data-integration/datasets), [Create dataset API](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/datasets/create-dataset), [Get dataset API](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/datasets/get-dataset).
 
-- [ ] `DF.2` Dataset file browser and logical path model (`P0`, `todo`)
+- [x] `DF.2` Dataset file browser and logical path model (`P0`, `done`)
   - Track logical file paths separately from backing object storage paths.
   - Support list files, get metadata, download content, upload content, and delete file within an open transaction.
   - Capture size, media type, checksum, row-count hint when available, transaction RID/ID, and storage location.
+  - Implementation note: `dataset_files` now carries the Foundry-visible logical path, stable transaction ID/RID, backing physical URI, media type/content type, SHA-256 checksum, row-count hint, and structured storage location. DVS exposes list, get-by-ID/get-by-path metadata, presigned content download, presigned upload URL, raw content upload into an open transaction, and transaction-scoped logical delete. Dataset Preview's Files tab now renders the real backing file contract and links active files to the download endpoint.
   - Docs: [Datasets core concepts](https://www.palantir.com/docs/foundry/data-integration/datasets), [File basics](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/files/file-basics), [List files](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/files/list-files), [Upload file](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/files/upload-file), [Get file content](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/files/get-file-content).
 
-- [ ] `DF.3` Dataset Preview application shell (`P0`, `todo`)
+- [x] `DF.3` Dataset Preview application shell (`P0`, `done`)
   - Provide tabs for Preview, Files, Details, Schema, History, Jobs, Schedules, Health, Lineage, and Retention.
   - Include branch selector, latest-view indicator, transaction/version selector, and API/copy-link affordances.
   - Show permission-aware empty/error states for missing dataset, missing branch, missing transaction, and no schema.
+  - Implementation note: Dataset Preview now has the full shell with Preview, Files, Details, Schema, History, Jobs, Schedules, Health, Lineage, and Retention tabs. The header exposes branch, version, and transaction selectors with latest/historical state; Details exposes copyable API paths; Preview/Files/Schema/History are branch-aware; Jobs, Schedules, Health, Lineage, and Retention reuse the existing build, schedule, Data Health, lineage, and retention policy surfaces. Missing datasets, branches, transactions, schemas, and permission failures now render scoped empty/error states instead of collapsing the whole page.
   - Docs: [Datasets core concepts](https://www.palantir.com/docs/foundry/data-integration/datasets), [Data Health](https://www.palantir.com/docs/foundry/observability/data-health/), [Data Lineage overview](https://www.palantir.com/docs/foundry/data-lineage/overview/).
 
 ### Transactions, branches, and views
 
-- [ ] `DF.4` Transaction lifecycle (`P0`, `todo`)
+- [x] `DF.4` Transaction lifecycle (`P0`, `done`)
   - Implement `OPEN -> COMMITTED` and `OPEN -> ABORTED` transitions.
   - Reject commits for non-open transactions and unknown datasets.
   - Preserve written files only after commit and ignore aborted files in latest views.
   - Return transaction type, status, created time, closed time, and IDs in API responses.
+  - Implementation note: DVS now exposes the branch transaction lifecycle on both `/v1` and `/api/v1`, accepts the Foundry `transactionType` request field, and returns transaction RID/ID, dataset/branch IDs, transaction type, status, created time, and closed time. Commit and abort both reject non-`OPEN` transactions with `TRANSACTION_NOT_OPEN`, unknown datasets still resolve to 404 before mutation, and the materialization triggers only copy staged files/schemas for `OPEN -> COMMITTED` so aborted writes remain out of latest views.
   - Docs: [Datasets core concepts](https://www.palantir.com/docs/foundry/data-integration/datasets), [Transaction basics](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/transactions/transaction-basics), [Create transaction](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/transactions/create-transaction), [Commit transaction](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/transactions/commit-transaction), [Abort transaction](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/transactions/abort-transaction).
 
-- [ ] `DF.5` Transaction type semantics (`P0`, `todo`)
+- [x] `DF.5` Transaction type semantics (`P0`, `done`)
   - Support `SNAPSHOT`, `APPEND`, `UPDATE`, and `DELETE` transaction types.
   - `SNAPSHOT` replaces the effective current view.
   - `APPEND` adds files and rejects overwrites of current-view files.
   - `UPDATE` adds files and may replace existing file references.
   - `DELETE` removes files from the current view without immediately deleting backing storage.
+  - Implementation note: DVS commit validation and replay now match the Foundry view rules: `SNAPSHOT` starts a new effective view, `APPEND` only adds non-overlapping logical paths, `UPDATE` adds or replaces logical references without accepting remove ops, and `DELETE` removes logical paths while leaving backing storage records available for retention. Current-view, file browser, and preview fallbacks now read from replayed committed transactions instead of raw undeleted physical rows, so replaced, deleted, and superseded files no longer leak into latest views.
   - Docs: [Datasets core concepts](https://www.palantir.com/docs/foundry/data-integration/datasets), [Commit transaction](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/transactions/commit-transaction).
 
-- [ ] `DF.6` Branch CRUD and branch pointer model (`P0`, `todo`)
+- [x] `DF.6` Branch CRUD and branch pointer model (`P0`, `done`)
   - Support create, get, list, delete, and transaction-history APIs for named branches.
   - Track each branch pointer to the most recent open or committed transaction.
   - Prevent branch deletion when it would orphan protected production data.
   - Provide default branch configuration without hard-coding Palantir-only names.
+  - Implementation note: Branch CRUD now has Foundry-shaped `/api/v2/datasets/{datasetRid}/branches` aliases with `{name, transactionRid}` responses plus branch transaction history at `/branches/{branchName}/transactions`. Runtime branch pointers move to newly opened transactions, stay on committed transactions, and are restored to the latest non-aborted transaction when an open transaction is aborted; an idempotent migration backfills existing branch heads. Delete now rejects root/default, active, `FOREVER` retention, and open-transaction branches before reparenting children. Dataset creation and default-branch bootstrapping use configurable `active_branch`/`default_branch` request values and the dataset's active branch rather than relying on a Palantir-only branch name.
   - Docs: [Datasets branches](https://www.palantir.com/docs/foundry/data-integration/datasets), [Branch basics](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/branches/branch-basics), [Get branch](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/branches/get-branch), [Branch transaction history](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/branches/get-branch-transaction-history).
 
-- [ ] `DF.7` Dataset view calculation (`P0`, `todo`)
+- [x] `DF.7` Dataset view calculation (`P0`, `done`)
   - Compute effective file sets for a branch at latest, transaction-specific, and time/version-specific points.
   - Start views at the latest prior `SNAPSHOT`, or earliest transaction if no snapshot exists.
   - Apply subsequent `APPEND`, `UPDATE`, and `DELETE` operations deterministically.
   - Cache view manifests but always be able to reconstruct from transaction history.
+  - Implementation note: Dataset view reads now reconstruct the effective file set from committed transaction history for latest, timestamp, transaction, and dataset-version cutoffs. Transaction cutoffs are applied by ordered transaction identity rather than timestamp alone, so ties do not leak later commits into historical views. Branch views include inherited parent history when a branch was forked from a committed transaction, and the computed manifest is cached into `dataset_views`/`dataset_view_files` by `(dataset, branch, head transaction)` while remaining rebuildable from source transactions.
   - Docs: [Dataset views](https://www.palantir.com/docs/foundry/data-integration/datasets), [View basics](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/views).
 
 ### Schemas and table reads
 
-- [ ] `DF.8` Versioned dataset schemas (`P0`, `todo`)
+- [x] `DF.8` Versioned dataset schemas (`P0`, `done`)
   - Store schema metadata on dataset views, not just on datasets globally.
   - Support primitive, decimal, map, array, struct, binary, date, timestamp, nullability, and custom metadata.
   - Show schema evolution across transaction history.
+  - Implementation note: Dataset schemas are now persisted against view manifests with branch, end-transaction, content hash, schema version ID, dataframe reader, and updated timestamp metadata. The Foundry-style `getSchema`, `putSchema`, and batch schema APIs normalize `fieldSchemaList` into internal view schema metadata while returning the Foundry wire shape. Recursive schema validation covers primitive, decimal, map, array, struct, binary, date, timestamp, nullability, and field-level custom metadata, and schema history reports per-view evolution with change flags across transaction history.
   - Docs: [Datasets schemas](https://www.palantir.com/docs/foundry/data-integration/datasets), [Get dataset schema](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/datasets/get-dataset-schema), [Put dataset schema](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/datasets/put-dataset-schema), [Get schemas batch](https://www.palantir.com/docs/foundry/api/v2/datasets-v2-resources/datasets/get-schema-datasets-batch).
 
-- [ ] `DF.9` Schema inference and edit flow for CSV/JSON (`P0`, `todo`)
+- [x] `DF.9` Schema inference and edit flow for CSV/JSON (`P0`, `done`)
   - Offer “apply schema” for CSV and JSON files based on samples.
   - Allow manual column type changes, parser options, delimiter/quote/escape configuration, jagged-row behavior, parse-error behavior, encoding, skip-lines, file path/imported-at/row-number helper columns, and dynamic-inference warnings.
+  - Implementation note: Dataset Preview now has an editable Schema tab that can infer CSV or JSON schemas from selected logical files, review sample warnings, manually adjust column names/types/nullability/descriptions, persist parser options, and apply or save the schema to the active branch. The backend exposes `schema:infer` on the Foundry-compatible and OpenFoundry v1 surfaces, samples local backing files or inline JSON/CSV samples, records delimiter/quote/escape/header/null/encoding/skip-line/jagged-row/parse-error/helper-column settings, emits dynamic-inference warnings, and stores the resulting schema as view-scoped metadata through the versioned schema APIs.
   - Docs: [Infer schema](https://www.palantir.com/docs/foundry/building-pipelines/infer-schema/), [CSV parsing](https://www.palantir.com/docs/foundry/dataset-preview/csv-parsing/).
 
-- [ ] `DF.10` Table read and preview API (`P0`, `todo`)
+- [x] `DF.10` Table read and preview API (`P0`, `done`)
   - Read rows from the selected branch/view using schema metadata.
   - Provide limit, pagination, column selection, filter, sort, and sample controls.
   - Return typed parse errors with file path and row/column context where possible.
+  - Implementation note: Dataset Preview now reads table rows from the selected branch, transaction/version, or view manifest using view-scoped schema metadata and local backing-file contents, with repo metadata preview retained as a fallback. The preview API supports limit/offset pagination, column projection, simple filter expressions, multi-column sort tokens, deterministic sampling, and typed parse errors that include logical file path, row number, column number, field, kind, message, and raw value. A Foundry-style `readTable` endpoint is exposed for CSV output with `branchName`, `endTransactionRid`, `columns`, and `rowLimit` query parameters.
   - Docs: [Read table dataset](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/datasets/read-table-dataset), [Datasets schemas](https://www.palantir.com/docs/foundry/data-integration/datasets).
 
 ### Build basics
 
-- [ ] `DF.11` Build and job resource model (`P0`, `todo`)
+- [x] `DF.11` Build and job resource model (`P0`, `done`)
   - Model builds as one-time computations over target datasets.
   - Model jobs as units of work generated from immutable JobSpecs and shared logic.
   - Support jobs with one or multiple output datasets, with all outputs updating together.
+  - Implementation note: Pipeline Build now persists `target_dataset_rids` on build resources and snapshots each job's immutable JobSpec context (`logic_kind`, content hash, input dataset RIDs, output dataset RIDs, and opened output transactions). Published JobSpecs are idempotent immutable resources with shared multi-output logic; lookup by any output dataset resolves to the same JobSpec RID. The v1 API now exposes build jobs at `/v1/builds/{rid}/jobs`, job resources at `/v1/jobs/{rid}`, and job output atomicity metadata at `/v1/jobs/{rid}/outputs`, including total/committed/aborted counts plus `atomic_commit_status` so multi-output jobs can be verified as updating together.
   - Docs: [Builds core concepts](https://www.palantir.com/docs/foundry/data-integration/builds/).
 
-- [ ] `DF.12` Build staleness resolution (`P0`, `todo`)
+- [x] `DF.12` Build staleness resolution (`P0`, `done`)
   - Determine whether output datasets are fresh by comparing input data and JobSpec logic against previous builds.
   - Skip up-to-date outputs by default.
   - Support force builds that recompute even fresh targets.
   - Expose “ignored because fresh” status in build and schedule run history.
+  - Implementation note: Build resolution now stores a stable input signature from resolved input branch heads, schema metadata, fallback/view options, and internal producer logic, plus a canonical JobSpec logic hash on each job. Non-force builds compare those signatures with prior committed outputs and mark fresh jobs as `stale_skipped`; dependent jobs only skip when their dependency chain is also fresh, while force builds always recompute. The executor now completes fresh jobs without invoking runtime code or committing outputs, aborts the unused open transactions, records `ignored because fresh`, and exposes ignored counts/statuses in build execution responses, job history, pipeline run node results, output resources (`unchanged`), and schedule-triggered run history (`ignored` when all nodes were fresh).
   - Docs: [Builds core concepts](https://www.palantir.com/docs/foundry/data-integration/builds/), [Schedules core concepts](https://www.palantir.com/docs/foundry/data-integration/schedules/).
 
-- [ ] `DF.13` Build execution status, logs, and history (`P0`, `todo`)
+- [x] `DF.13` Build execution status, logs, and history (`P0`, `done`)
   - Track queued, running, succeeded, failed, cancelled, skipped, and ignored statuses.
   - Show job DAG, attempts, worker/runtime, start/end time, duration, row/file counts, output transactions, and failure causes.
   - Provide live logs while jobs run and persisted logs after completion.
+  - Implementation note: Build/job resources now expose normalized execution statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`, `skipped`, and `ignored`) alongside the canonical Foundry state strings. Jobs carry dependency edges, start/end timestamps, duration, runtime, worker ID, row/file counts, compact output metadata, output transaction status, attempts, stale/ignored flags, hashes, and failure reason; build envelopes include `job_dag`, status counts, and build duration. The executor audit path now advances persisted build state to running/terminal states, releases build locks on terminal events, writes job start/finish timestamps, records result metrics on output commits, and emits transition/output log entries to the configured persistent log store plus live subscriber so `/jobs/{rid}/logs`, `/logs/stream`, and `/logs/ws` can replay history and follow active jobs.
   - Docs: [Builds core concepts](https://www.palantir.com/docs/foundry/data-integration/builds/), [Observability overview](https://www.palantir.com/docs/foundry/observability/overview).
 
 ### Schedule basics
 
-- [ ] `DF.14` Schedule CRUD and sidebar (`P0`, `todo`)
+- [x] `DF.14` Schedule CRUD and sidebar (`P0`, `done`)
   - Create, edit, pause, resume, delete, and view schedules from Dataset Preview and Data Lineage.
   - Track name, owner, project/folder, targets, trigger, build strategy, branch, run-as identity, last updated user, and pause state.
+  - Implementation note: Pipeline Build now exposes a Foundry-shaped schedule resource API at `/api/v1/data-integration/v1/schedules` with create, get, list, patch, pause, resume, delete, run-now, auto-pause exemption, run history, version history, version diff, and project-scope conversion handlers. Schedule persistence now tracks folder, resource RIDs, branch, build strategy, run-as identity, last editor, pause reason/time, owner, trigger, target, and project scope metadata. Dataset Preview's Schedules tab can create dataset-seeded schedules, Build schedules can create/edit/pause/resume/delete, and Data Lineage's right-rail schedule drawer lists and creates schedules for the selected dataset.
   - Docs: [Schedules core concepts](https://www.palantir.com/docs/foundry/data-integration/schedules/), [Create a schedule](https://www.palantir.com/docs/foundry/building-pipelines/create-schedule/), [Manage schedules](https://www.palantir.com/docs/foundry/data-lineage/manage-schedules/).
 
-- [ ] `DF.15` Schedule triggers and run history (`P0`, `todo`)
+- [x] `DF.15` Schedule triggers and run history (`P0`, `done`)
   - Support time-based triggers, data-updated triggers, logic-updated triggers, and combined trigger conditions.
   - If a trigger fires while a previous run is active, queue or preserve the pending trigger and run after the previous run completes.
   - Record succeeded, ignored, and failed schedule runs with build IDs and diagnostics.
+  - Implementation note: Schedule persistence now carries pending trigger snapshots, last-triggered timestamps, trigger type, and JSON diagnostics on every run. The dispatcher evaluates Foundry-shaped time, event, and compound triggers, stores event observations for multi-condition triggers, exposes scheduler endpoints for due ticks and data/logic events, and enqueues schedule builds with linked build RIDs. If a trigger fires while a prior build is active, the run history records an `IGNORED` coalescing row and preserves the pending trigger snapshot; later scheduler ticks finalize terminal builds, map all-fresh builds to `IGNORED`, and dispatch the preserved pending run.
   - Docs: [Scheduling overview](https://www.palantir.com/docs/foundry/building-pipelines/scheduling-overview), [Schedules core concepts](https://www.palantir.com/docs/foundry/data-integration/schedules/).
 
 ## Milestone B: credible Foundry-style data platform parity
 
 ### Advanced datasets and views
 
-- [ ] `DF.16` Dataset API compatibility surface (`P1`, `todo`)
+- [x] `DF.16` Dataset API compatibility surface (`P1`, `done`)
   - Provide OpenFoundry-native endpoints equivalent to public dataset, branch, transaction, file, schema, and view operations.
   - Return stable error codes for not found, permission denied, invalid argument, branch not found, transaction not open, and schema parse errors.
   - Include OAuth/scope or local-token checks equivalent to read/write operation classes.
+  - Implementation note: Dataset Versioning Service now mounts a cohesive `/api/v2/datasets` compatibility surface for dataset CRUD/restore, branch CRUD/history, transaction create/get/list/commit/abort/batch-get, logical file list/metadata/download/upload/delete, schema get/put/batch/infer/history/validate, table preview/read, and view list/create/current/at/files/schema/data/refresh operations. Error responses now keep the legacy `error` field while adding stable `code`/`error_code` values for `NOT_FOUND`, `PERMISSION_DENIED`, `INVALID_ARGUMENT`, `BRANCH_NOT_FOUND`, `TRANSACTION_NOT_OPEN`, and `SCHEMA_PARSE_ERROR`. The `/api/v2` surface enforces dataset read/write scopes (`datasets:read`, `datasets:write`, plus existing `dataset.*`/admin aliases) and local-token method/path scopes before dispatching to handlers.
   - Docs: [Foundry API overview](https://www.palantir.com/docs/foundry/api/), [Dataset API docs](https://www.palantir.com/docs/foundry/api/).
 
-- [ ] `DF.17` Logical views over backing datasets (`P1`, `todo`)
+- [x] `DF.17` Logical views over backing datasets (`P1`, `done`)
   - Create schema-backed view resources that point to one or more backing datasets and do not store files.
   - Read a view as the union of backing datasets.
   - Support optional primary-key deduplication and automatic rebuild when backing datasets change.
   - Enforce that views can be transform inputs but not transform outputs.
   - Docs: [View basics](https://www.palantir.com/docs/foundry/api/datasets-v2-resources/views).
 
-- [ ] `DF.18` Incremental pipeline readiness (`P1`, `todo`)
+- [x] `DF.18` Incremental pipeline readiness (`P1`, `done`)
   - Surface whether each dataset is append-only, snapshot-based, update-bearing, delete-bearing, or mixed.
   - Warn when `UPDATE` or `DELETE` transactions break append-only incremental assumptions.
   - Show first-snapshot state and incremental view boundaries.

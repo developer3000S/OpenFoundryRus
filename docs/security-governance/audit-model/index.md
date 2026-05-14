@@ -1,5 +1,11 @@
 # Audit model
 
+> **Sensitive admin surface.** Audit data is itself sensitive and is
+> gated by separate permissions. See the
+> [Security overview](../security-overview.md), the
+> [Shared responsibility model](../shared-responsibility-model.md), and
+> the [Foundry public-docs parity policy](../../reference/foundry-public-docs-parity-policy.md).
+
 OpenFoundry's audit model should explain not just that audit logs exist, but how audit is woven through platform capabilities.
 
 ## Repository signals

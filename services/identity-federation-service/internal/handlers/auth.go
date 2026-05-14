@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -167,6 +170,11 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusInternalServerError, "login failed")
 		return
 	}
+	// SG.4: stamp last_login_at + last_login_ip. Best-effort —
+	// failure does not block the authentication response.
+	if err := a.Repo.StampLogin(r.Context(), user.ID, time.Now().UTC(), clientIP(r)); err != nil {
+		slog.Warn("stamp login", slog.String("user_id", user.ID.String()), slog.String("error", err.Error()))
+	}
 	writeJSON(w, http.StatusOK, models.LoginResponse{
 		Status:       models.LoginStatusAuthenticated,
 		AccessToken:  access,
@@ -174,6 +182,24 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		TokenType:    "Bearer",
 		ExpiresIn:    int64(a.Issuer.AccessTTL.Seconds()),
 	})
+}
+
+// clientIP picks an honest IP for the request: respects an explicit
+// X-Forwarded-For (first hop) when present, otherwise falls back to
+// r.RemoteAddr's host part. Empty string is acceptable — the caller
+// stores it as NULL.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// First hop is the original client.
+		if i := strings.Index(xff, ","); i >= 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // Refresh handles POST /api/v1/auth/token/refresh.

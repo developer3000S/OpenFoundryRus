@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 
 import { JsonEditor } from '@/lib/components/JsonEditor';
 import { MediaTransformEditor } from '@/lib/components/pipeline/MediaTransformEditor';
@@ -45,6 +46,10 @@ const MEDIA_TRANSFORM_TYPES = new Set([
   'convert_media_set_to_table_rows',
   'get_media_references',
 ]);
+
+function datasetRoute(id: string) {
+  return `/datasets/${encodeURIComponent(id)}`;
+}
 
 export function NodeConfig({ node, siblings, readOnly = false, onChange, onDelete, validation = null }: NodeConfigProps) {
   const dependencyOptions = useMemo(() => siblings.filter((s) => node && s.id !== node.id), [siblings, node]);
@@ -145,6 +150,11 @@ export function NodeConfig({ node, siblings, readOnly = false, onChange, onDelet
       <label style={{ fontSize: 12 }}>
         Output dataset id
         <input value={node.output_dataset_id ?? ''} onChange={(e) => patch({ output_dataset_id: e.target.value || null })} disabled={readOnly} className="of-input" style={{ marginTop: 4 }} />
+        {node.output_dataset_id && (
+          <Link to={datasetRoute(node.output_dataset_id)} className="of-link" style={{ display: 'inline-block', marginTop: 4, fontSize: 11 }}>
+            Open dataset
+          </Link>
+        )}
       </label>
 
       <label style={{ fontSize: 12 }}>
@@ -156,6 +166,15 @@ export function NodeConfig({ node, siblings, readOnly = false, onChange, onDelet
           className="of-input"
           style={{ marginTop: 4, fontFamily: 'var(--font-mono)' }}
         />
+        {node.input_dataset_ids.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+            {node.input_dataset_ids.map((datasetId) => (
+              <Link key={datasetId} to={datasetRoute(datasetId)} className="of-link" style={{ fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                {datasetId}
+              </Link>
+            ))}
+          </div>
+        )}
       </label>
 
       <div style={{ fontSize: 12 }}>

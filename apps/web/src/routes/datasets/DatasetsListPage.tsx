@@ -348,8 +348,8 @@ export function DatasetsListPage() {
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="Delete dataset"
-        message={deleteTarget ? `Delete ${deleteTarget.name}?` : ''}
-        confirmLabel="Delete"
+        message={deleteTarget ? `Move ${deleteTarget.name} to deleted datasets? It can be restored through the dataset API until it is hard-deleted.` : ''}
+        confirmLabel="Soft-delete"
         danger
         busy={busy}
         onConfirm={() => void confirmDelete()}
@@ -407,7 +407,7 @@ function DatasetRow({
   const navigate = useNavigate();
   const tags = dataset.tags ?? [];
   const branchPath = dataset.storage_path
-    ? `/${dataset.storage_path.replace(/^\/+/, '').replace(/\/+$/, '')}`
+    ? (dataset.path || `/${dataset.storage_path.replace(/^\/+/, '').replace(/\/+$/, '')}`)
     : `/datasets/${dataset.name}`;
   const datasetCount = Math.max(1, dataset.current_version || 1);
 

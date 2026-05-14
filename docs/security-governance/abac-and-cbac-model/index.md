@@ -1,5 +1,11 @@
 # ABAC and CBAC model
 
+> **Sensitive admin surface.** Attribute-based decisions depend on the
+> identity source of truth. See the
+> [Security overview](../security-overview.md), the
+> [Shared responsibility model](../shared-responsibility-model.md), and
+> the [Foundry public-docs parity policy](../../reference/foundry-public-docs-parity-policy.md).
+
 OpenFoundry already shows signs of moving beyond RBAC-only authorization.
 
 ## Repository signals

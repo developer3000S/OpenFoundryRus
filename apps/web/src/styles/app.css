@@ -341,9 +341,12 @@ button {
   align-items: end;
   gap: 2px;
   border-bottom: 1px solid var(--border-default);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .of-tab {
+  flex: 0 0 auto;
   padding: 8px 11px;
   border: 0;
   border-bottom: 2px solid transparent;
@@ -351,6 +354,7 @@ button {
   color: var(--text-default);
   cursor: pointer;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .of-tab:hover {
@@ -5876,4 +5880,3 @@ button {
     padding: 18px 18px 36px;
   }
 }
-

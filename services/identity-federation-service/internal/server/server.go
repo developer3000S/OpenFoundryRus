@@ -35,7 +35,7 @@ import (
 // Subsequent slices add: /auth/sessions/*, /auth/sso/*, /users/*,
 // /roles/*, /groups/*, /permissions/*, /policies/*, /control-panel/*,
 // /scim/v2/*, /jwks/rotate, /audit/metrics.
-func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *handlers.MFA, wa *handlers.WebAuthn, sso *handlers.SSO, rbac *handlers.RBAC, m *observability.Metrics, probes ...capabilities.DependencyProbe) *http.Server {
+func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *handlers.MFA, wa *handlers.WebAuthn, sso *handlers.SSO, ssoAdmin *handlers.SsoAdmin, rbac *handlers.RBAC, m *observability.Metrics, probes ...capabilities.DependencyProbe) *http.Server {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, chimw.Compress(5))
 	r.Use(chimw.Timeout(30 * time.Second))
@@ -67,6 +67,10 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *ha
 		api.Get("/sso/{provider}/start", sso.Start)
 		api.Get("/sso/{provider}/callback", sso.Callback)
 		api.Post("/sso/{provider}/acs", sso.AssertionConsumerService)
+		// SG.3: unauthenticated login-troubleshooting endpoint.
+		// Returns provider responses through IntoResponse() so no
+		// secrets leak.
+		api.Post("/sso/troubleshoot", ssoAdmin.Troubleshoot)
 	})
 
 	// /api/v1/auth/mfa/* — bearer-protected MFA management.
@@ -87,12 +91,22 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *ha
 
 		api.Get("/users", rbac.ListUsers)
 		api.Get("/users/me", rbac.Me)
+		// SG.4: search/filter envelope alongside the bare-array list.
+		api.Get("/users/search", rbac.SearchUsers)
 		api.Get("/users/{id}", rbac.GetUser)
 		api.Patch("/users/{id}", rbac.UpdateUser)
 		api.Delete("/users/{id}", rbac.DeleteUser)
+		api.Get("/users/{id}/inspect", rbac.InspectUser)
+		api.Post("/users/{id}/restore", rbac.RestoreUser)
+		api.Post("/users/{id}/revoke-tokens", rbac.RevokeUserTokens)
 		api.Get("/users/{id}/roles", rbac.ListUserRoles)
 		api.Put("/users/{id}/roles/{role_id}", rbac.AssignUserRole)
 		api.Delete("/users/{id}/roles/{role_id}", rbac.RevokeUserRole)
+		// SG.4: admin-only preregistration. RequireAdmin is enforced
+		// per-route because the rest of /users (list, get, update) is
+		// already gated by the bearer middleware and individual route
+		// authorization in the gateway.
+		api.With(authmw.RequireAdmin()).Post("/users/preregister", rbac.PreregisterUser)
 
 		api.Get("/roles", rbac.ListRoles)
 		api.Post("/roles", rbac.CreateRole)
@@ -126,6 +140,22 @@ func New(cfg *config.Config, jwt *authmw.JWTConfig, auth *handlers.Auth, mfa *ha
 		api.Put("/restricted-views/{id}", rv.Update)
 		api.Patch("/restricted-views/{id}", rv.Update)
 		api.Delete("/restricted-views/{id}", rv.Delete)
+
+		// SG.3: SSO provider admin surface. Bearer-protected + admin-
+		// only via authmw.RequireAdmin so only admins can write/read
+		// secrets. The boot-time OIDC + SAML registries continue to
+		// be seeded from env config; these endpoints are the durable
+		// admin source-of-truth a follow-up RFC will hot-load.
+		api.Group(func(adm chi.Router) {
+			adm.Use(authmw.RequireAdmin())
+			adm.Get("/auth/sso/providers", ssoAdmin.List)
+			adm.Post("/auth/sso/providers", ssoAdmin.Create)
+			adm.Get("/auth/sso/providers/{id}", ssoAdmin.Get)
+			adm.Patch("/auth/sso/providers/{id}", ssoAdmin.Update)
+			adm.Delete("/auth/sso/providers/{id}", ssoAdmin.Delete)
+			adm.Post("/auth/sso/providers/{id}/refresh-metadata", ssoAdmin.RefreshMetadata)
+			adm.Get("/auth/sso/providers/{id}/health", ssoAdmin.Health)
+		})
 	})
 
 	// Synthesise capabilities for every mounted route. Anything

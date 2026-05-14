@@ -248,7 +248,7 @@ func startPipelineRun(r *http.Request, pipeline *models.Pipeline, req models.Tri
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planFromPipeline(pipeline, run.ID, req, ports)
+	plan, err := planFromPipeline(r.Context(), pipeline, run.ID, req, ports)
 	if err != nil {
 		finishRunBestEffort(r.Context(), repo, run.ID, "failed", nil, err.Error())
 		return nil, err

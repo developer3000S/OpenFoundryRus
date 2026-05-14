@@ -40,18 +40,25 @@ export interface Schedule {
   id: string;
   rid: string;
   project_rid: string;
+  folder_rid: string | null;
   name: string;
   description: string;
   trigger: Trigger;
   target: ScheduleTarget;
+  target_rids: string[];
+  branch: string;
+  build_strategy: string;
   paused: boolean;
   paused_reason: string | null;
   paused_at: string | null;
   auto_pause_exempt: boolean;
   pending_re_run: boolean;
+  pending_trigger_snapshot?: Record<string, string>;
   active_run_id: string | null;
+  last_triggered_at?: string | null;
   version: number;
   created_by: string;
+  owner: string;
   created_at: string;
   updated_at: string;
   last_run_at: string | null;
@@ -59,6 +66,8 @@ export interface Schedule {
   project_scope_rids: string[];
   run_as_user_id: string | null;
   service_principal_id: string | null;
+  run_as_identity: string | null;
+  last_updated_by: string;
 }
 
 export interface ScheduleRun {
@@ -71,6 +80,8 @@ export interface ScheduleRun {
   triggered_at: string;
   finished_at: string | null;
   trigger_snapshot: Record<string, string>;
+  trigger_type: string;
+  diagnostics: Record<string, string>;
   schedule_version: number;
 }
 
@@ -145,6 +156,26 @@ export function getSchedule(rid: string) {
   return api.get<Schedule>(`${SCHEDULES_BASE}/${encodeURIComponent(rid)}`);
 }
 
+export function createSchedule(
+  body: {
+    project_rid: string;
+    folder_rid?: string | null;
+    name: string;
+    description?: string;
+    trigger: Trigger;
+    target: ScheduleTarget;
+    paused?: boolean;
+    branch?: string;
+    build_strategy?: string;
+    scope_kind?: ScheduleScopeKind;
+    project_scope_rids?: string[];
+    run_as_user_id?: string | null;
+    run_as_identity?: string | null;
+  },
+) {
+  return api.post<Schedule>(SCHEDULES_BASE, body);
+}
+
 export function patchSchedule(
   rid: string,
   patch: Partial<{
@@ -157,6 +188,10 @@ export function patchSchedule(
   }>,
 ) {
   return api.patch<Schedule>(`${SCHEDULES_BASE}/${encodeURIComponent(rid)}`, patch);
+}
+
+export function deleteSchedule(rid: string) {
+  return api.delete<void>(`${SCHEDULES_BASE}/${encodeURIComponent(rid)}`);
 }
 
 export function pauseSchedule(rid: string, reason?: string) {
@@ -176,6 +211,37 @@ export function runScheduleNow(rid: string) {
     `${SCHEDULES_BASE}/${encodeURIComponent(rid)}:run-now`,
     {},
   );
+}
+
+export interface ScheduleDispatchResult {
+  schedule_rid: string;
+  run_rid?: string;
+  outcome: RunOutcome;
+  build_rid?: string;
+  pending_re_run?: boolean;
+  diagnostics?: Record<string, string>;
+}
+
+export interface ScheduleDispatchResponse {
+  triggered: number;
+  queued: number;
+  ignored: number;
+  failed: number;
+  results: ScheduleDispatchResult[];
+}
+
+export function dispatchDueSchedules(body?: { now?: string; limit?: number }) {
+  return api.post<ScheduleDispatchResponse>(`${SCHEDULES_BASE}/_scheduler/run-due`, body ?? {});
+}
+
+export function recordScheduleTriggerEvent(body: {
+  type: EventTrigger['type'] | 'LOGIC_UPDATED' | 'DATASET_UPDATED' | string;
+  target_rid: string;
+  branch?: string;
+  occurred_at?: string;
+  diagnostics?: Record<string, string>;
+}) {
+  return api.post<ScheduleDispatchResponse>(`${SCHEDULES_BASE}/_events`, body);
 }
 
 export function listScheduleRuns(

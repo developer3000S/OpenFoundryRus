@@ -205,9 +205,55 @@ export interface SsoProviderRecord {
   saml_metadata_url: string | null;
   saml_entity_id: string | null;
   saml_sso_url: string | null;
+  saml_certificate_configured?: boolean;
   attribute_mapping: Record<string, unknown>;
+  domains?: string[];
+  metadata_last_refreshed_at?: string | null;
+  metadata_last_error?: string | null;
+  certificate_expires_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// SG.3 admin-side payloads.
+export interface SsoProviderHealth {
+  provider_id: string;
+  provider_slug: string;
+  provider_type: string;
+  enabled: boolean;
+  overall_status: 'ok' | 'degraded' | 'blocked';
+  issuer_reachable?: boolean;
+  issuer_error?: string;
+  metadata_reachable?: boolean;
+  metadata_error?: string;
+  certificate_expires_at?: string | null;
+  certificate_days_left?: number | null;
+  checked_at: string;
+}
+
+export interface LoginTroubleshootIssue {
+  code: string;
+  severity: 'info' | 'warning' | 'error';
+  message: string;
+}
+
+export interface LoginTroubleshootResponse {
+  email: string;
+  domain: string;
+  state:
+    | 'ok'
+    | 'unknown_domain'
+    | 'user_disabled'
+    | 'provider_disabled'
+    | 'metadata_stale'
+    | 'certificate_expired'
+    | 'certificate_expiring'
+    | 'configuration_error';
+  matched_providers: SsoProviderRecord[];
+  user_exists: boolean;
+  user_disabled: boolean;
+  diagnostics: LoginTroubleshootIssue[];
+  checked_at: string;
 }
 
 export function getMe() {
@@ -437,27 +483,73 @@ export function listSsoProviders() {
   return api.get<SsoProviderRecord[]>('/auth/sso/providers');
 }
 
+export function getSsoProvider(providerId: string) {
+  return api.get<SsoProviderRecord>(`/auth/sso/providers/${providerId}`);
+}
+
 export function createSsoProvider(data: {
   slug: string;
   name: string;
   provider_type: string;
-  enabled: boolean;
+  enabled?: boolean;
   client_id?: string | null;
   client_secret?: string | null;
   issuer_url?: string | null;
   authorization_url?: string | null;
   token_url?: string | null;
   userinfo_url?: string | null;
-  scopes: string[];
+  scopes?: string[];
   saml_metadata_url?: string | null;
   saml_entity_id?: string | null;
   saml_sso_url?: string | null;
   saml_certificate?: string | null;
-  attribute_mapping: Record<string, unknown>;
+  attribute_mapping?: Record<string, unknown>;
+  domains?: string[];
 }) {
   return api.post<SsoProviderRecord>('/auth/sso/providers', data);
 }
 
+// updateSsoProvider follows the PATCH semantics of the Go handler:
+// missing keys preserve the current value; explicit nulls clear
+// pointer fields.
+export function updateSsoProvider(
+  providerId: string,
+  patch: Partial<{
+    name: string;
+    enabled: boolean;
+    client_id: string | null;
+    client_secret: string | null;
+    issuer_url: string | null;
+    authorization_url: string | null;
+    token_url: string | null;
+    userinfo_url: string | null;
+    scopes: string[];
+    saml_metadata_url: string | null;
+    saml_entity_id: string | null;
+    saml_sso_url: string | null;
+    saml_certificate: string | null;
+    attribute_mapping: Record<string, unknown>;
+    domains: string[];
+  }>,
+) {
+  return api.fetch<SsoProviderRecord>(`/auth/sso/providers/${providerId}`, {
+    method: 'PATCH',
+    body: patch,
+  });
+}
+
 export function deleteSsoProvider(providerId: string) {
   return api.delete<void>(`/auth/sso/providers/${providerId}`);
+}
+
+export function refreshSsoProviderMetadata(providerId: string) {
+  return api.post<SsoProviderRecord>(`/auth/sso/providers/${providerId}/refresh-metadata`, {});
+}
+
+export function checkSsoProviderHealth(providerId: string) {
+  return api.get<SsoProviderHealth>(`/auth/sso/providers/${providerId}/health`);
+}
+
+export function troubleshootSsoLogin(email: string) {
+  return api.post<LoginTroubleshootResponse>('/auth/sso/troubleshoot', { email });
 }

@@ -60,8 +60,18 @@ type Repo struct{ Pool DB }
 
 const datasetSelect = `SELECT id, name, description, format, storage_path,
 	size_bytes, row_count, owner_id, tags, current_version, active_branch,
-	metadata, health_status, current_view_id, created_at, updated_at
+	metadata, health_status, current_view_id,
+	rid, parent_folder_rid, folder_path, project_id, project_rid, path,
+	resource_visibility, deleted_at, created_at, updated_at
 	FROM datasets`
+
+const (
+	defaultParentFolderRID = "ri.openfoundry.main.folder.root"
+	defaultFolderPath      = "/datasets"
+	defaultProjectID       = "default"
+	defaultProjectRID      = "ri.openfoundry.main.project.default"
+	defaultVisibility      = models.ResourceVisibilityPrivate
+)
 
 func (r *Repo) ListDatasets(ctx context.Context, ownerID *uuid.UUID, limit int) ([]models.Dataset, error) {
 	if limit < 1 {
@@ -75,9 +85,9 @@ func (r *Repo) ListDatasets(ctx context.Context, ownerID *uuid.UUID, limit int) 
 		err  error
 	)
 	if ownerID != nil {
-		rows, err = r.Pool.Query(ctx, datasetSelect+` WHERE owner_id = $1 ORDER BY created_at DESC LIMIT $2`, *ownerID, limit)
+		rows, err = r.Pool.Query(ctx, datasetSelect+` WHERE owner_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT $2`, *ownerID, limit)
 	} else {
-		rows, err = r.Pool.Query(ctx, datasetSelect+` ORDER BY created_at DESC LIMIT $1`, limit)
+		rows, err = r.Pool.Query(ctx, datasetSelect+` WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT $1`, limit)
 	}
 	if err != nil {
 		return nil, err
@@ -95,6 +105,15 @@ func (r *Repo) ListDatasets(ctx context.Context, ownerID *uuid.UUID, limit int) 
 }
 
 func (r *Repo) GetDataset(ctx context.Context, id uuid.UUID) (*models.Dataset, error) {
+	row := r.Pool.QueryRow(ctx, datasetSelect+` WHERE id = $1 AND deleted_at IS NULL`, id)
+	v, err := scanDataset(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func (r *Repo) GetDatasetIncludingDeleted(ctx context.Context, id uuid.UUID) (*models.Dataset, error) {
 	row := r.Pool.QueryRow(ctx, datasetSelect+` WHERE id = $1`, id)
 	v, err := scanDataset(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -114,6 +133,132 @@ func BuildDatasetStoragePath(prefix string, datasetID uuid.UUID) string {
 	return normalized + "/" + datasetID.String()
 }
 
+func firstNonEmpty(values ...*string) string {
+	for _, ptr := range values {
+		if ptr == nil {
+			continue
+		}
+		if trimmed := strings.TrimSpace(*ptr); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func normalizeFolderPath(raw string) string {
+	trimmed := strings.Trim(strings.TrimSpace(raw), "/")
+	if trimmed == "" {
+		return defaultFolderPath
+	}
+	return "/" + trimmed
+}
+
+func normalizeResourcePath(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = "/" + strings.Trim(trimmed, "/")
+	if trimmed == "/" {
+		return ""
+	}
+	return trimmed
+}
+
+func BuildDatasetResourcePath(folderPath, displayName string) string {
+	base := normalizeFolderPath(folderPath)
+	name := strings.TrimSpace(displayName)
+	if base == "/" {
+		return "/" + name
+	}
+	return strings.TrimRight(base, "/") + "/" + name
+}
+
+func parentPath(resourcePath string) string {
+	path := normalizeResourcePath(resourcePath)
+	if path == "" {
+		return defaultFolderPath
+	}
+	idx := strings.LastIndex(path, "/")
+	if idx <= 0 {
+		return "/"
+	}
+	return path[:idx]
+}
+
+func normalizeBranchName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", fmt.Errorf("%w: branch name is required", ErrValidation)
+	}
+	if _, err := uuid.Parse(name); err == nil {
+		return "", fmt.Errorf("%w: invalid branch name", ErrValidation)
+	}
+	if strings.HasPrefix(name, "ri.") {
+		return "", fmt.Errorf("%w: invalid branch name", ErrValidation)
+	}
+	return name, nil
+}
+
+func datasetDefaultBranchName(dataset *models.Dataset) (string, error) {
+	if dataset != nil && strings.TrimSpace(dataset.ActiveBranch) != "" {
+		return normalizeBranchName(dataset.ActiveBranch)
+	}
+	return "main", nil
+}
+
+func createDatasetDefaultBranchName(body *models.CreateDatasetRequest) (string, error) {
+	if body != nil {
+		if name := firstNonEmpty(body.ActiveBranch, body.DefaultBranch, body.DefaultBranchName); name != "" {
+			return normalizeBranchName(name)
+		}
+	}
+	return "main", nil
+}
+
+func datasetLinks(id uuid.UUID) *models.DatasetLinks {
+	encoded := id.String()
+	return &models.DatasetLinks{
+		Self:    "/datasets/" + encoded,
+		Preview: "/datasets/" + encoded,
+		Lineage: "/lineage?dataset=" + encoded,
+	}
+}
+
+func hydrateDataset(v *models.Dataset) *models.Dataset {
+	if v == nil {
+		return nil
+	}
+	if v.RID == "" {
+		v.RID = "ri.foundry.main.dataset." + v.ID.String()
+	}
+	if v.DisplayName == "" {
+		v.DisplayName = v.Name
+	}
+	if v.ParentFolderRID == "" {
+		v.ParentFolderRID = defaultParentFolderRID
+	}
+	if v.FolderPath == "" {
+		v.FolderPath = defaultFolderPath
+	}
+	if v.ProjectID == "" {
+		v.ProjectID = defaultProjectID
+	}
+	if v.ProjectRID == "" {
+		v.ProjectRID = defaultProjectRID
+	}
+	if v.ResourceVisibility == "" {
+		v.ResourceVisibility = defaultVisibility
+	}
+	if v.Path == "" {
+		v.Path = BuildDatasetResourcePath(v.FolderPath, v.Name)
+	}
+	if v.Links == nil {
+		v.Links = datasetLinks(v.ID)
+	}
+	return v
+}
+
 // CreateDataset inserts a fresh dataset row with declarative-only
 // defaults (storage path under the Bronze lakehouse prefix, format
 // `parquet`, health `unknown`, metadata `{}`). Runtime version rows are
@@ -122,6 +267,10 @@ func (r *Repo) CreateDataset(ctx context.Context, body *models.CreateDatasetRequ
 	id := uuid.New()
 	if body.ID != nil && *body.ID != uuid.Nil {
 		id = *body.ID
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" && body.DisplayName != nil {
+		name = strings.TrimSpace(*body.DisplayName)
 	}
 	format := "parquet"
 	if body.Format != nil && *body.Format != "" {
@@ -143,40 +292,120 @@ func (r *Repo) CreateDataset(ctx context.Context, body *models.CreateDatasetRequ
 	if body.HealthStatus != nil && *body.HealthStatus != "" {
 		health = *body.HealthStatus
 	}
+	activeBranch, err := createDatasetDefaultBranchName(body)
+	if err != nil {
+		return nil, err
+	}
 	storagePath := BuildDatasetStoragePath("bronze", id)
+	parentFolderRID := firstNonEmpty(body.ParentFolderRID, body.ParentFolderRid)
+	if parentFolderRID == "" {
+		parentFolderRID = defaultParentFolderRID
+	}
+	folderPath := normalizeFolderPath(firstNonEmpty(body.FolderPath))
+	projectID := firstNonEmpty(body.ProjectID)
+	if projectID == "" {
+		projectID = defaultProjectID
+	}
+	projectRID := firstNonEmpty(body.ProjectRID)
+	if projectRID == "" {
+		projectRID = defaultProjectRID
+	}
+	visibility := strings.ToLower(firstNonEmpty(body.ResourceVisibility, body.Visibility))
+	if visibility == "" {
+		visibility = defaultVisibility
+	}
+	resourcePath := normalizeResourcePath(firstNonEmpty(body.Path))
+	if resourcePath == "" {
+		resourcePath = BuildDatasetResourcePath(folderPath, name)
+	}
 	row := r.Pool.QueryRow(ctx,
 		`INSERT INTO datasets
 		    (id, rid, name, description, format, storage_path, owner_id, tags,
-		     active_branch, metadata, health_status)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'main', $9, $10)
+		     active_branch, metadata, health_status, parent_folder_rid, folder_path,
+		     project_id, project_rid, path, resource_visibility)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		 RETURNING id, name, description, format, storage_path, size_bytes,
 		           row_count, owner_id, tags, current_version, active_branch,
-		           metadata, health_status, current_view_id, created_at, updated_at`,
-		id, "ri.foundry.main.dataset."+id.String(), strings.TrimSpace(body.Name), description,
-		format, storagePath, ownerID, tags, metadata, health,
+		           metadata, health_status, current_view_id, rid, parent_folder_rid,
+		           folder_path, project_id, project_rid, path, resource_visibility,
+		           deleted_at, created_at, updated_at`,
+		id, "ri.foundry.main.dataset."+id.String(), name, description,
+		format, storagePath, ownerID, tags, activeBranch, metadata, health, parentFolderRID,
+		folderPath, projectID, projectRID, resourcePath, visibility,
 	)
 	return scanDataset(row)
 }
 
-// UpdateDataset mirrors Rust's PATCH semantics: every column is folded
-// through COALESCE($n, column) so unspecified fields are left untouched.
+// UpdateDataset mirrors Rust's PATCH semantics while keeping dataset resource
+// placement fields consistent across rename, move and explicit path updates.
 func (r *Repo) UpdateDataset(ctx context.Context, id uuid.UUID, body *models.UpdateDatasetRequest) (*models.Dataset, error) {
+	current, err := r.GetDataset(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil {
+		return nil, nil
+	}
+	name := current.Name
+	if body.Name != nil {
+		name = strings.TrimSpace(*body.Name)
+	} else if body.DisplayName != nil {
+		name = strings.TrimSpace(*body.DisplayName)
+	}
+	parentFolderRID := current.ParentFolderRID
+	if next := firstNonEmpty(body.ParentFolderRID, body.ParentFolderRid); next != "" {
+		parentFolderRID = next
+	}
+	folderPath := current.FolderPath
+	if body.FolderPath != nil {
+		folderPath = normalizeFolderPath(*body.FolderPath)
+	}
+	projectID := current.ProjectID
+	if next := firstNonEmpty(body.ProjectID); next != "" {
+		projectID = next
+	}
+	projectRID := current.ProjectRID
+	if next := firstNonEmpty(body.ProjectRID); next != "" {
+		projectRID = next
+	}
+	visibility := current.ResourceVisibility
+	if next := firstNonEmpty(body.ResourceVisibility, body.Visibility); next != "" {
+		visibility = strings.ToLower(next)
+	}
+	resourcePath := current.Path
+	if body.Path != nil {
+		if normalized := normalizeResourcePath(*body.Path); normalized != "" {
+			resourcePath = normalized
+			folderPath = parentPath(normalized)
+		}
+	} else if body.Name != nil || body.DisplayName != nil || body.FolderPath != nil {
+		resourcePath = BuildDatasetResourcePath(folderPath, name)
+	}
 	row := r.Pool.QueryRow(ctx,
 		`UPDATE datasets SET
-		    name           = COALESCE($2, name),
+		    name           = $2,
 		    description    = COALESCE($3, description),
 		    tags           = COALESCE($4, tags),
 		    owner_id       = COALESCE($5, owner_id),
 		    metadata       = COALESCE($6, metadata),
 		    health_status  = COALESCE($7, health_status),
 		    current_view_id = COALESCE($8, current_view_id),
+		    parent_folder_rid = $9,
+		    folder_path = $10,
+		    project_id = $11,
+		    project_rid = $12,
+		    path = $13,
+		    resource_visibility = $14,
 		    updated_at     = NOW()
-		  WHERE id = $1
+		  WHERE id = $1 AND deleted_at IS NULL
 		  RETURNING id, name, description, format, storage_path, size_bytes,
 		            row_count, owner_id, tags, current_version, active_branch,
-		            metadata, health_status, current_view_id, created_at, updated_at`,
-		id, body.Name, body.Description, body.Tags, body.OwnerID,
+		            metadata, health_status, current_view_id, rid, parent_folder_rid,
+		            folder_path, project_id, project_rid, path, resource_visibility,
+		            deleted_at, created_at, updated_at`,
+		id, name, body.Description, body.Tags, body.OwnerID,
 		jsonOrNil(body.Metadata), body.HealthStatus, body.CurrentViewID,
+		parentFolderRID, folderPath, projectID, projectRID, resourcePath, visibility,
 	)
 	v, err := scanDataset(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -193,6 +422,29 @@ func jsonOrNil(raw []byte) any {
 }
 
 func (r *Repo) DeleteDataset(ctx context.Context, id uuid.UUID) (bool, error) {
+	cmd, err := r.Pool.Exec(ctx, `UPDATE datasets SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`, id)
+	if err != nil {
+		return false, err
+	}
+	return cmd.RowsAffected() > 0, nil
+}
+
+func (r *Repo) RestoreDataset(ctx context.Context, id uuid.UUID) (*models.Dataset, error) {
+	row := r.Pool.QueryRow(ctx, `UPDATE datasets SET deleted_at = NULL, updated_at = NOW()
+		WHERE id = $1
+		RETURNING id, name, description, format, storage_path, size_bytes,
+		          row_count, owner_id, tags, current_version, active_branch,
+		          metadata, health_status, current_view_id, rid, parent_folder_rid,
+		          folder_path, project_id, project_rid, path, resource_visibility,
+		          deleted_at, created_at, updated_at`, id)
+	v, err := scanDataset(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return v, err
+}
+
+func (r *Repo) HardDeleteDataset(ctx context.Context, id uuid.UUID) (bool, error) {
 	cmd, err := r.Pool.Exec(ctx, `DELETE FROM datasets WHERE id = $1`, id)
 	if err != nil {
 		return false, err
@@ -207,6 +459,8 @@ func scanDataset(r rowLikeT) (*models.Dataset, error) {
 	if err := r.Scan(&v.ID, &v.Name, &v.Description, &v.Format, &v.StoragePath,
 		&v.SizeBytes, &v.RowCount, &v.OwnerID, &v.Tags, &v.CurrentVersion,
 		&v.ActiveBranch, &v.Metadata, &v.HealthStatus, &v.CurrentViewID,
+		&v.RID, &v.ParentFolderRID, &v.FolderPath, &v.ProjectID, &v.ProjectRID,
+		&v.Path, &v.ResourceVisibility, &v.DeletedAt,
 		&v.CreatedAt, &v.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -216,7 +470,7 @@ func scanDataset(r rowLikeT) (*models.Dataset, error) {
 	if len(v.Metadata) == 0 {
 		v.Metadata = []byte(`{}`)
 	}
-	return v, nil
+	return hydrateDataset(v), nil
 }
 
 const versionSelect = `SELECT id, dataset_id, version, message, size_bytes,
@@ -234,7 +488,7 @@ func IsConflict(err error) bool {
 }
 
 func (r *Repo) GetDatasetForOwner(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.Dataset, error) {
-	row := r.Pool.QueryRow(ctx, datasetSelect+` WHERE id = $1 AND owner_id = $2`, id, ownerID)
+	row := r.Pool.QueryRow(ctx, datasetSelect+` WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`, id, ownerID)
 	v, err := scanDataset(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -307,16 +561,20 @@ const branchSelect = `SELECT id,
 
 func (r *Repo) EnsureDefaultBranch(ctx context.Context, dataset *models.Dataset) error {
 	var exists bool
-	if err := r.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM dataset_branches WHERE dataset_id = $1)`, dataset.ID).Scan(&exists); err != nil {
+	if err := r.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM dataset_branches WHERE dataset_id = $1 AND deleted_at IS NULL AND archived_at IS NULL)`, dataset.ID).Scan(&exists); err != nil {
 		return err
 	}
 	if exists {
 		return nil
 	}
-	_, err := r.Pool.Exec(ctx,
+	branchName, err := datasetDefaultBranchName(dataset)
+	if err != nil {
+		return err
+	}
+	_, err = r.Pool.Exec(ctx,
 		`INSERT INTO dataset_branches (id, dataset_id, dataset_rid, name, version, base_version, description, is_default)
-		 VALUES ($1, $2, 'ri.foundry.main.dataset.' || $2::text, 'main', $3, $3, 'Default branch', TRUE)`,
-		uuid.New(), dataset.ID, dataset.CurrentVersion,
+		 VALUES ($1, $2, 'ri.foundry.main.dataset.' || $2::text, $3, $4, $4, 'Default branch', TRUE)`,
+		uuid.New(), dataset.ID, branchName, dataset.CurrentVersion,
 	)
 	if IsConflict(err) {
 		return nil
@@ -325,7 +583,7 @@ func (r *Repo) EnsureDefaultBranch(ctx context.Context, dataset *models.Dataset)
 }
 
 func (r *Repo) ListBranches(ctx context.Context, datasetID uuid.UUID) ([]models.DatasetBranch, error) {
-	rows, err := r.Pool.Query(ctx, branchSelect+` WHERE dataset_id = $1 ORDER BY is_default DESC, name ASC`, datasetID)
+	rows, err := r.Pool.Query(ctx, branchSelect+` WHERE dataset_id = $1 AND deleted_at IS NULL AND archived_at IS NULL ORDER BY is_default DESC, name ASC`, datasetID)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +600,11 @@ func (r *Repo) ListBranches(ctx context.Context, datasetID uuid.UUID) ([]models.
 }
 
 func (r *Repo) GetBranch(ctx context.Context, datasetID uuid.UUID, name string) (*models.DatasetBranch, error) {
-	row := r.Pool.QueryRow(ctx, branchSelect+` WHERE dataset_id = $1 AND name = $2`, datasetID, name)
+	name, err := normalizeBranchName(name)
+	if err != nil {
+		return nil, err
+	}
+	row := r.Pool.QueryRow(ctx, branchSelect+` WHERE dataset_id = $1 AND name = $2 AND deleted_at IS NULL AND archived_at IS NULL`, datasetID, name)
 	v, err := scanBranch(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -351,6 +613,10 @@ func (r *Repo) GetBranch(ctx context.Context, datasetID uuid.UUID, name string) 
 }
 
 func (r *Repo) CreateBranch(ctx context.Context, dataset *models.Dataset, body *models.CreateDatasetBranchRequest) (*models.DatasetBranch, error) {
+	name, err := normalizeBranchName(body.Name)
+	if err != nil {
+		return nil, err
+	}
 	sourceVersion := dataset.CurrentVersion
 	if body.SourceVersion != nil {
 		sourceVersion = *body.SourceVersion
@@ -372,7 +638,7 @@ func (r *Repo) CreateBranch(ctx context.Context, dataset *models.Dataset, body *
 		           parent_branch_id, head_transaction_id, created_from_transaction_id,
 		           last_activity_at, labels, fallback_chain, version, base_version,
 		           description, is_default, created_at, updated_at`,
-		uuid.New(), dataset.ID, strings.TrimSpace(body.Name), sourceVersion, body.Description,
+		uuid.New(), dataset.ID, name, sourceVersion, body.Description,
 	)
 	v, err := scanBranch(row)
 	if IsConflict(err) {
@@ -409,55 +675,91 @@ func scanBranch(r rowLikeT) (*models.DatasetBranch, error) {
 	return v, nil
 }
 
-const fileSelect = `SELECT df.id, df.dataset_id, df.transaction_id, df.logical_path,
-	df.physical_uri, df.size_bytes, df.sha256, df.created_at,
+const fileSelect = `SELECT df.id, df.dataset_id, df.transaction_id,
+	'ri.foundry.main.transaction.' || df.transaction_id::text AS transaction_rid,
+	df.logical_path, df.physical_uri, df.size_bytes, df.media_type, df.sha256,
+	df.row_count_hint, df.storage_location, df.created_at,
 	COALESCE(t.committed_at, t.started_at, df.created_at) AS modified_at,
 	df.deleted_at,
 	CASE WHEN df.deleted_at IS NULL THEN 'active' ELSE 'deleted' END AS status
 	FROM dataset_files df
 	LEFT JOIN dataset_transactions t ON t.id = df.transaction_id`
 
-// ListFiles returns the branch-effective dataset_files projection. The
-// dataset_files table is maintained by migrations from committed transaction
-// file rows; this query adds branch head cutoff and prefix filtering.
+// ListFiles returns the branch-effective logical file projection. Physical
+// dataset_files rows are retained for audit and storage retention, so latest
+// file listings must replay committed transactions instead of reading every
+// undeleted physical row directly.
 func (r *Repo) ListFiles(ctx context.Context, datasetID uuid.UUID, branch string, prefix string) ([]models.DatasetFile, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		branch = "main"
 	}
 	prefix = strings.TrimLeft(prefix, "/")
-	rows, err := r.Pool.Query(ctx, fileSelect+`
-		WHERE df.dataset_id = $1
-		  AND ($3 = '' OR df.logical_path LIKE $3 || '%')
-		  AND (
-		    NOT EXISTS (SELECT 1 FROM dataset_branches b WHERE b.dataset_id = $1 AND b.name = $2)
-		    OR COALESCE(t.committed_at, t.started_at, df.created_at) <= COALESCE((
-		      SELECT COALESCE(ht.committed_at, ht.started_at)
-		        FROM dataset_branches b
-		        JOIN dataset_transactions ht ON ht.id = b.head_transaction_id
-		       WHERE b.dataset_id = $1 AND b.name = $2
-		       LIMIT 1
-		    ), 'infinity'::timestamptz)
-		  )
-		ORDER BY df.logical_path ASC, df.created_at DESC`, datasetID, branch, prefix)
+
+	view, err := r.computeViewAt(ctx, datasetID, branch, viewCutoff{})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := make([]models.DatasetFile, 0)
-	seen := map[string]struct{}{}
-	for rows.Next() {
-		v, err := scanFile(rows)
+	out := make([]models.DatasetFile, 0, len(view.Files))
+	for _, file := range view.Files {
+		logicalPath := strings.TrimLeft(file.LogicalPath, "/")
+		if prefix != "" && !strings.HasPrefix(logicalPath, prefix) {
+			continue
+		}
+		v, err := r.fileForViewRef(ctx, datasetID, file)
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := seen[v.LogicalPath]; ok {
-			continue
-		}
-		seen[v.LogicalPath] = struct{}{}
 		out = append(out, *v)
 	}
-	return out, rows.Err()
+	sort.Slice(out, func(i, j int) bool { return out[i].LogicalPath < out[j].LogicalPath })
+	return out, nil
+}
+
+func (r *Repo) fileForViewRef(ctx context.Context, datasetID uuid.UUID, ref models.RuntimeViewFile) (*models.DatasetFile, error) {
+	if ref.IntroducedBy != nil && *ref.IntroducedBy != uuid.Nil {
+		row := r.Pool.QueryRow(ctx, fileSelect+`
+			WHERE df.dataset_id = $1
+			  AND df.transaction_id = $2
+			  AND df.logical_path = $3
+			  AND df.deleted_at IS NULL
+			ORDER BY df.created_at DESC
+			LIMIT 1`, datasetID, *ref.IntroducedBy, ref.LogicalPath)
+		v, err := scanFile(row)
+		if err == nil {
+			return v, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+	return syntheticDatasetFileFromViewRef(datasetID, ref), nil
+}
+
+func syntheticDatasetFileFromViewRef(datasetID uuid.UUID, ref models.RuntimeViewFile) *models.DatasetFile {
+	transactionID := uuid.Nil
+	transactionRID := ""
+	if ref.IntroducedBy != nil {
+		transactionID = *ref.IntroducedBy
+		transactionRID = "ri.foundry.main.transaction." + ref.IntroducedBy.String()
+	}
+	now := time.Now().UTC()
+	stableID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(datasetID.String()+"\x00"+transactionID.String()+"\x00"+ref.LogicalPath+"\x00"+ref.PhysicalPath))
+	return &models.DatasetFile{
+		ID:              stableID,
+		DatasetID:       datasetID,
+		TransactionID:   transactionID,
+		TransactionRID:  transactionRID,
+		LogicalPath:     ref.LogicalPath,
+		Path:            ref.LogicalPath,
+		PhysicalURI:     ref.PhysicalPath,
+		SizeBytes:       ref.SizeBytes,
+		StorageLocation: []byte(`{}`),
+		CreatedAt:       now,
+		ModifiedAt:      now,
+		UpdatedTime:     now,
+		Status:          "active",
+	}
 }
 
 func (r *Repo) GetFile(ctx context.Context, datasetID uuid.UUID, fileID uuid.UUID) (*models.DatasetFile, error) {
@@ -471,10 +773,17 @@ func (r *Repo) GetFile(ctx context.Context, datasetID uuid.UUID, fileID uuid.UUI
 
 func scanFile(r rowLikeT) (*models.DatasetFile, error) {
 	v := &models.DatasetFile{}
-	if err := r.Scan(&v.ID, &v.DatasetID, &v.TransactionID, &v.LogicalPath,
-		&v.PhysicalURI, &v.SizeBytes, &v.SHA256, &v.CreatedAt, &v.ModifiedAt,
+	if err := r.Scan(&v.ID, &v.DatasetID, &v.TransactionID, &v.TransactionRID,
+		&v.LogicalPath, &v.PhysicalURI, &v.SizeBytes, &v.MediaType, &v.SHA256,
+		&v.RowCountHint, &v.StorageLocation, &v.CreatedAt, &v.ModifiedAt,
 		&v.DeletedAt, &v.Status); err != nil {
 		return nil, err
+	}
+	v.Path = v.LogicalPath
+	v.ContentType = v.MediaType
+	v.UpdatedTime = v.ModifiedAt
+	if len(v.StorageLocation) == 0 {
+		v.StorageLocation = []byte(`{}`)
 	}
 	return v, nil
 }

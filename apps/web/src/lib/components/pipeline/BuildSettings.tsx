@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import type { StreamConsistency } from '@/lib/api/streaming';
 import { StreamingProfileSelector } from './StreamingProfileSelector';
@@ -26,6 +27,10 @@ interface BuildSettingsProps {
 }
 
 const STREAMING_CONSISTENCY_OPTIONS: StreamConsistency[] = ['AT_LEAST_ONCE', 'EXACTLY_ONCE'];
+
+function datasetRoute(rid: string) {
+  return `/datasets/${encodeURIComponent(rid)}`;
+}
 
 export function BuildSettings({
   streamingConsistency = 'AT_LEAST_ONCE',
@@ -136,7 +141,13 @@ export function BuildSettings({
           <legend style={{ fontSize: 11, color: '#94a3b8', padding: '0 6px' }}>Stale outputs in last build ({lastBuildStaleOutputs.length})</legend>
           <ul style={{ paddingLeft: 18, fontSize: 11, fontFamily: 'var(--font-mono)', color: '#94a3b8' }}>
             {lastBuildStaleOutputs.map((o, i) => (
-              <li key={i}>{o.outputDatasetRid} ← {o.jobSpecRid.slice(0, 12)}…</li>
+              <li key={i}>
+                <Link to={datasetRoute(o.outputDatasetRid)} className="of-link">
+                  {o.outputDatasetRid}
+                </Link>
+                {' ← '}
+                {o.jobSpecRid.slice(0, 12)}…
+              </li>
             ))}
           </ul>
         </fieldset>
@@ -147,9 +158,16 @@ export function BuildSettings({
       )}
 
       {outputDatasetRids.length > 0 && (
-        <p className="of-text-muted" style={{ fontSize: 11, margin: 0 }}>
-          {outputDatasetRids.length} output dataset{outputDatasetRids.length === 1 ? '' : 's'}
-        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          <span className="of-text-muted" style={{ fontSize: 11 }}>
+            {outputDatasetRids.length} output dataset{outputDatasetRids.length === 1 ? '' : 's'}
+          </span>
+          {outputDatasetRids.map((rid) => (
+            <Link key={rid} to={datasetRoute(rid)} className="of-link" style={{ fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+              {rid}
+            </Link>
+          ))}
+        </div>
       )}
     </section>
   );

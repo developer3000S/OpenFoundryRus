@@ -11,8 +11,9 @@
 //     exists, replay every committed transaction from the oldest one.
 //  3. From that anchor, replay each subsequent committed transaction in
 //     timestamp order applying:
-//     * SNAPSHOT / APPEND -> insert/overwrite the file in the set.
-//     * UPDATE            -> overwrite (or insert) the file.
+//     * SNAPSHOT          -> replace the set with the transaction's files.
+//     * APPEND            -> add files that are not already present.
+//     * UPDATE            -> overwrite or insert file references.
 //     * DELETE            -> drop the file from the set.
 //
 // ComputeView is intentionally pure: it consumes a flat slice of
@@ -109,6 +110,9 @@ func ComputeView(transactions []TransactionEntry, atTs *time.Time) []FileRef {
 		case models.TransactionTypeSnapshot:
 			files = map[string]FileRef{}
 			for _, op := range entry.Files {
+				if op.Kind == FileOpRemove {
+					continue
+				}
 				files[op.LogicalPath] = FileRef{
 					LogicalPath:  op.LogicalPath,
 					PhysicalPath: op.PhysicalPath,
@@ -118,6 +122,9 @@ func ComputeView(transactions []TransactionEntry, atTs *time.Time) []FileRef {
 			}
 		case models.TransactionTypeAppend:
 			for _, op := range entry.Files {
+				if op.Kind == FileOpRemove {
+					continue
+				}
 				if _, exists := files[op.LogicalPath]; !exists {
 					files[op.LogicalPath] = FileRef{
 						LogicalPath:  op.LogicalPath,
@@ -129,6 +136,9 @@ func ComputeView(transactions []TransactionEntry, atTs *time.Time) []FileRef {
 			}
 		case models.TransactionTypeUpdate:
 			for _, op := range entry.Files {
+				if op.Kind == FileOpRemove {
+					continue
+				}
 				files[op.LogicalPath] = FileRef{
 					LogicalPath:  op.LogicalPath,
 					PhysicalPath: op.PhysicalPath,

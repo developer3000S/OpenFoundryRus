@@ -1,5 +1,14 @@
 # Restricted views and data controls
 
+> **Sensitive admin surface.** Restricted views and row-level policies are
+> mandatory access controls — misconfiguration leaks data. Read the
+> [Security overview](./security-overview.md) for how restricted views
+> compose with markings and scoped sessions, and the
+> [Shared responsibility model](./shared-responsibility-model.md) for
+> who is allowed to define and approve policies. Anything modeled on a
+> Foundry concept must follow the
+> [Foundry public-docs parity policy](../reference/foundry-public-docs-parity-policy.md).
+
 Data protection in OpenFoundry is not only about authentication. It also needs controlled projections of data for different audiences and contexts.
 
 ## Repository signals

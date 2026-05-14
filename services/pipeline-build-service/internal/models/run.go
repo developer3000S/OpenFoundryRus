@@ -86,7 +86,7 @@ func (r *PipelineRun) ProjectBuildState() BuildState {
 		return BuildQueued
 	case "running":
 		return BuildRunning
-	case "completed", "succeeded", "success":
+	case "completed", "succeeded", "success", "ignored":
 		return BuildCompleted
 	case "failed":
 		return BuildFailed

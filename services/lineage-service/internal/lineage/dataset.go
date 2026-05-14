@@ -58,14 +58,23 @@ func EnsureDatasetSnapshot(ctx context.Context, state *AppState, datasetID uuid.
 	effective := MaxMarkings(values)
 
 	overlay, err := json.Marshal(map[string]any{
-		"format":                 dataset.Format,
-		"tags":                   dataset.Tags,
-		"current_version":        dataset.CurrentVersion,
-		"active_branch":          dataset.ActiveBranch,
-		"owner_id":               dataset.OwnerID,
-		"dataset_marking":        dataset.Marking,
-		"base_marking":           baseMarking,
-		"metadata_refreshed_at":  dataset.UpdatedAt,
+		"rid":                   dataset.RID,
+		"display_name":          firstString(dataset.DisplayName, dataset.Name),
+		"format":                dataset.Format,
+		"tags":                  dataset.Tags,
+		"current_version":       dataset.CurrentVersion,
+		"active_branch":         dataset.ActiveBranch,
+		"owner_id":              dataset.OwnerID,
+		"parent_folder_rid":     dataset.ParentFolderRID,
+		"folder_path":           dataset.FolderPath,
+		"project_id":            dataset.ProjectID,
+		"project_rid":           dataset.ProjectRID,
+		"path":                  dataset.Path,
+		"resource_visibility":   dataset.ResourceVisibility,
+		"links":                 dataset.Links,
+		"dataset_marking":       dataset.Marking,
+		"base_marking":          baseMarking,
+		"metadata_refreshed_at": dataset.UpdatedAt,
 	})
 	if err != nil {
 		return nil, err
@@ -82,6 +91,15 @@ func EnsureDatasetSnapshot(ctx context.Context, state *AppState, datasetID uuid.
 	}
 	view := NodeFromRecord(record)
 	return &view, nil
+}
+
+func firstString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // EnsurePipelineSnapshot ports `ensure_pipeline_snapshot`. Reads the
@@ -170,12 +188,12 @@ func PropagatePipelineRuntimeLineage(ctx context.Context, state *AppState, pipel
 	pipelineMarking := MaxMarkings(values)
 
 	pipelineMeta, err := json.Marshal(map[string]any{
-		"status":                       pipeline.Status,
-		"description":                  pipeline.Description,
-		"owner_id":                     pipeline.OwnerID,
-		"next_run_at":                  pipeline.NextRunAt,
-		"last_lineage_node_id":         nodeID,
-		"last_lineage_transform_type":  transformType,
+		"status":                      pipeline.Status,
+		"description":                 pipeline.Description,
+		"owner_id":                    pipeline.OwnerID,
+		"next_run_at":                 pipeline.NextRunAt,
+		"last_lineage_node_id":        nodeID,
+		"last_lineage_transform_type": transformType,
 	})
 	if err != nil {
 		return err

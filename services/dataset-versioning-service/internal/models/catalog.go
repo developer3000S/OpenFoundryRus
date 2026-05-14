@@ -95,6 +95,14 @@ const (
 	DatasetFormatUnknown = "unknown"
 )
 
+// ResourceVisibility values stored on browseable dataset resources.
+const (
+	ResourceVisibilityPrivate      = "private"
+	ResourceVisibilityShared       = "shared"
+	ResourceVisibilityOrganization = "organization"
+	ResourceVisibilityPublic       = "public"
+)
+
 // CatalogAuditAction string constants — match Rust emit_audit() invocations.
 const (
 	AuditActionDatasetMetadataUpdate     = "dataset.metadata.update"
@@ -357,6 +365,18 @@ func IsKnownHealthStatus(s string) bool {
 	switch strings.ToLower(s) {
 	case HealthStatusUnknown, HealthStatusHealthy, HealthStatusWarning,
 		HealthStatusDegraded, HealthStatusCritical:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsKnownResourceVisibility reports whether `s` matches one of the
+// browseable dataset visibility states.
+func IsKnownResourceVisibility(s string) bool {
+	switch strings.ToLower(s) {
+	case ResourceVisibilityPrivate, ResourceVisibilityShared,
+		ResourceVisibilityOrganization, ResourceVisibilityPublic:
 		return true
 	default:
 		return false

@@ -40,14 +40,20 @@ func TestDatasetJSONShape(t *testing.T) {
 		ID: uuid.New(), Name: "sales", Description: "fact",
 		Format: "parquet", StoragePath: "bronze/abc",
 		SizeBytes: 1024, RowCount: 100,
-		OwnerID:        uuid.New(),
-		Tags:           []string{"finance", "daily"},
-		CurrentVersion: 1,
-		ActiveBranch:   "main",
-		Metadata:       []byte(`{}`),
-		HealthStatus:   "unknown",
-		CreatedAt:      time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC),
-		UpdatedAt:      time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC),
+		OwnerID:            uuid.New(),
+		Tags:               []string{"finance", "daily"},
+		CurrentVersion:     1,
+		ActiveBranch:       "main",
+		Metadata:           []byte(`{}`),
+		HealthStatus:       "unknown",
+		ParentFolderRID:    "ri.openfoundry.main.folder.root",
+		FolderPath:         "/datasets",
+		ProjectID:          "default",
+		ProjectRID:         "ri.openfoundry.main.project.default",
+		Path:               "/datasets/sales",
+		ResourceVisibility: "private",
+		CreatedAt:          time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC),
+		UpdatedAt:          time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC),
 	}
 	out, err := json.Marshal(d)
 	require.NoError(t, err)
@@ -57,6 +63,7 @@ func TestDatasetJSONShape(t *testing.T) {
 		"id", "name", "description", "format", "storage_path", "size_bytes",
 		"row_count", "owner_id", "tags", "current_version", "active_branch",
 		"metadata", "health_status", "current_view_id", "created_at", "updated_at",
+		"parent_folder_rid", "folder_path", "project_id", "project_rid", "path", "resource_visibility",
 	} {
 		assert.Contains(t, view, k)
 	}
@@ -148,6 +155,9 @@ func TestCreateDatasetDefaultsAndPersists(t *testing.T) {
 	assert.Equal(t, "unknown", got.HealthStatus)
 	assert.Equal(t, "main", got.ActiveBranch)
 	assert.True(t, strings.HasPrefix(got.StoragePath, "bronze/"))
+	assert.Equal(t, "private", got.ResourceVisibility)
+	assert.Equal(t, "/datasets/orders", got.Path)
+	require.Len(t, store.branches[got.ID], 1)
 }
 
 func TestUpdateDatasetRejectsUnknownHealthStatus(t *testing.T) {
@@ -177,6 +187,24 @@ func TestUpdateDatasetAppliesPatch(t *testing.T) {
 	assert.Equal(t, "healthy", got.HealthStatus)
 }
 
+func TestUpdateDatasetMovesRenamesAndChangesVisibility(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	req := datasetReq("PATCH", store, owner, `{"display_name":"curated_orders","folder_path":"/finance/curated","project_id":"finance","resource_visibility":"shared"}`)
+	rec := httptest.NewRecorder()
+	h.UpdateDataset(rec, req)
+	require.Equal(t, 200, rec.Code)
+	var got models.Dataset
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, "curated_orders", got.DisplayName)
+	assert.Equal(t, "/finance/curated", got.FolderPath)
+	assert.Equal(t, "/finance/curated/curated_orders", got.Path)
+	assert.Equal(t, "finance", got.ProjectID)
+	assert.Equal(t, "shared", got.ResourceVisibility)
+}
+
 func TestDeleteDatasetRequiresWriteScope(t *testing.T) {
 	t.Parallel()
 	owner := uuid.New()
@@ -190,6 +218,45 @@ func TestDeleteDatasetRequiresWriteScope(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.DeleteDataset(rec, req)
 	assert.Equal(t, 403, rec.Code)
+}
+
+func TestDeleteDatasetSoftDeletesAndRestoreBringsItBack(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	req := datasetReq("DELETE", store, owner, ``)
+	rec := httptest.NewRecorder()
+	h.DeleteDataset(rec, req)
+	require.Equal(t, 204, rec.Code)
+
+	deletedID := store.datasets[0].ID
+	_, err := store.ResolveDatasetID(context.Background(), deletedID.String())
+	require.ErrorIs(t, err, repo.ErrNotFound)
+	require.NotNil(t, store.datasets[0].DeletedAt)
+
+	restoreReq := httptest.NewRequest("POST", "/datasets/"+deletedID.String()+":restore", nil)
+	restoreReq = restoreReq.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner, Roles: []string{"admin"}}))
+	restoreReq = withRouteParam(restoreReq, "id", deletedID.String())
+	restoreRec := httptest.NewRecorder()
+	h.RestoreDataset(restoreRec, restoreReq)
+	require.Equal(t, 200, restoreRec.Code)
+	require.Nil(t, store.datasets[0].DeletedAt)
+}
+
+func TestHardDeleteDatasetPurgesRow(t *testing.T) {
+	t.Parallel()
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	target := store.datasets[0].ID.String()
+	req := httptest.NewRequest("DELETE", "/datasets/"+target+"?hard=true", nil)
+	req = req.WithContext(authmw.ContextWithClaims(context.Background(), &authmw.Claims{Sub: owner, Roles: []string{"admin"}}))
+	req = withRouteParam(req, "id", target)
+	rec := httptest.NewRecorder()
+	h.DeleteDataset(rec, req)
+	require.Equal(t, 204, rec.Code)
+	require.Empty(t, store.datasets)
 }
 
 func TestListDatasetsRequiresAuth(t *testing.T) {
@@ -225,6 +292,8 @@ type fakeStore struct {
 	fileIndex           map[uuid.UUID][]models.DatasetFileIndexEntry
 	stagedFiles         map[uuid.UUID][]models.StageTransactionFile
 	views               map[uuid.UUID][]models.DatasetView
+	viewBacking         map[uuid.UUID][]models.ViewBackingDataset
+	viewPrimaryKeys     map[uuid.UUID][]string
 	schemas             map[uuid.UUID]models.SchemaResponse
 	quality             map[uuid.UUID]*models.DatasetQualityResponse
 	health              map[string]*models.DatasetHealth
@@ -239,21 +308,36 @@ func newFakeStore(owner uuid.UUID) *fakeStore {
 	ds := models.Dataset{
 		ID: uuid.New(), Name: "sales", Description: "", Format: "parquet",
 		StoragePath: "s3://bucket/sales", OwnerID: owner, CurrentVersion: 1,
-		Tags: []string{}, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		Tags: []string{}, ActiveBranch: "main", Metadata: []byte(`{}`), HealthStatus: "unknown",
+		ParentFolderRID: "ri.openfoundry.main.folder.root", FolderPath: "/datasets",
+		ProjectID: "default", ProjectRID: "ri.openfoundry.main.project.default",
+		ResourceVisibility: "private", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	return &fakeStore{datasets: []models.Dataset{ds}, versions: map[uuid.UUID][]models.DatasetVersion{}, branches: map[uuid.UUID][]models.DatasetBranch{}, files: map[uuid.UUID][]models.DatasetFile{}, transactions: map[uuid.UUID]string{}, runtimeTransactions: map[uuid.UUID]models.RuntimeTransaction{}, markings: map[uuid.UUID][]models.EffectiveMarking{}, permissions: map[uuid.UUID][]models.DatasetPermissionEdge{}, lineageLinks: map[uuid.UUID][]models.DatasetLineageLink{}, fileIndex: map[uuid.UUID][]models.DatasetFileIndexEntry{}, stagedFiles: map[uuid.UUID][]models.StageTransactionFile{}, views: map[uuid.UUID][]models.DatasetView{}, schemas: map[uuid.UUID]models.SchemaResponse{}, quality: map[uuid.UUID]*models.DatasetQualityResponse{}, health: map[string]*models.DatasetHealth{}, lint: map[uuid.UUID]*models.DatasetLintSummary{}, fallbacks: map[uuid.UUID][]string{}}
+	ds.RID = "ri.foundry.main.dataset." + ds.ID.String()
+	ds.DisplayName = ds.Name
+	ds.Path = "/datasets/" + ds.Name
+	ds.Links = &models.DatasetLinks{Self: "/datasets/" + ds.ID.String(), Preview: "/datasets/" + ds.ID.String(), Lineage: "/lineage?dataset=" + ds.ID.String()}
+	return &fakeStore{datasets: []models.Dataset{ds}, versions: map[uuid.UUID][]models.DatasetVersion{}, branches: map[uuid.UUID][]models.DatasetBranch{}, files: map[uuid.UUID][]models.DatasetFile{}, transactions: map[uuid.UUID]string{}, runtimeTransactions: map[uuid.UUID]models.RuntimeTransaction{}, markings: map[uuid.UUID][]models.EffectiveMarking{}, permissions: map[uuid.UUID][]models.DatasetPermissionEdge{}, lineageLinks: map[uuid.UUID][]models.DatasetLineageLink{}, fileIndex: map[uuid.UUID][]models.DatasetFileIndexEntry{}, stagedFiles: map[uuid.UUID][]models.StageTransactionFile{}, views: map[uuid.UUID][]models.DatasetView{}, viewBacking: map[uuid.UUID][]models.ViewBackingDataset{}, viewPrimaryKeys: map[uuid.UUID][]string{}, schemas: map[uuid.UUID]models.SchemaResponse{}, quality: map[uuid.UUID]*models.DatasetQualityResponse{}, health: map[string]*models.DatasetHealth{}, lint: map[uuid.UUID]*models.DatasetLintSummary{}, fallbacks: map[uuid.UUID][]string{}}
 }
 
 func (f *fakeStore) ListDatasets(_ context.Context, ownerID *uuid.UUID, _ int) ([]models.Dataset, error) {
 	out := []models.Dataset{}
 	for _, d := range f.datasets {
-		if ownerID == nil || d.OwnerID == *ownerID {
+		if d.DeletedAt == nil && (ownerID == nil || d.OwnerID == *ownerID) {
 			out = append(out, d)
 		}
 	}
 	return out, nil
 }
 func (f *fakeStore) GetDataset(_ context.Context, id uuid.UUID) (*models.Dataset, error) {
+	for i := range f.datasets {
+		if f.datasets[i].ID == id && f.datasets[i].DeletedAt == nil {
+			return &f.datasets[i], nil
+		}
+	}
+	return nil, nil
+}
+func (f *fakeStore) GetDatasetIncludingDeleted(_ context.Context, id uuid.UUID) (*models.Dataset, error) {
 	for i := range f.datasets {
 		if f.datasets[i].ID == id {
 			return &f.datasets[i], nil
@@ -263,7 +347,7 @@ func (f *fakeStore) GetDataset(_ context.Context, id uuid.UUID) (*models.Dataset
 }
 func (f *fakeStore) GetDatasetForOwner(_ context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.Dataset, error) {
 	for i := range f.datasets {
-		if f.datasets[i].ID == id && f.datasets[i].OwnerID == ownerID {
+		if f.datasets[i].ID == id && f.datasets[i].OwnerID == ownerID && f.datasets[i].DeletedAt == nil {
 			return &f.datasets[i], nil
 		}
 	}
@@ -304,7 +388,7 @@ func (f *fakeStore) GetInternalDatasetMetadata(ctx context.Context, datasetID uu
 	if err != nil || d == nil {
 		return nil, err
 	}
-	out := &models.InternalDatasetMetadata{ID: d.ID, Name: d.Name, Format: d.Format, Markings: []uuid.UUID{}, Tags: d.Tags, CurrentVersion: d.CurrentVersion, ActiveBranch: "main", OwnerID: d.OwnerID, UpdatedAt: d.UpdatedAt}
+	out := &models.InternalDatasetMetadata{ID: d.ID, RID: d.RID, Name: d.Name, DisplayName: d.DisplayName, Format: d.Format, Markings: []uuid.UUID{}, Tags: d.Tags, CurrentVersion: d.CurrentVersion, ActiveBranch: "main", OwnerID: d.OwnerID, ParentFolderRID: d.ParentFolderRID, FolderPath: d.FolderPath, ProjectID: d.ProjectID, ProjectRID: d.ProjectRID, Path: d.Path, ResourceVisibility: d.ResourceVisibility, Links: d.Links, UpdatedAt: d.UpdatedAt}
 	for _, marking := range f.markings[datasetID] {
 		if marking.Source.Kind == "direct" {
 			out.Markings = append(out.Markings, marking.ID)
@@ -317,6 +401,10 @@ func (f *fakeStore) CreateDataset(_ context.Context, body *models.CreateDatasetR
 	id := uuid.New()
 	if body.ID != nil && *body.ID != uuid.Nil {
 		id = *body.ID
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" && body.DisplayName != nil {
+		name = strings.TrimSpace(*body.DisplayName)
 	}
 	format := "parquet"
 	if body.Format != nil && *body.Format != "" {
@@ -338,20 +426,37 @@ func (f *fakeStore) CreateDataset(_ context.Context, body *models.CreateDatasetR
 	if body.HealthStatus != nil && *body.HealthStatus != "" {
 		health = *body.HealthStatus
 	}
+	visibility := "private"
+	if body.ResourceVisibility != nil && *body.ResourceVisibility != "" {
+		visibility = *body.ResourceVisibility
+	}
+	folderPath := "/datasets"
+	if body.FolderPath != nil && strings.TrimSpace(*body.FolderPath) != "" {
+		folderPath = "/" + strings.Trim(strings.TrimSpace(*body.FolderPath), "/")
+	}
 	d := models.Dataset{
-		ID:             id,
-		Name:           strings.TrimSpace(body.Name),
-		Description:    description,
-		Format:         format,
-		StoragePath:    "bronze/" + id.String(),
-		OwnerID:        ownerID,
-		Tags:           tags,
-		CurrentVersion: 1,
-		ActiveBranch:   "main",
-		Metadata:       metadata,
-		HealthStatus:   health,
-		CreatedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
+		ID:                 id,
+		RID:                "ri.foundry.main.dataset." + id.String(),
+		Name:               name,
+		DisplayName:        name,
+		Description:        description,
+		Format:             format,
+		StoragePath:        "bronze/" + id.String(),
+		OwnerID:            ownerID,
+		Tags:               tags,
+		CurrentVersion:     1,
+		ActiveBranch:       "main",
+		Metadata:           metadata,
+		HealthStatus:       health,
+		ParentFolderRID:    "ri.openfoundry.main.folder.root",
+		FolderPath:         folderPath,
+		ProjectID:          "default",
+		ProjectRID:         "ri.openfoundry.main.project.default",
+		Path:               folderPath + "/" + name,
+		ResourceVisibility: visibility,
+		Links:              &models.DatasetLinks{Self: "/datasets/" + id.String(), Preview: "/datasets/" + id.String(), Lineage: "/lineage?dataset=" + id.String()},
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
 	}
 	f.datasets = append(f.datasets, d)
 	return &d, nil
@@ -364,6 +469,11 @@ func (f *fakeStore) UpdateDataset(_ context.Context, id uuid.UUID, body *models.
 		d := &f.datasets[i]
 		if body.Name != nil {
 			d.Name = *body.Name
+			d.DisplayName = *body.Name
+		}
+		if body.DisplayName != nil {
+			d.Name = *body.DisplayName
+			d.DisplayName = *body.DisplayName
 		}
 		if body.Description != nil {
 			d.Description = *body.Description
@@ -383,6 +493,28 @@ func (f *fakeStore) UpdateDataset(_ context.Context, id uuid.UUID, body *models.
 		if body.CurrentViewID != nil {
 			d.CurrentViewID = body.CurrentViewID
 		}
+		if body.ParentFolderRID != nil {
+			d.ParentFolderRID = *body.ParentFolderRID
+		}
+		if body.ParentFolderRid != nil {
+			d.ParentFolderRID = *body.ParentFolderRid
+		}
+		if body.FolderPath != nil {
+			d.FolderPath = "/" + strings.Trim(strings.TrimSpace(*body.FolderPath), "/")
+			d.Path = d.FolderPath + "/" + d.Name
+		}
+		if body.ProjectID != nil {
+			d.ProjectID = *body.ProjectID
+		}
+		if body.ProjectRID != nil {
+			d.ProjectRID = *body.ProjectRID
+		}
+		if body.Path != nil {
+			d.Path = *body.Path
+		}
+		if body.ResourceVisibility != nil {
+			d.ResourceVisibility = *body.ResourceVisibility
+		}
 		d.UpdatedAt = time.Now().UTC()
 		copy := *d
 		return &copy, nil
@@ -390,8 +522,35 @@ func (f *fakeStore) UpdateDataset(_ context.Context, id uuid.UUID, body *models.
 	return nil, nil
 }
 func (f *fakeStore) DeleteDataset(_ context.Context, id uuid.UUID) (bool, error) {
-	_, err := f.GetDataset(context.Background(), id)
-	return err == nil, err
+	for i := range f.datasets {
+		if f.datasets[i].ID == id && f.datasets[i].DeletedAt == nil {
+			now := time.Now().UTC()
+			f.datasets[i].DeletedAt = &now
+			f.datasets[i].UpdatedAt = now
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (f *fakeStore) RestoreDataset(_ context.Context, id uuid.UUID) (*models.Dataset, error) {
+	for i := range f.datasets {
+		if f.datasets[i].ID == id {
+			f.datasets[i].DeletedAt = nil
+			f.datasets[i].UpdatedAt = time.Now().UTC()
+			copy := f.datasets[i]
+			return &copy, nil
+		}
+	}
+	return nil, nil
+}
+func (f *fakeStore) HardDeleteDataset(_ context.Context, id uuid.UUID) (bool, error) {
+	for i := range f.datasets {
+		if f.datasets[i].ID == id {
+			f.datasets = append(f.datasets[:i], f.datasets[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
 }
 func (f *fakeStore) ListVersions(_ context.Context, datasetID uuid.UUID) ([]models.DatasetVersion, error) {
 	return f.versions[datasetID], nil
@@ -418,7 +577,11 @@ func (f *fakeStore) CreateVersion(_ context.Context, datasetID uuid.UUID, body *
 }
 func (f *fakeStore) EnsureDefaultBranch(_ context.Context, dataset *models.Dataset) error {
 	if len(f.branches[dataset.ID]) == 0 {
-		b := models.DatasetBranch{ID: uuid.New(), RID: "ri.foundry.main.branch." + uuid.NewString(), DatasetID: dataset.ID, DatasetRID: "ri.foundry.main.dataset." + dataset.ID.String(), Name: "main", Labels: []byte(`{}`), FallbackChain: []string{}, Version: dataset.CurrentVersion, BaseVersion: dataset.CurrentVersion, Description: "Default branch", IsDefault: true, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), LastActivityAt: time.Now().UTC()}
+		name := strings.TrimSpace(dataset.ActiveBranch)
+		if name == "" {
+			name = "main"
+		}
+		b := models.DatasetBranch{ID: uuid.New(), RID: "ri.foundry.main.branch." + uuid.NewString(), DatasetID: dataset.ID, DatasetRID: "ri.foundry.main.dataset." + dataset.ID.String(), Name: name, Labels: []byte(`{}`), FallbackChain: []string{}, Version: dataset.CurrentVersion, BaseVersion: dataset.CurrentVersion, Description: "Default branch", IsDefault: true, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), LastActivityAt: time.Now().UTC()}
 		f.branches[dataset.ID] = append(f.branches[dataset.ID], b)
 	}
 	return nil
@@ -483,6 +646,23 @@ func (f *fakeStore) GetTransactionStatus(_ context.Context, _ uuid.UUID, transac
 func (f *fakeStore) ResolveDatasetID(_ context.Context, raw string) (uuid.UUID, error) {
 	if id, err := uuid.Parse(raw); err == nil {
 		for _, d := range f.datasets {
+			if d.ID == id && d.DeletedAt == nil {
+				return id, nil
+			}
+		}
+		return uuid.Nil, repo.ErrNotFound
+	}
+	for _, d := range f.datasets {
+		if (raw == "ri.foundry.main.dataset."+d.ID.String() || raw == d.RID) && d.DeletedAt == nil {
+			return d.ID, nil
+		}
+	}
+	return uuid.Nil, repo.ErrNotFound
+}
+
+func (f *fakeStore) ResolveDatasetIDIncludingDeleted(_ context.Context, raw string) (uuid.UUID, error) {
+	if id, err := uuid.Parse(raw); err == nil {
+		for _, d := range f.datasets {
 			if d.ID == id {
 				return id, nil
 			}
@@ -490,7 +670,7 @@ func (f *fakeStore) ResolveDatasetID(_ context.Context, raw string) (uuid.UUID, 
 		return uuid.Nil, repo.ErrNotFound
 	}
 	for _, d := range f.datasets {
-		if raw == "ri.foundry.main.dataset."+d.ID.String() {
+		if raw == "ri.foundry.main.dataset."+d.ID.String() || raw == d.RID {
 			return d.ID, nil
 		}
 	}
@@ -499,7 +679,7 @@ func (f *fakeStore) ResolveDatasetID(_ context.Context, raw string) (uuid.UUID, 
 
 func (f *fakeStore) DatasetExists(_ context.Context, datasetID uuid.UUID) (bool, error) {
 	for _, d := range f.datasets {
-		if d.ID == datasetID {
+		if d.ID == datasetID && d.DeletedAt == nil {
 			return true, nil
 		}
 	}
@@ -515,7 +695,7 @@ func (f *fakeStore) GetCatalogDataset(_ context.Context, datasetID uuid.UUID) (*
 	if err != nil || d == nil {
 		return nil, err
 	}
-	return &models.CatalogDataset{ID: d.ID, Name: d.Name, Description: d.Description, Format: d.Format, StoragePath: d.StoragePath, SizeBytes: d.SizeBytes, RowCount: d.RowCount, OwnerID: d.OwnerID, Tags: d.Tags, CurrentVersion: d.CurrentVersion, ActiveBranch: "main", Metadata: []byte(`{}`), HealthStatus: "unknown", CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}, nil
+	return &models.CatalogDataset{ID: d.ID, RID: d.RID, Name: d.Name, DisplayName: d.DisplayName, Description: d.Description, Format: d.Format, StoragePath: d.StoragePath, SizeBytes: d.SizeBytes, RowCount: d.RowCount, OwnerID: d.OwnerID, Tags: d.Tags, CurrentVersion: d.CurrentVersion, ActiveBranch: "main", Metadata: []byte(`{}`), HealthStatus: "unknown", ParentFolderRID: d.ParentFolderRID, FolderPath: d.FolderPath, ProjectID: d.ProjectID, ProjectRID: d.ProjectRID, Path: d.Path, ResourceVisibility: d.ResourceVisibility, DeletedAt: d.DeletedAt, Links: d.Links, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}, nil
 }
 
 func (f *fakeStore) GetDatasetRichModel(ctx context.Context, datasetID uuid.UUID) (*models.DatasetRichModel, error) {
@@ -523,7 +703,7 @@ func (f *fakeStore) GetDatasetRichModel(ctx context.Context, datasetID uuid.UUID
 	if err != nil || cat == nil {
 		return nil, err
 	}
-	d := models.Dataset{ID: cat.ID, Name: cat.Name, Description: cat.Description, Format: cat.Format, StoragePath: cat.StoragePath, SizeBytes: cat.SizeBytes, RowCount: cat.RowCount, OwnerID: cat.OwnerID, Tags: cat.Tags, CurrentVersion: cat.CurrentVersion, CreatedAt: cat.CreatedAt, UpdatedAt: cat.UpdatedAt}
+	d := models.Dataset{ID: cat.ID, RID: cat.RID, Name: cat.Name, DisplayName: cat.DisplayName, Description: cat.Description, Format: cat.Format, StoragePath: cat.StoragePath, SizeBytes: cat.SizeBytes, RowCount: cat.RowCount, OwnerID: cat.OwnerID, Tags: cat.Tags, CurrentVersion: cat.CurrentVersion, ActiveBranch: cat.ActiveBranch, Metadata: cat.Metadata, HealthStatus: cat.HealthStatus, CurrentViewID: cat.CurrentViewID, ParentFolderRID: cat.ParentFolderRID, FolderPath: cat.FolderPath, ProjectID: cat.ProjectID, ProjectRID: cat.ProjectRID, Path: cat.Path, ResourceVisibility: cat.ResourceVisibility, DeletedAt: cat.DeletedAt, Links: cat.Links, CreatedAt: cat.CreatedAt, UpdatedAt: cat.UpdatedAt}
 	return &models.DatasetRichModel{Dataset: d, Files: f.fileIndex[datasetID], Branches: f.branches[datasetID], Versions: f.versions[datasetID], Health: models.DatasetHealthSummary{Status: cat.HealthStatus}, Markings: f.markings[datasetID], Permissions: f.permissions[datasetID], LineageLinks: f.lineageLinks[datasetID]}, nil
 }
 
@@ -532,6 +712,11 @@ func (f *fakeStore) PatchDatasetMetadata(_ context.Context, datasetID uuid.UUID,
 		if f.datasets[i].ID == datasetID {
 			if body.Name != nil {
 				f.datasets[i].Name = *body.Name
+				f.datasets[i].DisplayName = *body.Name
+			}
+			if body.DisplayName != nil {
+				f.datasets[i].Name = *body.DisplayName
+				f.datasets[i].DisplayName = *body.DisplayName
 			}
 			if body.Description != nil {
 				f.datasets[i].Description = *body.Description
@@ -541,6 +726,25 @@ func (f *fakeStore) PatchDatasetMetadata(_ context.Context, datasetID uuid.UUID,
 			}
 			if body.Tags != nil {
 				f.datasets[i].Tags = body.Tags
+			}
+			if body.ParentFolderRID != nil {
+				f.datasets[i].ParentFolderRID = *body.ParentFolderRID
+			}
+			if body.FolderPath != nil {
+				f.datasets[i].FolderPath = "/" + strings.Trim(strings.TrimSpace(*body.FolderPath), "/")
+				f.datasets[i].Path = f.datasets[i].FolderPath + "/" + f.datasets[i].Name
+			}
+			if body.ProjectID != nil {
+				f.datasets[i].ProjectID = *body.ProjectID
+			}
+			if body.ProjectRID != nil {
+				f.datasets[i].ProjectRID = *body.ProjectRID
+			}
+			if body.Path != nil {
+				f.datasets[i].Path = *body.Path
+			}
+			if body.ResourceVisibility != nil {
+				f.datasets[i].ResourceVisibility = *body.ResourceVisibility
 			}
 			return f.GetCatalogDataset(context.Background(), datasetID)
 		}
@@ -627,16 +831,44 @@ func (f *fakeStore) CreateRuntimeBranch(_ context.Context, datasetID uuid.UUID, 
 	if f.branchConflict {
 		return nil, repo.ErrConflict
 	}
+	for _, existing := range f.branches[datasetID] {
+		if existing.Name == strings.TrimSpace(body.Name) {
+			return nil, repo.ErrConflict
+		}
+	}
 	b := models.DatasetBranch{ID: uuid.New(), RID: "ri.foundry.main.branch." + uuid.NewString(), DatasetID: datasetID, DatasetRID: "ri.foundry.main.dataset." + datasetID.String(), Name: strings.TrimSpace(body.Name), Labels: []byte(`{}`), FallbackChain: body.FallbackChain, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), LastActivityAt: time.Now().UTC()}
+	if body.Source != nil && body.Source.FromTransactionRID != nil {
+		txnID, err := uuid.Parse(strings.TrimPrefix(strings.TrimSpace(*body.Source.FromTransactionRID), "ri.foundry.main.transaction."))
+		if err != nil {
+			return nil, repo.ErrValidation
+		}
+		tx, ok := f.runtimeTransactions[txnID]
+		if !ok || tx.DatasetID != datasetID {
+			return nil, repo.ErrNotFound
+		}
+		if tx.Status != models.TransactionStatusCommitted {
+			return nil, repo.ErrValidation
+		}
+		b.ParentBranchID = &tx.BranchID
+		b.HeadTransactionID = &txnID
+		b.CreatedFromTransactionID = &txnID
+		if len(b.FallbackChain) == 0 {
+			b.FallbackChain = []string{tx.BranchName}
+		}
+	}
 	if body.ParentBranch != nil {
 		for _, p := range f.branches[datasetID] {
 			if p.Name == *body.ParentBranch {
 				b.ParentBranchID = &p.ID
+				b.HeadTransactionID = p.HeadTransactionID
+				if len(b.FallbackChain) == 0 {
+					b.FallbackChain = []string{p.Name}
+				}
 			}
 		}
 	}
 	f.branches[datasetID] = append(f.branches[datasetID], b)
-	return &models.RuntimeBranch{ID: b.ID, RID: b.RID, DatasetID: b.DatasetID, DatasetRID: b.DatasetRID, Name: b.Name, ParentBranchID: b.ParentBranchID, Labels: b.Labels, FallbackChain: b.FallbackChain, CreatedAt: b.CreatedAt, UpdatedAt: b.UpdatedAt, LastActivityAt: b.LastActivityAt}, nil
+	return &models.RuntimeBranch{ID: b.ID, RID: b.RID, DatasetID: b.DatasetID, DatasetRID: b.DatasetRID, Name: b.Name, ParentBranchID: b.ParentBranchID, HeadTransactionID: b.HeadTransactionID, CreatedFromTransactionID: b.CreatedFromTransactionID, Labels: b.Labels, FallbackChain: b.FallbackChain, CreatedAt: b.CreatedAt, UpdatedAt: b.UpdatedAt, LastActivityAt: b.LastActivityAt}, nil
 }
 func (f *fakeStore) GetRuntimeBranch(_ context.Context, datasetID uuid.UUID, branch string) (*models.RuntimeBranch, error) {
 	for _, b := range f.branches[datasetID] {
@@ -654,11 +886,18 @@ func (f *fakeStore) PreviewDeleteBranch(_ context.Context, datasetID uuid.UUID, 
 	return &models.BranchDeletePreview{Branch: b.Name, BranchRID: b.RID, TransactionsPreserved: true, ChildrenToReparent: []models.BranchDeleteChildReparent{}}, nil
 }
 func (f *fakeStore) DeleteRuntimeBranch(_ context.Context, datasetID uuid.UUID, branch string) (*models.BranchDeleteResponse, error) {
-	b, err := f.GetRuntimeBranch(context.Background(), datasetID, branch)
-	if err != nil {
-		return nil, err
+	for i := range f.branches[datasetID] {
+		b := f.branches[datasetID][i]
+		if b.Name != branch {
+			continue
+		}
+		if b.ParentBranchID == nil || b.IsDefault {
+			return nil, repo.ErrPreconditionFailed
+		}
+		f.branches[datasetID] = append(f.branches[datasetID][:i], f.branches[datasetID][i+1:]...)
+		return &models.BranchDeleteResponse{Branch: b.Name, BranchRID: b.RID, Reparented: []models.BranchDeleteChildReparent{}}, nil
 	}
-	return &models.BranchDeleteResponse{Branch: b.Name, BranchRID: b.RID, Reparented: []models.BranchDeleteChildReparent{}}, nil
+	return nil, repo.ErrNotFound
 }
 func (f *fakeStore) ReparentRuntimeBranch(_ context.Context, datasetID uuid.UUID, branch string, newParent *string) (*models.RuntimeBranch, error) {
 	b, err := f.GetRuntimeBranch(context.Background(), datasetID, branch)
@@ -737,6 +976,11 @@ func (f *fakeStore) StartTransaction(_ context.Context, datasetID uuid.UUID, bra
 	}
 	f.runtimeTransactions[id] = tx
 	f.transactions[id] = string(tx.Status)
+	for datasetIdx := range f.branches[datasetID] {
+		if f.branches[datasetID][datasetIdx].ID == branchID {
+			f.branches[datasetID][datasetIdx].HeadTransactionID = &id
+		}
+	}
 	return &tx, nil
 }
 
@@ -800,6 +1044,95 @@ func (f *fakeStore) ListRuntimeTransactions(_ context.Context, datasetID uuid.UU
 	}
 	return out, nil
 }
+func (f *fakeStore) GetDatasetIncrementalReadiness(_ context.Context, datasetID uuid.UUID, branch string) (*models.DatasetIncrementalReadiness, error) {
+	dataset, err := f.GetDataset(context.Background(), datasetID)
+	if err != nil {
+		return nil, err
+	}
+	if dataset == nil {
+		return nil, repo.ErrNotFound
+	}
+	if strings.TrimSpace(branch) == "" {
+		branch = dataset.ActiveBranch
+	}
+	if strings.TrimSpace(branch) == "" {
+		branch = "main"
+	}
+	rows := []models.RuntimeTransaction{}
+	for _, tx := range f.runtimeTransactions {
+		if tx.DatasetID == datasetID && tx.BranchName == branch && tx.Status == models.TransactionStatusCommitted {
+			rows = append(rows, tx)
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		left := rows[i].StartedAt
+		if rows[i].CommittedAt != nil {
+			left = *rows[i].CommittedAt
+		}
+		right := rows[j].StartedAt
+		if rows[j].CommittedAt != nil {
+			right = *rows[j].CommittedAt
+		}
+		return left.Before(right)
+	})
+	counts := map[string]int{"SNAPSHOT": 0, "APPEND": 0, "UPDATE": 0, "DELETE": 0}
+	out := &models.DatasetIncrementalReadiness{DatasetID: datasetID, DatasetRID: dataset.RID, Branch: branch, Mode: models.IncrementalModeEmpty, Classification: models.IncrementalModeEmpty, TransactionCounts: counts, TotalCommitted: len(rows), ComputedAt: time.Now().UTC()}
+	if len(rows) == 0 {
+		out.Warnings = []models.IncrementalReadinessWarning{{Code: "no_committed_transactions", Severity: "info", Message: "No committed transactions exist on this branch yet, so incremental readiness cannot be established."}}
+		return out, nil
+	}
+	boundaries := make([]models.IncrementalTransactionBoundary, len(rows))
+	for i, tx := range rows {
+		b := models.IncrementalTransactionBoundary{Index: i, TransactionID: tx.ID, TransactionRID: models.TransactionRID(tx.ID), TxType: tx.TxType, StartedAt: tx.StartedAt, CommittedAt: tx.CommittedAt}
+		boundaries[i] = b
+		counts[string(tx.TxType)]++
+		if tx.TxType == models.TransactionTypeSnapshot {
+			if out.FirstSnapshot == nil {
+				copy := b
+				out.FirstSnapshot = &copy
+			}
+			copy := b
+			out.LatestSnapshot = &copy
+			out.CurrentViewStart = &copy
+		}
+		if tx.TxType == models.TransactionTypeUpdate || tx.TxType == models.TransactionTypeDelete {
+			rid := b.TransactionRID
+			id := tx.ID
+			code := "update_breaks_append_only"
+			if tx.TxType == models.TransactionTypeDelete {
+				code = "delete_breaks_append_only"
+			}
+			out.Warnings = append(out.Warnings, models.IncrementalReadinessWarning{Code: code, Severity: "warning", Message: string(tx.TxType) + " transactions break append-only incremental assumptions.", TransactionID: &id, TransactionRID: &rid})
+		}
+	}
+	if out.CurrentViewStart == nil {
+		out.CurrentViewStart = &boundaries[0]
+	}
+	out.CurrentViewEnd = &boundaries[len(boundaries)-1]
+	out.Mode = fakeIncrementalMode(counts)
+	out.Classification = out.Mode
+	out.AppendOnly = out.Mode == models.IncrementalModeAppendOnly
+	out.IncrementalReady = out.AppendOnly
+	out.ViewBoundaries = []models.IncrementalViewBoundary{{Start: *out.CurrentViewStart, End: *out.CurrentViewEnd, StartReason: "latest_snapshot_or_earliest", TransactionCount: len(rows), Counts: counts, AppendOnly: out.AppendOnly, HasUpdate: counts["UPDATE"] > 0, HasDelete: counts["DELETE"] > 0, HasSnapshot: counts["SNAPSHOT"] > 0}}
+	return out, nil
+}
+
+func fakeIncrementalMode(counts map[string]int) string {
+	switch {
+	case counts["UPDATE"] > 0 && counts["DELETE"] > 0:
+		return models.IncrementalModeMixed
+	case counts["UPDATE"] > 0:
+		return models.IncrementalModeUpdateBearing
+	case counts["DELETE"] > 0:
+		return models.IncrementalModeDeleteBearing
+	case counts["SNAPSHOT"] > 1 || (counts["SNAPSHOT"] == 1 && counts["APPEND"] == 0):
+		return models.IncrementalModeSnapshotBased
+	case counts["APPEND"] > 0:
+		return models.IncrementalModeAppendOnly
+	default:
+		return models.IncrementalModeEmpty
+	}
+}
 
 func (f *fakeStore) CommitTransaction(_ context.Context, datasetID uuid.UUID, txnID uuid.UUID) error {
 	tx, ok := f.runtimeTransactions[txnID]
@@ -814,6 +1147,11 @@ func (f *fakeStore) CommitTransaction(_ context.Context, datasetID uuid.UUID, tx
 	tx.CommittedAt = &now
 	f.runtimeTransactions[txnID] = tx
 	f.transactions[txnID] = string(tx.Status)
+	for i := range f.branches[datasetID] {
+		if f.branches[datasetID][i].ID == tx.BranchID {
+			f.branches[datasetID][i].HeadTransactionID = &txnID
+		}
+	}
 	return nil
 }
 
@@ -822,7 +1160,7 @@ func (f *fakeStore) AbortTransaction(_ context.Context, datasetID uuid.UUID, txn
 	if !ok || tx.DatasetID != datasetID {
 		return repo.ErrNotFound
 	}
-	if tx.Status != models.TransactionStatusOpen && tx.Status != models.TransactionStatusAborted {
+	if tx.Status != models.TransactionStatusOpen {
 		return repo.ErrInvalidTransition
 	}
 	now := time.Now().UTC()
@@ -830,6 +1168,27 @@ func (f *fakeStore) AbortTransaction(_ context.Context, datasetID uuid.UUID, txn
 	tx.AbortedAt = &now
 	f.runtimeTransactions[txnID] = tx
 	f.transactions[txnID] = string(tx.Status)
+	var latest *uuid.UUID
+	var latestAt time.Time
+	for _, candidate := range f.runtimeTransactions {
+		if candidate.DatasetID != datasetID || candidate.BranchID != tx.BranchID || candidate.Status == models.TransactionStatusAborted {
+			continue
+		}
+		when := candidate.StartedAt
+		if candidate.CommittedAt != nil {
+			when = *candidate.CommittedAt
+		}
+		if latest == nil || when.After(latestAt) {
+			id := candidate.ID
+			latest = &id
+			latestAt = when
+		}
+	}
+	for i := range f.branches[datasetID] {
+		if f.branches[datasetID][i].ID == tx.BranchID {
+			f.branches[datasetID][i].HeadTransactionID = latest
+		}
+	}
 	return nil
 }
 
@@ -837,12 +1196,32 @@ func (f *fakeStore) ListViews(_ context.Context, datasetID uuid.UUID) ([]models.
 	return f.views[datasetID], nil
 }
 func (f *fakeStore) CreateView(_ context.Context, datasetID uuid.UUID, body *models.CreateDatasetViewRequest) (*models.DatasetView, error) {
-	v := models.DatasetView{ID: uuid.New(), DatasetID: datasetID, Name: body.Name, Description: derefString(body.Description), SQLText: body.SQL, SourceBranch: body.SourceBranch, SourceVersion: body.SourceVersion, Format: "parquet", CurrentVersion: 1, SchemaFields: []byte(`[]`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	kind := models.DatasetViewKindMaterialized
+	if strings.EqualFold(body.Kind, models.DatasetViewKindLogical) || strings.EqualFold(body.Kind, "logical_view") || len(body.BackingDatasets) > 0 {
+		kind = models.DatasetViewKindLogical
+	}
+	v := models.DatasetView{ID: uuid.New(), DatasetID: datasetID, Name: body.Name, Description: derefString(body.Description), SQLText: body.SQL, Kind: kind, SourceBranch: body.SourceBranch, SourceVersion: body.SourceVersion, Format: "parquet", CurrentVersion: 1, SchemaFields: []byte(`[]`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if kind == models.DatasetViewKindLogical {
+		v.Materialized = false
+		v.RefreshOnSourceUpdate = true
+		v.AutoRebuild = true
+		v.TransformInputOnly = true
+		v.Format = "logical_view"
+	} else {
+		v.Materialized = true
+	}
 	if body.Materialized != nil {
 		v.Materialized = *body.Materialized
 	}
 	if body.RefreshOnSourceUpdate != nil {
 		v.RefreshOnSourceUpdate = *body.RefreshOnSourceUpdate
+	}
+	if body.AutoRebuild != nil {
+		v.AutoRebuild = *body.AutoRebuild
+	}
+	if len(body.PrimaryKey) > 0 {
+		v.PrimaryKey = append([]string(nil), body.PrimaryKey...)
+		f.viewPrimaryKeys[v.ID] = append([]string(nil), body.PrimaryKey...)
 	}
 	f.views[datasetID] = append(f.views[datasetID], v)
 	return &v, nil
@@ -874,10 +1253,30 @@ func (f *fakeStore) GetCurrentView(ctx context.Context, datasetID uuid.UUID, bra
 	if len(f.views[datasetID]) == 0 {
 		_, _ = f.CreateView(ctx, datasetID, &models.CreateDatasetViewRequest{Name: "current", SQL: "select *"})
 	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		for _, dataset := range f.datasets {
+			if dataset.ID == datasetID && strings.TrimSpace(dataset.ActiveBranch) != "" {
+				branch = strings.TrimSpace(dataset.ActiveBranch)
+				break
+			}
+		}
+	}
+	if branch == "" {
+		branch = "main"
+	}
 	v := f.views[datasetID][0]
-	return &models.ViewOut{ID: v.ID, DatasetID: datasetID, BranchID: uuid.New(), HeadTransactionID: uuid.New(), RequestedBranch: branch, ResolvedBranch: branch, FallbackChain: []string{}, ComputedAt: time.Now().UTC(), Files: []models.RuntimeViewFile{}}, nil
+	files := []models.RuntimeViewFile{}
+	for _, file := range f.files[datasetID] {
+		if file.DeletedAt != nil || file.Status == string(models.DatasetFileStatusDeleted) {
+			continue
+		}
+		txnID := file.TransactionID
+		files = append(files, models.RuntimeViewFile{LogicalPath: file.LogicalPath, PhysicalPath: file.PhysicalURI, SizeBytes: file.SizeBytes, IntroducedBy: &txnID})
+	}
+	return &models.ViewOut{ID: v.ID, DatasetID: datasetID, BranchID: uuid.New(), HeadTransactionID: uuid.New(), RequestedBranch: branch, ResolvedBranch: branch, FallbackChain: []string{}, ComputedAt: time.Now().UTC(), FileCount: int32(len(files)), Files: files}, nil
 }
-func (f *fakeStore) GetViewAt(ctx context.Context, datasetID uuid.UUID, branch string, _ *time.Time, _ *uuid.UUID) (*models.ViewOut, error) {
+func (f *fakeStore) GetViewAt(ctx context.Context, datasetID uuid.UUID, branch string, _ *time.Time, _ *uuid.UUID, _ *int32) (*models.ViewOut, error) {
 	return f.GetCurrentView(ctx, datasetID, branch)
 }
 func (f *fakeStore) CompareViews(ctx context.Context, datasetID uuid.UUID, baseBranch string, targetBranch string, _ *uuid.UUID, _ *uuid.UUID) (*models.CompareOut, error) {
@@ -891,8 +1290,147 @@ func (f *fakeStore) CompareViews(ctx context.Context, datasetID uuid.UUID, baseB
 	}
 	return &models.CompareOut{Base: *base, Target: *target, Files: models.FileDiff{Added: []models.RuntimeViewFile{}, Removed: []models.RuntimeViewFile{}, Modified: []models.FileChange{}}}, nil
 }
-func (f *fakeStore) ListViewFiles(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]models.RuntimeViewFile, error) {
+func (f *fakeStore) ListViewFiles(_ context.Context, _ uuid.UUID, viewID uuid.UUID) ([]models.RuntimeViewFile, error) {
+	if len(f.viewBacking[viewID]) > 0 {
+		return []models.RuntimeViewFile{}, nil
+	}
 	return []models.RuntimeViewFile{{LogicalPath: "part.parquet", PhysicalPath: "s3://x/part.parquet", SizeBytes: 42}}, nil
+}
+func (f *fakeStore) ListViewBackingDatasets(_ context.Context, datasetID uuid.UUID, viewID uuid.UUID) ([]models.ViewBackingDataset, error) {
+	for _, view := range f.views[datasetID] {
+		if view.ID == viewID {
+			return append([]models.ViewBackingDataset(nil), f.viewBacking[viewID]...), nil
+		}
+	}
+	return nil, repo.ErrNotFound
+}
+func (f *fakeStore) ReplaceViewBackingDatasets(_ context.Context, datasetID uuid.UUID, viewID uuid.UUID, backing []models.ViewBackingDatasetInput) ([]models.ViewBackingDataset, error) {
+	if _, err := f.GetDatasetView(context.Background(), datasetID, viewID.String()); err != nil {
+		return nil, err
+	}
+	out := []models.ViewBackingDataset{}
+	for i, input := range backing {
+		item, err := f.resolveBackingInput(input)
+		if err != nil {
+			return nil, err
+		}
+		item.Position = int32(i)
+		now := time.Now().UTC()
+		item.CreatedAt = &now
+		item.UpdatedAt = &now
+		out = append(out, item)
+	}
+	f.viewBacking[viewID] = out
+	f.markViewLogical(datasetID, viewID)
+	return append([]models.ViewBackingDataset(nil), out...), nil
+}
+func (f *fakeStore) AddViewBackingDatasets(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, backing []models.ViewBackingDatasetInput) ([]models.ViewBackingDataset, error) {
+	current, err := f.ListViewBackingDatasets(ctx, datasetID, viewID)
+	if err != nil {
+		return nil, err
+	}
+	for _, input := range backing {
+		item, err := f.resolveBackingInput(input)
+		if err != nil {
+			return nil, err
+		}
+		item.Position = int32(len(current))
+		now := time.Now().UTC()
+		item.CreatedAt = &now
+		item.UpdatedAt = &now
+		current = append(current, item)
+	}
+	f.viewBacking[viewID] = current
+	f.markViewLogical(datasetID, viewID)
+	return append([]models.ViewBackingDataset(nil), current...), nil
+}
+func (f *fakeStore) RemoveViewBackingDatasets(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, backing []models.ViewBackingDatasetInput) ([]models.ViewBackingDataset, error) {
+	current, err := f.ListViewBackingDatasets(ctx, datasetID, viewID)
+	if err != nil {
+		return nil, err
+	}
+	remove := map[string]bool{}
+	for _, input := range backing {
+		item, err := f.resolveBackingInput(input)
+		if err != nil {
+			return nil, err
+		}
+		remove[item.DatasetID.String()+"\x00"+item.Branch] = true
+		remove[item.DatasetID.String()+"\x00"] = true
+	}
+	out := []models.ViewBackingDataset{}
+	for _, item := range current {
+		if remove[item.DatasetID.String()+"\x00"+item.Branch] {
+			continue
+		}
+		item.Position = int32(len(out))
+		out = append(out, item)
+	}
+	f.viewBacking[viewID] = out
+	return append([]models.ViewBackingDataset(nil), out...), nil
+}
+func (f *fakeStore) PutViewPrimaryKey(_ context.Context, datasetID uuid.UUID, viewID uuid.UUID, primaryKey []string) ([]string, error) {
+	if _, err := f.GetDatasetView(context.Background(), datasetID, viewID.String()); err != nil {
+		return nil, err
+	}
+	out := append([]string(nil), primaryKey...)
+	f.viewPrimaryKeys[viewID] = out
+	for i := range f.views[datasetID] {
+		if f.views[datasetID][i].ID == viewID {
+			f.views[datasetID][i].PrimaryKey = out
+			if len(out) > 0 {
+				f.markViewLogical(datasetID, viewID)
+			}
+			break
+		}
+	}
+	return out, nil
+}
+func (f *fakeStore) GetViewPrimaryKey(_ context.Context, datasetID uuid.UUID, viewID uuid.UUID) ([]string, error) {
+	if _, err := f.GetDatasetView(context.Background(), datasetID, viewID.String()); err != nil {
+		return nil, err
+	}
+	return append([]string(nil), f.viewPrimaryKeys[viewID]...), nil
+}
+func (f *fakeStore) resolveBackingInput(input models.ViewBackingDatasetInput) (models.ViewBackingDataset, error) {
+	var id uuid.UUID
+	if input.DatasetID != nil {
+		id = *input.DatasetID
+	} else {
+		resolved, err := f.ResolveDatasetID(context.Background(), input.DatasetRID)
+		if err != nil {
+			return models.ViewBackingDataset{}, err
+		}
+		id = resolved
+	}
+	dataset, err := f.GetDataset(context.Background(), id)
+	if err != nil {
+		return models.ViewBackingDataset{}, err
+	}
+	if dataset == nil {
+		return models.ViewBackingDataset{}, repo.ErrNotFound
+	}
+	rid := input.DatasetRID
+	if strings.TrimSpace(rid) == "" {
+		rid = dataset.RID
+	}
+	alias := input.Alias
+	if strings.TrimSpace(alias) == "" {
+		alias = dataset.Name
+	}
+	return models.ViewBackingDataset{DatasetID: id, DatasetRID: rid, Branch: strings.TrimSpace(input.Branch), Alias: alias, SchemaVersionID: input.SchemaVersionID}, nil
+}
+func (f *fakeStore) markViewLogical(datasetID uuid.UUID, viewID uuid.UUID) {
+	for i := range f.views[datasetID] {
+		if f.views[datasetID][i].ID == viewID {
+			f.views[datasetID][i].Kind = models.DatasetViewKindLogical
+			f.views[datasetID][i].Materialized = false
+			f.views[datasetID][i].RefreshOnSourceUpdate = true
+			f.views[datasetID][i].AutoRebuild = true
+			f.views[datasetID][i].TransformInputOnly = true
+			f.views[datasetID][i].BackingDatasets = append([]models.ViewBackingDataset(nil), f.viewBacking[viewID]...)
+		}
+	}
 }
 func (f *fakeStore) GetViewSchema(_ context.Context, viewID uuid.UUID) (*models.SchemaResponse, error) {
 	if s, ok := f.schemas[viewID]; ok {
@@ -901,6 +1439,7 @@ func (f *fakeStore) GetViewSchema(_ context.Context, viewID uuid.UUID) (*models.
 	return nil, nil
 }
 func (f *fakeStore) PutViewSchema(_ context.Context, viewID uuid.UUID, datasetID uuid.UUID, branch *string, schema models.DatasetSchema, contentHash string) (*models.SchemaResponse, error) {
+	schema = models.NormalizeDatasetSchema(schema)
 	s := models.SchemaResponse{ViewID: viewID, DatasetID: datasetID, Branch: branch, Schema: schema, ContentHash: contentHash, CreatedAt: time.Now().UTC()}
 	if old, ok := f.schemas[viewID]; ok && old.ContentHash == contentHash {
 		s.Unchanged = true
@@ -918,6 +1457,76 @@ func (f *fakeStore) GetCurrentSchema(ctx context.Context, datasetID uuid.UUID, b
 		return &s, nil
 	}
 	return nil, nil
+}
+func (f *fakeStore) GetDatasetSchema(ctx context.Context, datasetID uuid.UUID, branch string, endTransactionID *uuid.UUID, versionID *string) (*models.FoundryDatasetSchemaResponse, error) {
+	if versionID != nil {
+		for _, schema := range f.schemas {
+			if schema.ContentHash == *versionID {
+				branchName := derefString(schema.Branch)
+				if branchName == "" {
+					branchName = branch
+				}
+				return &models.FoundryDatasetSchemaResponse{BranchName: branchName, EndTransactionRID: "ri.foundry.main.transaction." + uuid.Nil.String(), Schema: models.FoundrySchemaFromDatasetSchema(schema.Schema), VersionID: *versionID}, nil
+			}
+		}
+	}
+	view, err := f.GetCurrentView(ctx, datasetID, branch)
+	if err != nil {
+		return nil, err
+	}
+	if endTransactionID != nil {
+		view.HeadTransactionID = *endTransactionID
+	}
+	if s, ok := f.schemas[view.ID]; ok {
+		version := s.ContentHash
+		if version == "" {
+			version = uuid.NewString()
+		}
+		branchName := view.ResolvedBranch
+		return &models.FoundryDatasetSchemaResponse{BranchName: branchName, EndTransactionRID: "ri.foundry.main.transaction." + view.HeadTransactionID.String(), Schema: models.FoundrySchemaFromDatasetSchema(s.Schema), VersionID: version}, nil
+	}
+	for _, s := range f.schemas {
+		version := s.ContentHash
+		if version == "" {
+			version = uuid.NewString()
+		}
+		branchName := branch
+		if s.Branch != nil && *s.Branch != "" {
+			branchName = *s.Branch
+		}
+		return &models.FoundryDatasetSchemaResponse{BranchName: branchName, EndTransactionRID: "ri.foundry.main.transaction." + view.HeadTransactionID.String(), Schema: models.FoundrySchemaFromDatasetSchema(s.Schema), VersionID: version}, nil
+	}
+	return nil, repo.ErrNotFound
+}
+func (f *fakeStore) PutDatasetSchema(ctx context.Context, datasetID uuid.UUID, branch string, endTransactionID *uuid.UUID, dataframeReader string, schema models.DatasetSchema) (*models.FoundryDatasetSchemaResponse, error) {
+	view, err := f.GetCurrentView(ctx, datasetID, branch)
+	if err != nil {
+		return nil, err
+	}
+	if endTransactionID != nil {
+		view.HeadTransactionID = *endTransactionID
+	}
+	schema = models.NormalizeDatasetSchema(schema)
+	raw, _ := models.MarshalJSONValue(schema)
+	version := uuid.NewSHA1(uuid.NameSpaceURL, raw).String()
+	branchName := view.ResolvedBranch
+	s := models.SchemaResponse{ViewID: view.ID, DatasetID: datasetID, Branch: &branchName, Schema: schema, ContentHash: version, CreatedAt: time.Now().UTC()}
+	f.schemas[view.ID] = s
+	return &models.FoundryDatasetSchemaResponse{BranchName: branchName, EndTransactionRID: "ri.foundry.main.transaction." + view.HeadTransactionID.String(), Schema: models.FoundrySchemaFromDatasetSchema(schema), VersionID: version}, nil
+}
+func (f *fakeStore) ListDatasetSchemaHistory(_ context.Context, _ uuid.UUID, branch string, limit int) ([]models.SchemaEvolutionEntry, error) {
+	out := []models.SchemaEvolutionEntry{}
+	for _, s := range f.schemas {
+		branchName := branch
+		if s.Branch != nil && *s.Branch != "" {
+			branchName = *s.Branch
+		}
+		out = append(out, models.SchemaEvolutionEntry{ViewID: s.ViewID, BranchName: branchName, EndTransactionRID: "ri.foundry.main.transaction." + uuid.Nil.String(), VersionID: s.ContentHash, Schema: models.FoundrySchemaFromDatasetSchema(s.Schema), ContentHash: s.ContentHash, Changed: true, CreatedAt: s.CreatedAt})
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 func (f *fakeStore) PreviewData(_ context.Context, datasetID uuid.UUID, _ *uuid.UUID, q models.PreviewQuery) (*models.PreviewDataResponse, error) {
 	limit := 100
@@ -1137,9 +1746,13 @@ func TestListAndDownloadFiles(t *testing.T) {
 	store := newFakeStore(owner)
 	datasetID := store.datasets[0].ID
 	fileID := uuid.New()
+	txnID := uuid.New()
+	mediaType := "application/parquet"
+	sha := "abc123"
+	rowCount := int64(250)
 	store.files[datasetID] = []models.DatasetFile{{
-		ID: fileID, DatasetID: datasetID, TransactionID: uuid.New(), LogicalPath: "daily/part-000.parquet",
-		PhysicalURI: "local:///datasets/sales/daily/part-000.parquet", SizeBytes: 42,
+		ID: fileID, DatasetID: datasetID, TransactionID: txnID, TransactionRID: "ri.foundry.main.transaction." + txnID.String(), LogicalPath: "daily/part-000.parquet", Path: "daily/part-000.parquet",
+		PhysicalURI: "local:///datasets/sales/daily/part-000.parquet", SizeBytes: 42, MediaType: &mediaType, ContentType: &mediaType, SHA256: &sha, RowCountHint: &rowCount, StorageLocation: []byte(`{"uri":"local:///datasets/sales/daily/part-000.parquet"}`),
 		CreatedAt: time.Now().UTC(), ModifiedAt: time.Now().UTC(), Status: "active",
 	}}
 	fs := storageabstraction.NewLocalBackingFS("http://files.local", "", []byte("test-secret"))
@@ -1157,6 +1770,26 @@ func TestListAndDownloadFiles(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &listed))
 	require.Len(t, listed.Files, 1)
 	assert.Equal(t, "daily/part-000.parquet", listed.Files[0].LogicalPath)
+	assert.Equal(t, "daily/part-000.parquet", listed.Data[0].Path)
+	assert.Equal(t, "application/parquet", *listed.Files[0].MediaType)
+	assert.Equal(t, rowCount, *listed.Files[0].RowCountHint)
+
+	req = withRouteParam(datasetReq("GET", store, owner, ""), "file_id", fileID.String())
+	rec = httptest.NewRecorder()
+	h.GetFileMetadata(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var metadata models.DatasetFile
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &metadata))
+	assert.Equal(t, "daily/part-000.parquet", metadata.Path)
+	assert.Equal(t, "ri.foundry.main.transaction."+txnID.String(), metadata.TransactionRID)
+
+	req = datasetReq("GET", store, owner, "")
+	req.URL.RawQuery = "path=daily/part-000.parquet"
+	rec = httptest.NewRecorder()
+	h.GetFileMetadataByPath(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &metadata))
+	assert.Equal(t, fileID, metadata.ID)
 
 	req = withRouteParam(datasetReq("GET", store, owner, ""), "file_id", fileID.String())
 	rec = httptest.NewRecorder()
@@ -1169,6 +1802,13 @@ func TestListAndDownloadFiles(t *testing.T) {
 	assert.Equal(t, datasetID.String(), audits[0].DatasetRID)
 	assert.Equal(t, "daily/part-000.parquet", audits[0].Details["logical_path"])
 	assert.Equal(t, uint64(60), audits[0].Details["presign_ttl_seconds"])
+
+	req = datasetReq("GET", store, owner, "")
+	req.URL.RawQuery = "path=daily/part-000.parquet"
+	rec = httptest.NewRecorder()
+	h.DownloadFileContentByPath(rec, req)
+	require.Equal(t, http.StatusFound, rec.Code)
+	assert.Contains(t, rec.Header().Get("Location"), "http://files.local/v1/_internal/local-fs/datasets/sales/daily/part-000.parquet")
 }
 
 func TestDownloadDeletedFileReturnsGone(t *testing.T) {
@@ -1219,9 +1859,97 @@ func TestCreateFileUploadURL(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
 	assert.Equal(t, "PUT", out.Method)
 	assert.Equal(t, "local:///dataset-root/transactions/"+txnID.String()+"/incoming/file.csv", out.PhysicalURI)
+	assert.Equal(t, "incoming/file.csv", out.LogicalPath)
+	assert.Equal(t, "ri.foundry.main.transaction."+txnID.String(), out.TransactionRID)
 	require.Len(t, audits, 1)
 	assert.Equal(t, "files.upload_url", audits[0].Action)
-	assert.Equal(t, "transactions/"+txnID.String()+"/incoming/file.csv", audits[0].Details["logical_path"])
+	assert.Equal(t, "incoming/file.csv", audits[0].Details["logical_path"])
+	assert.Equal(t, "transactions/"+txnID.String()+"/incoming/file.csv", audits[0].Details["object_key"])
+}
+
+func TestUploadTransactionFileContentStagesBytesAndMetadata(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	datasetID := store.datasets[0].ID
+	branchID := uuid.New()
+	txnID := uuid.New()
+	store.runtimeTransactions[txnID] = models.RuntimeTransaction{
+		ID:         txnID,
+		DatasetID:  datasetID,
+		BranchID:   branchID,
+		BranchName: "main",
+		TxType:     models.TransactionTypeAppend,
+		Status:     models.TransactionStatusOpen,
+		Metadata:   []byte(`{}`),
+		Providence: []byte(`{}`),
+		StartedAt:  time.Now().UTC(),
+	}
+	store.transactions[txnID] = string(models.TransactionStatusOpen)
+	fs := storageabstraction.NewLocalBackingFS("http://files.local", "dataset-root", []byte("secret"))
+	fs.RootDir = t.TempDir()
+	audits := []handlers.AuditEvent{}
+	h := &handlers.Handlers{Repo: store, BackingFS: fs, AuditSink: func(_ context.Context, event handlers.AuditEvent) {
+		audits = append(audits, event)
+	}}
+
+	req := withRouteParam(datasetReq("POST", store, owner, "trail_id,distance\nmesa,4.8\nridge,6.1\n"), "txn", txnID.String())
+	req.Header.Set("Content-Type", "text/csv")
+	req.URL.RawQuery = "path=incoming/run.csv&row_count_hint=2&operation=REPLACE"
+	rec := httptest.NewRecorder()
+	h.UploadTransactionFileContent(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var out models.UploadDatasetFileContentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	require.Equal(t, "incoming/run.csv", out.Path)
+	require.Equal(t, "text/csv", out.MediaType)
+	require.NotEmpty(t, out.SHA256)
+	require.NotNil(t, out.RowCountHint)
+	require.EqualValues(t, 2, *out.RowCountHint)
+	require.Contains(t, out.PhysicalURI, "local:///dataset-root/transactions/"+txnID.String()+"/incoming/run.csv")
+	require.Len(t, store.stagedFiles[txnID], 1)
+	staged := store.stagedFiles[txnID][0]
+	require.Equal(t, "incoming/run.csv", staged.LogicalPath)
+	require.Equal(t, models.FileOperationReplace, staged.Operation)
+	require.Equal(t, out.PhysicalURI, staged.PhysicalURI)
+	require.Equal(t, "text/csv", *staged.MediaType)
+	require.Equal(t, out.SHA256, *staged.SHA256)
+	require.JSONEq(t, `{"uri":"`+out.PhysicalURI+`","fs_id":"local","base_directory":"dataset-root","relative_path":"transactions/`+txnID.String()+`/incoming/run.csv","logical_path":"incoming/run.csv"}`, string(staged.StorageLocation))
+	require.Len(t, audits, 1)
+	require.Equal(t, "files.upload", audits[0].Action)
+}
+
+func TestDeleteTransactionFileStagesRemove(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	datasetID := store.datasets[0].ID
+	txnID := uuid.New()
+	store.runtimeTransactions[txnID] = models.RuntimeTransaction{
+		ID:         txnID,
+		DatasetID:  datasetID,
+		BranchID:   uuid.New(),
+		BranchName: "main",
+		TxType:     models.TransactionTypeDelete,
+		Status:     models.TransactionStatusOpen,
+		Metadata:   []byte(`{}`),
+		Providence: []byte(`{}`),
+		StartedAt:  time.Now().UTC(),
+	}
+	store.transactions[txnID] = string(models.TransactionStatusOpen)
+	h := &handlers.Handlers{Repo: store}
+
+	req := withRouteParam(datasetReq("DELETE", store, owner, `{"path":"incoming/run.csv"}`), "txn", txnID.String())
+	rec := httptest.NewRecorder()
+	h.DeleteTransactionFile(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var out models.DeleteDatasetFileContentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	require.Equal(t, "incoming/run.csv", out.Path)
+	require.Equal(t, string(models.FileOperationRemove), out.Operation)
+	require.Len(t, store.stagedFiles[txnID], 1)
+	require.Equal(t, models.FileOperationRemove, store.stagedFiles[txnID][0].Operation)
+	require.Equal(t, "incoming/run.csv", store.stagedFiles[txnID][0].LogicalPath)
 }
 
 func TestCreateFileUploadURLRejectsClosedTransaction(t *testing.T) {
@@ -1234,7 +1962,7 @@ func TestCreateFileUploadURLRejectsClosedTransaction(t *testing.T) {
 	req := withRouteParam(datasetReq("POST", store, owner, `{"logical_path":"file.csv"}`), "txn", txnID.String())
 	rec := httptest.NewRecorder()
 	h.CreateFileUploadURL(rec, req)
-	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestCreateFileUploadURLRejectsUnsafeLogicalPath(t *testing.T) {
@@ -1477,6 +2205,74 @@ func TestAdvancedBranchLifecycleHandlers(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
+func TestFoundryBranchCRUDAndTransactionHistory(t *testing.T) {
+	owner := uuid.New()
+	claims := &authmw.Claims{Sub: owner, Roles: []string{"admin"}}
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	datasetID := store.datasets[0].ID
+	require.NoError(t, store.EnsureDefaultBranch(context.Background(), &store.datasets[0]))
+	mainBranch := store.branches[datasetID][0]
+
+	tx, err := store.StartTransaction(context.Background(), datasetID, mainBranch.ID, mainBranch.Name, models.TransactionTypeAppend, "seed", nil, owner)
+	require.NoError(t, err)
+	require.NoError(t, store.CommitTransaction(context.Background(), datasetID, tx.ID))
+	txRID := models.TransactionRID(tx.ID)
+
+	req := catalogReq(http.MethodPost, store, claims, `{"name":"feature","transactionRid":"`+txRID+`"}`)
+	rec := httptest.NewRecorder()
+	h.CreateFoundryBranch(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var created models.FoundryBranch
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	require.Equal(t, "feature", created.Name)
+	require.NotNil(t, created.TransactionRID)
+	require.Equal(t, txRID, *created.TransactionRID)
+
+	req = catalogReq(http.MethodGet, store, claims, "")
+	rec = httptest.NewRecorder()
+	h.ListFoundryBranches(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var listed models.FoundryListBranchesResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &listed))
+	require.Len(t, listed.Data, 2)
+
+	req = withRouteParam(catalogReq(http.MethodGet, store, claims, ""), "branch", "feature")
+	rec = httptest.NewRecorder()
+	h.GetFoundryBranch(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got models.FoundryBranch
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, txRID, *got.TransactionRID)
+
+	req = withRouteParam(catalogReq(http.MethodGet, store, claims, ""), "branch", "main")
+	rec = httptest.NewRecorder()
+	h.ListFoundryBranchTransactions(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var history models.FoundryListTransactionsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &history))
+	require.Len(t, history.Data, 1)
+	require.Equal(t, models.TransactionStatusCommitted, history.Data[0].Status)
+
+	req = withRouteParam(catalogReq(http.MethodDelete, store, claims, ""), "branch", "feature")
+	rec = httptest.NewRecorder()
+	h.DeleteFoundryBranch(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestFoundryDeleteProtectedDefaultBranchRejected(t *testing.T) {
+	owner := uuid.New()
+	claims := &authmw.Claims{Sub: owner, Roles: []string{"admin"}}
+	store := newFakeStore(owner)
+	require.NoError(t, store.EnsureDefaultBranch(context.Background(), &store.datasets[0]))
+	h := &handlers.Handlers{Repo: store}
+
+	req := withRouteParam(catalogReq(http.MethodDelete, store, claims, ""), "branch", "main")
+	rec := httptest.NewRecorder()
+	h.DeleteFoundryBranch(rec, req)
+	require.Equal(t, http.StatusPreconditionFailed, rec.Code)
+}
+
 func TestAdvancedBranchRetentionCompareFallbacksAndValidation(t *testing.T) {
 	owner := uuid.New()
 	store := newFakeStore(owner)
@@ -1585,6 +2381,119 @@ func TestViewsSchemaPreviewHandlers(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
+func TestLogicalViewCreateBackingsAndUnionPreview(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	baseDatasetID := store.datasets[0].ID
+	second := store.datasets[0]
+	second.ID = uuid.New()
+	second.Name = "sales_eu"
+	second.DisplayName = second.Name
+	second.RID = "ri.foundry.main.dataset." + second.ID.String()
+	second.StoragePath = "s3://bucket/sales_eu"
+	second.Path = "/datasets/" + second.Name
+	store.datasets = append(store.datasets, second)
+
+	fs := storageabstraction.NewLocalBackingFS("http://files.local", "", []byte("secret"))
+	fs.RootDir = t.TempDir()
+	objectKeyUS := "datasets/" + baseDatasetID.String() + "/daily/us.csv"
+	objectKeyEU := "datasets/" + second.ID.String() + "/daily/eu.csv"
+	require.NoError(t, fs.WriteLocalObject(objectKeyUS, []byte("id,name\n1,Ada\n2,Ben\n")))
+	require.NoError(t, fs.WriteLocalObject(objectKeyEU, []byte("id,name\n2,Benoit\n3,Cora\n")))
+	media := "text/csv"
+	store.files[baseDatasetID] = []models.DatasetFile{{
+		ID:            uuid.New(),
+		DatasetID:     baseDatasetID,
+		TransactionID: uuid.New(),
+		LogicalPath:   "daily/us.csv",
+		PhysicalURI:   "local:///" + objectKeyUS,
+		SizeBytes:     20,
+		MediaType:     &media,
+		Status:        string(models.DatasetFileStatusActive),
+		CreatedAt:     time.Now().UTC(),
+		ModifiedAt:    time.Now().UTC(),
+		UpdatedTime:   time.Now().UTC(),
+	}}
+	store.files[second.ID] = []models.DatasetFile{{
+		ID:            uuid.New(),
+		DatasetID:     second.ID,
+		TransactionID: uuid.New(),
+		LogicalPath:   "daily/eu.csv",
+		PhysicalURI:   "local:///" + objectKeyEU,
+		SizeBytes:     24,
+		MediaType:     &media,
+		Status:        string(models.DatasetFileStatusActive),
+		CreatedAt:     time.Now().UTC(),
+		ModifiedAt:    time.Now().UTC(),
+		UpdatedTime:   time.Now().UTC(),
+	}}
+
+	h := &handlers.Handlers{Repo: store, BackingFS: fs}
+	claims := &authmw.Claims{Sub: owner, Permissions: []string{"dataset.write"}}
+	body := `{
+		"name": "global_sales",
+		"kind": "logical",
+		"backing_datasets": [
+			{"dataset_rid": "` + store.datasets[0].RID + `", "branch": "main", "alias": "us"},
+			{"dataset_rid": "` + second.RID + `", "branch": "main", "alias": "eu"}
+		],
+		"primary_key": ["id"],
+		"schema": {
+			"file_format": "TEXT",
+			"fields": [
+				{"name": "id", "type": "LONG", "nullable": false},
+				{"name": "name", "type": "STRING", "nullable": false}
+			],
+			"custom_metadata": {"csv": {"delimiter": ",", "quote": "\"", "escape": "\\", "header": true, "nullValue": "", "charset": "UTF-8", "encoding": "UTF-8", "parseErrorBehavior": "NULL"}}
+		}
+	}`
+	req := catalogReq(http.MethodPost, store, claims, body)
+	rec := httptest.NewRecorder()
+	h.CreateView(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var view models.DatasetView
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &view))
+	require.Equal(t, models.DatasetViewKindLogical, view.Kind)
+	require.False(t, view.Materialized)
+	require.True(t, view.TransformInputOnly)
+	require.Equal(t, []string{"id"}, view.PrimaryKey)
+	require.Len(t, view.BackingDatasets, 2)
+
+	req = catalogReq(http.MethodGet, store, claims, "")
+	req = withRouteParam(req, "view_id", view.ID.String())
+	rec = httptest.NewRecorder()
+	h.ListViewBackingDatasets(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var backing models.ViewBackingDatasetsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &backing))
+	require.Len(t, backing.Data, 2)
+	require.Equal(t, []string{"id"}, backing.PrimaryKey)
+
+	req = catalogReq(http.MethodGet, store, claims, "")
+	req = withRouteParam(req, "view_id", view.ID.String())
+	req.URL.RawQuery = "sort=id&limit=10"
+	rec = httptest.NewRecorder()
+	h.PreviewMaterializedView(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var preview models.PreviewDataResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &preview))
+	require.Equal(t, 3, preview.TotalRows)
+	require.Len(t, preview.Rows, 3)
+	var secondName string
+	require.NoError(t, json.Unmarshal(preview.Rows[1][1], &secondName))
+	require.Equal(t, "Benoit", secondName)
+	require.Contains(t, strings.Join(preview.Warnings, " "), "does not read stored view files")
+
+	req = catalogReq(http.MethodGet, store, claims, "")
+	req = withRouteParam(req, "view_id", view.ID.String())
+	rec = httptest.NewRecorder()
+	h.ListViewFiles(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var files []models.RuntimeViewFile
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &files))
+	require.Empty(t, files)
+}
+
 func TestPreviewCurrentSchemaAndValidateHandlers(t *testing.T) {
 	owner := uuid.New()
 	store := newFakeStore(owner)
@@ -1623,6 +2532,272 @@ func TestPreviewCurrentSchemaAndValidateHandlers(t *testing.T) {
 	var validation models.ValidateResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &validation))
 	require.False(t, validation.Conforms)
+}
+
+func TestFoundryDatasetSchemaHandlersSupportVersionedComplexSchemas(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	claims := &authmw.Claims{Sub: owner, Permissions: []string{"dataset.write"}}
+	txnID := uuid.New()
+	txnRID := "ri.foundry.main.transaction." + txnID.String()
+	rid := store.datasets[0].RID
+
+	putBody := `{
+		"branchName": "main",
+		"dataframeReader": "PARQUET",
+		"endTransactionRid": "` + txnRID + `",
+		"schema": {
+			"fieldSchemaList": [
+				{"name": "id", "type": "STRING", "nullable": false, "customMetadata": {"primaryKey": true}},
+				{"name": "amount", "type": "DECIMAL", "precision": 10, "scale": 2, "nullable": true},
+				{"name": "tags", "type": "ARRAY", "arraySubtype": {"type": "STRING", "nullable": true}, "nullable": true},
+				{"name": "attributes", "type": "MAP", "mapKeyType": {"type": "STRING", "nullable": false}, "mapValueType": {"type": "STRING", "nullable": true}, "nullable": true},
+				{"name": "payload", "type": "BINARY", "nullable": true},
+				{"name": "event_date", "type": "DATE", "nullable": true},
+				{"name": "event_ts", "type": "TIMESTAMP", "nullable": true},
+				{"name": "details", "type": "STRUCT", "subSchemas": [{"name": "country", "type": "STRING", "nullable": true}], "nullable": true}
+			]
+		}
+	}`
+	req := catalogReq(http.MethodPut, store, claims, putBody)
+	rec := httptest.NewRecorder()
+	h.PutFoundryDatasetSchema(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var written models.FoundryDatasetSchemaResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &written))
+	require.Equal(t, "main", written.BranchName)
+	require.Equal(t, txnRID, written.EndTransactionRID)
+	require.NotEmpty(t, written.VersionID)
+	require.Len(t, written.Schema.FieldSchemaList, 8)
+	require.Equal(t, models.FieldTypeStruct, written.Schema.FieldSchemaList[7].Type)
+
+	req = catalogReq(http.MethodGet, store, claims, "")
+	req.URL.RawQuery = "branchName=main&endTransactionRid=" + txnRID
+	rec = httptest.NewRecorder()
+	h.GetFoundryDatasetSchema(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var fetched models.FoundryDatasetSchemaResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &fetched))
+	require.Equal(t, written.VersionID, fetched.VersionID)
+	require.Equal(t, txnRID, fetched.EndTransactionRID)
+	require.Equal(t, "id", fetched.Schema.FieldSchemaList[0].Name)
+	require.JSONEq(t, `{"primaryKey":true}`, string(fetched.Schema.FieldSchemaList[0].CustomMetadata))
+	wireSchema, err := json.Marshal(fetched.Schema)
+	require.NoError(t, err)
+	require.Contains(t, string(wireSchema), "arraySubtype")
+	require.NotContains(t, string(wireSchema), "arraySubType")
+
+	req = catalogReq(http.MethodGet, store, claims, "")
+	rec = httptest.NewRecorder()
+	h.GetFoundryDatasetSchema(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var defaultBranchSchema models.FoundryDatasetSchemaResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &defaultBranchSchema))
+	require.Equal(t, "main", defaultBranchSchema.BranchName)
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v2/datasets/getSchemaBatch", strings.NewReader(`[{"datasetRid":"`+rid+`","branchName":"main","versionId":"`+written.VersionID+`"}]`))
+	req = req.WithContext(authmw.ContextWithClaims(context.Background(), claims))
+	rec = httptest.NewRecorder()
+	h.GetFoundryDatasetSchemaBatch(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var batch models.GetSchemaDatasetsBatchResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &batch))
+	require.Contains(t, batch.Data, rid)
+	require.Equal(t, written.VersionID, batch.Data[rid].VersionID)
+
+	req = catalogReq(http.MethodGet, store, claims, "")
+	req.URL.RawQuery = "branchName=main&limit=10"
+	rec = httptest.NewRecorder()
+	h.ListDatasetSchemaHistory(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var history models.Page[models.SchemaEvolutionEntry]
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &history))
+	require.NotEmpty(t, history.Data)
+	require.Equal(t, written.VersionID, history.Data[0].VersionID)
+	require.True(t, history.Data[0].Changed)
+
+	invalidBody := `{"branchName":"main","schema":{"fieldSchemaList":[{"name":"bad_array","type":"ARRAY","nullable":true}]}}`
+	req = catalogReq(http.MethodPut, store, claims, invalidBody)
+	rec = httptest.NewRecorder()
+	h.PutFoundryDatasetSchema(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestInferDatasetSchemaSamplesCsvAndAppliesParserMetadata(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	datasetID := store.datasets[0].ID
+	fs := storageabstraction.NewLocalBackingFS("http://files.local", "", []byte("secret"))
+	fs.RootDir = t.TempDir()
+	objectKey := "datasets/" + datasetID.String() + "/daily/sales.csv"
+	require.NoError(t, fs.WriteLocalObject(objectKey, []byte("id,amount,active,day\n1,12.50,true,2026-05-01\n2,,false,2026-05-02\n")))
+	media := "text/csv"
+	store.files[datasetID] = []models.DatasetFile{{
+		ID:            uuid.New(),
+		DatasetID:     datasetID,
+		TransactionID: uuid.New(),
+		LogicalPath:   "daily/sales.csv",
+		PhysicalURI:   "local:///" + objectKey,
+		SizeBytes:     72,
+		MediaType:     &media,
+		Status:        string(models.DatasetFileStatusActive),
+		CreatedAt:     time.Now().UTC(),
+		ModifiedAt:    time.Now().UTC(),
+		UpdatedTime:   time.Now().UTC(),
+	}}
+	h := &handlers.Handlers{Repo: store, BackingFS: fs}
+	claims := &authmw.Claims{Sub: owner, Permissions: []string{"dataset.write"}}
+	body := `{
+		"branchName": "main",
+		"format": "CSV",
+		"paths": ["daily/sales.csv"],
+		"apply": true,
+		"parserOptions": {
+			"delimiter": ",",
+			"quote": "\"",
+			"escape": "\\",
+			"header": true,
+			"nullValue": "",
+			"encoding": "UTF-8",
+			"skipLines": 0,
+			"jaggedRowBehavior": "FILL_NULLS",
+			"parseErrorBehavior": "NULL",
+			"filePathColumn": true,
+			"importedAtColumn": true,
+			"rowNumberColumn": true,
+			"dynamicTyping": true
+		}
+	}`
+	req := catalogReq(http.MethodPost, store, claims, body)
+	rec := httptest.NewRecorder()
+	h.InferDatasetSchema(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var out models.InferDatasetSchemaResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	require.Equal(t, "main", out.BranchName)
+	require.NotNil(t, out.Applied)
+	require.Equal(t, 2, out.SampleRows)
+	require.Len(t, out.DatasetSchema.Fields, 7)
+	require.Equal(t, "id", out.DatasetSchema.Fields[0].Name)
+	require.Equal(t, models.FieldTypeLong, out.DatasetSchema.Fields[0].Type)
+	require.Equal(t, models.FieldTypeDouble, out.DatasetSchema.Fields[1].Type)
+	require.Equal(t, models.FieldTypeBoolean, out.DatasetSchema.Fields[2].Type)
+	require.Equal(t, models.FieldTypeDate, out.DatasetSchema.Fields[3].Type)
+	require.Equal(t, "__file_path", out.DatasetSchema.Fields[4].Name)
+	require.NotNil(t, out.DatasetSchema.CustomMetadata)
+	require.NotNil(t, out.DatasetSchema.CustomMetadata.CSV)
+	require.Equal(t, "FILL_NULLS", out.DatasetSchema.CustomMetadata.CSV.JaggedRowBehavior)
+	require.True(t, out.DatasetSchema.CustomMetadata.CSV.RowNumberColumn)
+	require.NotEmpty(t, out.Warnings)
+}
+
+func TestInferDatasetSchemaSupportsInlineJSONSamples(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	claims := &authmw.Claims{Sub: owner, Permissions: []string{"dataset.write"}}
+	body := `{
+		"branchName": "main",
+		"format": "JSON",
+		"samples": [
+			{"id": "a1", "score": 3.5, "tags": ["vip"], "payload": {"country": "US"}},
+			{"id": "a2", "score": 4, "tags": ["trial"], "payload": {"country": "ES"}}
+		],
+		"parserOptions": {"header": true, "dynamicTyping": true, "rowNumberColumn": true}
+	}`
+	req := catalogReq(http.MethodPost, store, claims, body)
+	rec := httptest.NewRecorder()
+	h.InferDatasetSchema(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var out models.InferDatasetSchemaResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	require.Equal(t, 2, out.SampleRows)
+	require.Len(t, out.DatasetSchema.Fields, 5)
+	fieldTypes := map[string]models.SchemaFieldType{}
+	for _, field := range out.DatasetSchema.Fields {
+		fieldTypes[field.Name] = field.Type
+	}
+	require.Equal(t, models.FieldTypeString, fieldTypes["id"])
+	require.Equal(t, models.FieldTypeDouble, fieldTypes["score"])
+	require.Equal(t, models.FieldTypeArray, fieldTypes["tags"])
+	require.Equal(t, models.FieldTypeStruct, fieldTypes["payload"])
+	require.Equal(t, models.FieldTypeLong, fieldTypes["__row_number"])
+}
+
+func TestPreviewDatasetReadsTableRowsWithSchemaControlsAndParseErrors(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	datasetID := store.datasets[0].ID
+	fs := storageabstraction.NewLocalBackingFS("http://files.local", "", []byte("secret"))
+	fs.RootDir = t.TempDir()
+	objectKey := "datasets/" + datasetID.String() + "/daily/sales.csv"
+	require.NoError(t, fs.WriteLocalObject(objectKey, []byte("id,amount,active,day\n1,10.5,true,2026-05-01\n2,oops,true,2026-05-02\n3,30.25,true,2026-05-03\n4,5,false,2026-05-04\n")))
+	media := "text/csv"
+	store.files[datasetID] = []models.DatasetFile{{
+		ID:            uuid.New(),
+		DatasetID:     datasetID,
+		TransactionID: uuid.New(),
+		LogicalPath:   "daily/sales.csv",
+		PhysicalURI:   "local:///" + objectKey,
+		SizeBytes:     128,
+		MediaType:     &media,
+		Status:        string(models.DatasetFileStatusActive),
+		CreatedAt:     time.Now().UTC(),
+		ModifiedAt:    time.Now().UTC(),
+		UpdatedTime:   time.Now().UTC(),
+	}}
+	csvOptions := &models.CsvOptions{Delimiter: ",", Quote: "\"", Escape: "\\", Header: true, NullValue: "", Charset: "UTF-8", Encoding: "UTF-8", DynamicTyping: true}
+	_, err := store.PutDatasetSchema(context.Background(), datasetID, "main", nil, "TEXT", models.DatasetSchema{
+		FileFormat:     models.FileFormatText,
+		CustomMetadata: &models.CustomMetadata{CSV: csvOptions},
+		Fields: []models.Field{
+			{Name: "id", Type: models.FieldTypeLong, Nullable: false},
+			{Name: "amount", Type: models.FieldTypeDouble, Nullable: true},
+			{Name: "active", Type: models.FieldTypeBoolean, Nullable: false},
+			{Name: "day", Type: models.FieldTypeDate, Nullable: false},
+		},
+	})
+	require.NoError(t, err)
+	h := &handlers.Handlers{Repo: store, BackingFS: fs}
+	claims := &authmw.Claims{Sub: owner, Permissions: []string{"dataset.write"}}
+
+	req := catalogReq(http.MethodGet, store, claims, "")
+	req.URL.RawQuery = "columns=id,amount&filter=active=true&sort=-amount&limit=2"
+	rec := httptest.NewRecorder()
+	h.PreviewDataset(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var preview models.PreviewDataResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &preview))
+	require.Equal(t, []string{"id", "amount"}, preview.Columns)
+	require.Equal(t, 3, preview.TotalRows)
+	require.Len(t, preview.Rows, 2)
+	var firstID int64
+	require.NoError(t, json.Unmarshal(preview.Rows[0][0], &firstID))
+	require.Equal(t, int64(3), firstID)
+	require.NotEmpty(t, preview.ParseErrors)
+	require.Equal(t, "daily/sales.csv", preview.ParseErrors[0].FilePath)
+	require.Equal(t, "amount", preview.ParseErrors[0].Field)
+	require.Equal(t, "TYPE_MISMATCH", preview.ParseErrors[0].Kind)
+
+	req = catalogReq(http.MethodGet, store, claims, "")
+	req.URL.RawQuery = "sample=true&sample_size=1&sample_seed=7"
+	rec = httptest.NewRecorder()
+	h.PreviewDataset(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &preview))
+	require.True(t, preview.Sampled)
+	require.Len(t, preview.Rows, 1)
+
+	req = catalogReq(http.MethodGet, store, claims, "")
+	req.URL.RawQuery = "format=CSV&columns=id,amount&rowLimit=1&branchName=main"
+	rec = httptest.NewRecorder()
+	h.ReadTableDataset(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Header().Get("Content-Type"), "text/csv")
+	require.Equal(t, "id,amount\n1,10.5\n", rec.Body.String())
 }
 
 func TestCommitDatasetOutputCreatesTransactionSchemaFilesLineageAndPreview(t *testing.T) {
@@ -1953,10 +3128,13 @@ func TestTransactionHandlersLifecycleAndBatch(t *testing.T) {
 	store.branches[datasetID] = []models.DatasetBranch{{ID: uuid.New(), DatasetID: datasetID, Name: "master", Labels: []byte(`{}`), FallbackChain: []string{}, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), LastActivityAt: time.Now().UTC()}}
 	h := &handlers.Handlers{Repo: store}
 
-	startBody := `{"type":"APPEND","summary":"load","providence":{"source":"test"}}`
+	startBody := `{"transactionType":"APPEND","summary":"load","providence":{"source":"test"}}`
 	rec := httptest.NewRecorder()
 	h.StartTransaction(rec, transactionReq(http.MethodPost, store, owner, "master", nil, startBody))
 	require.Equal(t, http.StatusCreated, rec.Code)
+	require.Contains(t, rec.Body.String(), `"rid":"ri.foundry.main.transaction.`)
+	require.Contains(t, rec.Body.String(), `"transactionType":"APPEND"`)
+	require.Contains(t, rec.Body.String(), `"createdTime":`)
 	var opened models.RuntimeTransaction
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&opened))
 	require.Equal(t, models.TransactionStatusOpen, opened.Status)
@@ -1969,9 +3147,11 @@ func TestTransactionHandlersLifecycleAndBatch(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.CommitTransaction(rec, transactionReq(http.MethodPost, store, owner, "master", &opened.ID, ""))
 	require.Equal(t, http.StatusOK, rec.Code)
+	committedBody := rec.Body.String()
 	var committed models.RuntimeTransaction
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&committed))
 	require.Equal(t, models.TransactionStatusCommitted, committed.Status)
+	require.Contains(t, committedBody, `"closedTime":`)
 
 	batchBody := `{"ids":["` + opened.ID.String() + `","not-a-uuid","` + uuid.NewString() + `"]}`
 	rec = httptest.NewRecorder()
@@ -1995,6 +3175,59 @@ func TestListTransactionsBeforeValidation(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestIncrementalReadinessWarnsForUpdateDeleteAndShowsBoundaries(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	datasetID := store.datasets[0].ID
+	branchID := uuid.New()
+	start := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	types := []models.TransactionType{
+		models.TransactionTypeSnapshot,
+		models.TransactionTypeAppend,
+		models.TransactionTypeUpdate,
+		models.TransactionTypeDelete,
+	}
+	for i, txType := range types {
+		id := uuid.New()
+		started := start.Add(time.Duration(i) * time.Minute)
+		committed := started.Add(time.Second)
+		store.runtimeTransactions[id] = models.RuntimeTransaction{
+			ID:          id,
+			DatasetID:   datasetID,
+			BranchID:    branchID,
+			BranchName:  "master",
+			TxType:      txType,
+			Status:      models.TransactionStatusCommitted,
+			Summary:     string(txType),
+			Metadata:    []byte(`{}`),
+			Providence:  []byte(`{}`),
+			StartedAt:   started,
+			CommittedAt: &committed,
+		}
+	}
+	h := &handlers.Handlers{Repo: store}
+	req := authedReq(http.MethodGet, "/v1/datasets/"+datasetID.String()+"/incremental-readiness?branch=master", "", owner)
+	req = withRouteParam(req, "rid", datasetID.String())
+	rec := httptest.NewRecorder()
+
+	h.GetIncrementalReadiness(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	var out models.DatasetIncrementalReadiness
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&out))
+	require.Equal(t, models.IncrementalModeMixed, out.Mode)
+	require.False(t, out.IncrementalReady)
+	require.NotNil(t, out.FirstSnapshot)
+	require.NotNil(t, out.CurrentViewStart)
+	require.NotNil(t, out.CurrentViewEnd)
+	require.Equal(t, 4, out.TotalCommitted)
+	require.Equal(t, 1, out.TransactionCounts["UPDATE"])
+	require.Len(t, out.Warnings, 2)
+	require.Contains(t, body, "update_breaks_append_only")
+	require.Contains(t, body, "delete_breaks_append_only")
+	require.NotEmpty(t, out.ViewBoundaries)
+}
+
 func TestConcurrentTransactionsRejectedOnSameBranch(t *testing.T) {
 	owner := uuid.New()
 	store := newFakeStore(owner)
@@ -2012,7 +3245,7 @@ func TestConcurrentTransactionsRejectedOnSameBranch(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "BRANCH_HAS_OPEN_TRANSACTION")
 }
 
-func TestAbortTransactionIsIdempotentButCommitIsOpenOnly(t *testing.T) {
+func TestAbortTransactionAndCommitRequireOpenTransaction(t *testing.T) {
 	owner := uuid.New()
 	store := newFakeStore(owner)
 	datasetID := store.datasets[0].ID
@@ -2031,11 +3264,28 @@ func TestAbortTransactionIsIdempotentButCommitIsOpenOnly(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	h.AbortTransaction(rec, transactionReq(http.MethodPost, store, owner, "master", &opened.ID, ""))
-	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "TRANSACTION_NOT_OPEN")
 
 	rec = httptest.NewRecorder()
 	h.CommitTransaction(rec, transactionReq(http.MethodPost, store, owner, "master", &opened.ID, ""))
-	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "TRANSACTION_NOT_OPEN")
+}
+
+func TestCommitTransactionRejectsUnknownDataset(t *testing.T) {
+	owner := uuid.New()
+	store := newFakeStore(owner)
+	h := &handlers.Handlers{Repo: store}
+	txnID := uuid.New()
+	req := authedReq(http.MethodPost, "/v1/datasets/"+uuid.NewString()+"/branches/master/transactions/"+txnID.String()+":commit", "", owner)
+	req = withRouteParam(req, "rid", uuid.NewString())
+	req = withRouteParam(req, "branch", "master")
+	req = withRouteParam(req, "txn", txnID.String())
+
+	rec := httptest.NewRecorder()
+	h.CommitTransaction(rec, req)
+	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestBranchOpenTransactionBlocksNewTransactionButAllowsChildBranch(t *testing.T) {

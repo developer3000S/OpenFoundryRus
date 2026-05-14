@@ -42,10 +42,10 @@ func (h *Handlers) requireDatasetWrite(w http.ResponseWriter, r *http.Request, d
 		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
 		return nil, false
 	}
-	if claims.HasRole("admin") || claims.HasPermissionKey("dataset.write") || claims.HasPermission("dataset", "write") {
+	if canWriteDataset(claims) {
 		return claims, true
 	}
-	writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden", "required_scope": "dataset.write", "dataset_rid": datasetID.String()})
+	writePermissionDenied(w, datasetWriteScope, datasetID.String())
 	return nil, false
 }
 
@@ -58,7 +58,7 @@ func (h *Handlers) requireDatasetAdmin(w http.ResponseWriter, r *http.Request, d
 	if claims.HasRole("admin") || claims.HasPermissionKey("dataset.admin") || claims.HasPermission("dataset", "admin") {
 		return claims, true
 	}
-	writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden", "required_scope": "dataset.admin", "dataset_rid": datasetID.String()})
+	writePermissionDenied(w, "datasets:admin", datasetID.String())
 	return nil, false
 }
 
@@ -107,6 +107,11 @@ func (h *Handlers) PatchDatasetMetadata(w http.ResponseWriter, r *http.Request) 
 			writeJSONErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	} else if body.DisplayName != nil {
+		if err := validateDatasetName(*body.DisplayName); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if body.Format != nil {
 		normalized := strings.ToLower(*body.Format)
@@ -121,6 +126,22 @@ func (h *Handlers) PatchDatasetMetadata(w http.ResponseWriter, r *http.Request) 
 			writeJSONErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	if body.ResourceVisibility != nil {
+		normalized := strings.ToLower(strings.TrimSpace(*body.ResourceVisibility))
+		if err := validateResourceVisibility(normalized); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		body.ResourceVisibility = &normalized
+	}
+	if body.Visibility != nil && body.ResourceVisibility == nil {
+		normalized := strings.ToLower(strings.TrimSpace(*body.Visibility))
+		if err := validateResourceVisibility(normalized); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		body.ResourceVisibility = &normalized
 	}
 	if body.CurrentViewID != nil {
 		belongs, err := h.Repo.DatasetViewBelongsToDataset(r.Context(), datasetID, *body.CurrentViewID)
@@ -157,9 +178,12 @@ func (h *Handlers) PatchDatasetMetadata(w http.ResponseWriter, r *http.Request) 
 // so audit consumers can drive change-history queries. Order matches the
 // Rust audit emit so payload diffs stay byte-for-byte stable.
 func metadataPatchChangedFields(p *models.DatasetMetadataPatch) []string {
-	out := make([]string, 0, 9)
+	out := make([]string, 0, 16)
 	if p.Name != nil {
 		out = append(out, "name")
+	}
+	if p.DisplayName != nil {
+		out = append(out, "display_name")
 	}
 	if p.Description != nil {
 		out = append(out, "description")
@@ -184,6 +208,24 @@ func metadataPatchChangedFields(p *models.DatasetMetadataPatch) []string {
 	}
 	if p.CurrentViewID != nil {
 		out = append(out, "current_view_id")
+	}
+	if p.ParentFolderRID != nil || p.ParentFolderRid != nil {
+		out = append(out, "parent_folder_rid")
+	}
+	if p.FolderPath != nil {
+		out = append(out, "folder_path")
+	}
+	if p.ProjectID != nil {
+		out = append(out, "project_id")
+	}
+	if p.ProjectRID != nil {
+		out = append(out, "project_rid")
+	}
+	if p.Path != nil {
+		out = append(out, "path")
+	}
+	if p.ResourceVisibility != nil || p.Visibility != nil {
+		out = append(out, "resource_visibility")
 	}
 	return out
 }
@@ -446,6 +488,13 @@ func validateHealthStatus(status string) error {
 		return nil
 	}
 	return errors.New("health_status must be one of: unknown, healthy, warning, degraded, critical")
+}
+
+func validateResourceVisibility(visibility string) error {
+	if models.IsKnownResourceVisibility(visibility) {
+		return nil
+	}
+	return errors.New("resource_visibility must be one of: private, shared, organization, public")
 }
 
 func validatePermissionEdge(principalKind, principalID, role string, actions []string, source string, inheritedFrom *string) error {

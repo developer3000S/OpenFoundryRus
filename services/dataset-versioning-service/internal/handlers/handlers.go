@@ -25,12 +25,15 @@ import (
 type Store interface {
 	ListDatasets(ctx context.Context, ownerID *uuid.UUID, limit int) ([]models.Dataset, error)
 	GetDataset(ctx context.Context, id uuid.UUID) (*models.Dataset, error)
+	GetDatasetIncludingDeleted(ctx context.Context, id uuid.UUID) (*models.Dataset, error)
 	GetDatasetForOwner(ctx context.Context, id uuid.UUID, ownerID uuid.UUID) (*models.Dataset, error)
 	GetCatalogFacets(ctx context.Context) (*models.CatalogFacets, error)
 	GetInternalDatasetMetadata(ctx context.Context, datasetID uuid.UUID) (*models.InternalDatasetMetadata, error)
 	CreateDataset(ctx context.Context, body *models.CreateDatasetRequest, ownerID uuid.UUID) (*models.Dataset, error)
 	UpdateDataset(ctx context.Context, id uuid.UUID, body *models.UpdateDatasetRequest) (*models.Dataset, error)
 	DeleteDataset(ctx context.Context, id uuid.UUID) (bool, error)
+	RestoreDataset(ctx context.Context, id uuid.UUID) (*models.Dataset, error)
+	HardDeleteDataset(ctx context.Context, id uuid.UUID) (bool, error)
 	ListVersions(ctx context.Context, datasetID uuid.UUID) ([]models.DatasetVersion, error)
 	GetVersion(ctx context.Context, datasetID uuid.UUID, version int32) (*models.DatasetVersion, error)
 	CreateVersion(ctx context.Context, datasetID uuid.UUID, body *models.CreateDatasetVersionRequest) (*models.DatasetVersion, error)
@@ -42,6 +45,7 @@ type Store interface {
 	GetFile(ctx context.Context, datasetID uuid.UUID, fileID uuid.UUID) (*models.DatasetFile, error)
 	GetTransactionStatus(ctx context.Context, datasetID uuid.UUID, transactionID uuid.UUID) (string, bool, error)
 	ResolveDatasetID(ctx context.Context, raw string) (uuid.UUID, error)
+	ResolveDatasetIDIncludingDeleted(ctx context.Context, raw string) (uuid.UUID, error)
 	DatasetExists(ctx context.Context, datasetID uuid.UUID) (bool, error)
 	DatasetViewBelongsToDataset(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID) (bool, error)
 	GetCatalogDataset(ctx context.Context, datasetID uuid.UUID) (*models.CatalogDataset, error)
@@ -74,12 +78,21 @@ type Store interface {
 	GetDatasetView(ctx context.Context, datasetID uuid.UUID, viewOrName string) (*models.DatasetView, error)
 	RefreshDatasetView(ctx context.Context, datasetID uuid.UUID, viewOrName string) (*models.DatasetView, error)
 	GetCurrentView(ctx context.Context, datasetID uuid.UUID, branch string) (*models.ViewOut, error)
-	GetViewAt(ctx context.Context, datasetID uuid.UUID, branch string, at *time.Time, transactionID *uuid.UUID) (*models.ViewOut, error)
+	GetViewAt(ctx context.Context, datasetID uuid.UUID, branch string, at *time.Time, transactionID *uuid.UUID, version *int32) (*models.ViewOut, error)
 	CompareViews(ctx context.Context, datasetID uuid.UUID, baseBranch string, targetBranch string, baseTransaction *uuid.UUID, targetTransaction *uuid.UUID) (*models.CompareOut, error)
 	ListViewFiles(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID) ([]models.RuntimeViewFile, error)
+	ListViewBackingDatasets(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID) ([]models.ViewBackingDataset, error)
+	ReplaceViewBackingDatasets(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, backing []models.ViewBackingDatasetInput) ([]models.ViewBackingDataset, error)
+	AddViewBackingDatasets(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, backing []models.ViewBackingDatasetInput) ([]models.ViewBackingDataset, error)
+	RemoveViewBackingDatasets(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, backing []models.ViewBackingDatasetInput) ([]models.ViewBackingDataset, error)
+	PutViewPrimaryKey(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID, primaryKey []string) ([]string, error)
+	GetViewPrimaryKey(ctx context.Context, datasetID uuid.UUID, viewID uuid.UUID) ([]string, error)
 	GetViewSchema(ctx context.Context, viewID uuid.UUID) (*models.SchemaResponse, error)
 	PutViewSchema(ctx context.Context, viewID uuid.UUID, datasetID uuid.UUID, branch *string, schema models.DatasetSchema, contentHash string) (*models.SchemaResponse, error)
 	GetCurrentSchema(ctx context.Context, datasetID uuid.UUID, branch string) (*models.SchemaResponse, error)
+	GetDatasetSchema(ctx context.Context, datasetID uuid.UUID, branch string, endTransactionID *uuid.UUID, versionID *string) (*models.FoundryDatasetSchemaResponse, error)
+	PutDatasetSchema(ctx context.Context, datasetID uuid.UUID, branch string, endTransactionID *uuid.UUID, dataframeReader string, schema models.DatasetSchema) (*models.FoundryDatasetSchemaResponse, error)
+	ListDatasetSchemaHistory(ctx context.Context, datasetID uuid.UUID, branch string, limit int) ([]models.SchemaEvolutionEntry, error)
 	PreviewData(ctx context.Context, datasetID uuid.UUID, viewID *uuid.UUID, q models.PreviewQuery) (*models.PreviewDataResponse, error)
 	ValidateSchema(ctx context.Context, datasetID uuid.UUID, schema models.DatasetSchema) (*models.ValidateResponse, error)
 	StorageDetails(ctx context.Context, datasetID uuid.UUID, fsID string, driver string, baseDir string, ttlSeconds uint64) (*models.StorageDetailsOut, error)
@@ -88,6 +101,7 @@ type Store interface {
 	MergeTransactionMetadata(ctx context.Context, datasetID uuid.UUID, transactionID uuid.UUID, metadata models.JSONValue) error
 	GetRuntimeTransaction(ctx context.Context, datasetID uuid.UUID, txnID uuid.UUID) (*models.RuntimeTransaction, error)
 	ListRuntimeTransactions(ctx context.Context, datasetID uuid.UUID, branch *string, before *time.Time, limit int) ([]models.RuntimeTransaction, error)
+	GetDatasetIncrementalReadiness(ctx context.Context, datasetID uuid.UUID, branch string) (*models.DatasetIncrementalReadiness, error)
 	CommitTransaction(ctx context.Context, datasetID uuid.UUID, txnID uuid.UUID) error
 	AbortTransaction(ctx context.Context, datasetID uuid.UUID, txnID uuid.UUID) error
 	GetDatasetQuality(ctx context.Context, datasetID uuid.UUID) (*models.DatasetQualityResponse, error)
@@ -117,13 +131,13 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 func writeJSONErr(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	writeCodedJSONErr(w, status, "", msg)
 }
 
 const dependencyUnavailableStatus = 503
 
 func writeDependencyUnavailable(w http.ResponseWriter, code string, msg string) {
-	writeJSON(w, dependencyUnavailableStatus, map[string]string{"code": code, "error": msg})
+	writeJSON(w, dependencyUnavailableStatus, map[string]string{"code": code, "error": msg, "message": msg, "error_code": apiErrorUnavailable})
 }
 
 func datasetIDParam(r *http.Request) string {
@@ -174,9 +188,13 @@ func (h *Handlers) GetDataset(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	id, err := uuid.Parse(datasetIDParam(r))
+	id, err := h.Repo.ResolveDatasetID(r.Context(), datasetIDParam(r))
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		if errors.Is(err, repo.ErrNotFound) {
+			writeJSONErr(w, http.StatusNotFound, "dataset not found")
+		} else {
+			writeJSONErr(w, http.StatusInternalServerError, "failed to resolve dataset")
+		}
 		return
 	}
 	v, err := h.Repo.GetDataset(r.Context(), id)
@@ -200,13 +218,16 @@ func (h *Handlers) CreateDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canWriteDataset(caller) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden", "required_scope": "dataset.write", "dataset_rid": "new"})
+		writePermissionDenied(w, datasetWriteScope, "new")
 		return
 	}
 	var body models.CreateDatasetRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSONErr(w, http.StatusBadRequest, "invalid body")
 		return
+	}
+	if strings.TrimSpace(body.Name) == "" && body.DisplayName != nil {
+		body.Name = strings.TrimSpace(*body.DisplayName)
 	}
 	if err := validateDatasetName(body.Name); err != nil {
 		writeJSONErr(w, http.StatusBadRequest, err.Error())
@@ -230,15 +251,38 @@ func (h *Handlers) CreateDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.HealthStatus = &health
+	visibility := "private"
+	if body.ResourceVisibility != nil && strings.TrimSpace(*body.ResourceVisibility) != "" {
+		visibility = strings.ToLower(strings.TrimSpace(*body.ResourceVisibility))
+	} else if body.Visibility != nil && strings.TrimSpace(*body.Visibility) != "" {
+		visibility = strings.ToLower(strings.TrimSpace(*body.Visibility))
+	}
+	if err := validateResourceVisibility(visibility); err != nil {
+		writeJSONErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	body.ResourceVisibility = &visibility
 	v, err := h.Repo.CreateDataset(r.Context(), &body, caller.Sub)
+	if repo.IsConflict(err) {
+		writeJSONErr(w, http.StatusConflict, "dataset name already exists in this folder")
+		return
+	}
 	if err != nil {
 		slog.Error("create dataset", slog.String("error", err.Error()))
 		writeJSONErr(w, http.StatusInternalServerError, "create failed")
 		return
 	}
+	if err := h.Repo.EnsureDefaultBranch(r.Context(), v); err != nil {
+		slog.Error("ensure default branch", slog.String("error", err.Error()), slog.String("dataset_id", v.ID.String()))
+		writeJSONErr(w, http.StatusInternalServerError, "failed to create default branch")
+		return
+	}
 	emitDatasetAudit(caller.Sub.String(), "dataset.create", v.StoragePath, map[string]any{
 		"dataset_id":      v.ID,
+		"dataset_rid":     v.RID,
 		"name":            v.Name,
+		"path":            v.Path,
+		"visibility":      v.ResourceVisibility,
 		"format":          v.Format,
 		"tags":            v.Tags,
 		"runtime_owner":   "dataset-versioning-service",
@@ -255,13 +299,17 @@ func (h *Handlers) UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	id, err := uuid.Parse(datasetIDParam(r))
+	id, err := h.Repo.ResolveDatasetID(r.Context(), datasetIDParam(r))
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		if errors.Is(err, repo.ErrNotFound) {
+			writeJSONErr(w, http.StatusNotFound, "dataset not found")
+		} else {
+			writeJSONErr(w, http.StatusInternalServerError, "failed to resolve dataset")
+		}
 		return
 	}
 	if !canWriteDataset(caller) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden", "required_scope": "dataset.write", "dataset_rid": id.String()})
+		writePermissionDenied(w, datasetWriteScope, id.String())
 		return
 	}
 	var body models.UpdateDatasetRequest
@@ -274,6 +322,11 @@ func (h *Handlers) UpdateDataset(w http.ResponseWriter, r *http.Request) {
 			writeJSONErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	} else if body.DisplayName != nil {
+		if err := validateDatasetName(*body.DisplayName); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if body.HealthStatus != nil {
 		if err := validateHealthStatus(*body.HealthStatus); err != nil {
@@ -281,7 +334,27 @@ func (h *Handlers) UpdateDataset(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if body.ResourceVisibility != nil {
+		normalized := strings.ToLower(strings.TrimSpace(*body.ResourceVisibility))
+		if err := validateResourceVisibility(normalized); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		body.ResourceVisibility = &normalized
+	}
+	if body.Visibility != nil && body.ResourceVisibility == nil {
+		normalized := strings.ToLower(strings.TrimSpace(*body.Visibility))
+		if err := validateResourceVisibility(normalized); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		body.ResourceVisibility = &normalized
+	}
 	v, err := h.Repo.UpdateDataset(r.Context(), id, &body)
+	if repo.IsConflict(err) {
+		writeJSONErr(w, http.StatusConflict, "dataset name or path already exists in this folder")
+		return
+	}
 	if err != nil {
 		writeJSONErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -292,6 +365,8 @@ func (h *Handlers) UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	}
 	emitDatasetAudit(caller.Sub.String(), "dataset.update", v.StoragePath, map[string]any{
 		"dataset_id":     v.ID,
+		"dataset_rid":    v.RID,
+		"path":           v.Path,
 		"fields_changed": updateChangedFields(&body),
 	})
 	writeJSON(w, http.StatusOK, v)
@@ -303,20 +378,34 @@ func (h *Handlers) DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	id, err := uuid.Parse(datasetIDParam(r))
+	hardDelete := strings.EqualFold(r.URL.Query().Get("hard"), "true") || strings.EqualFold(r.URL.Query().Get("mode"), "hard")
+	resolve := h.Repo.ResolveDatasetID
+	if hardDelete {
+		resolve = h.Repo.ResolveDatasetIDIncludingDeleted
+	}
+	id, err := resolve(r.Context(), datasetIDParam(r))
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		if errors.Is(err, repo.ErrNotFound) {
+			writeJSONErr(w, http.StatusNotFound, "dataset not found")
+		} else {
+			writeJSONErr(w, http.StatusInternalServerError, "failed to resolve dataset")
+		}
 		return
 	}
 	if !canWriteDataset(caller) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden", "required_scope": "dataset.write", "dataset_rid": id.String()})
+		writePermissionDenied(w, datasetWriteScope, id.String())
 		return
 	}
 	storagePath := "unknown"
-	if existing, _ := h.Repo.GetDataset(r.Context(), id); existing != nil {
+	if existing, _ := h.Repo.GetDatasetIncludingDeleted(r.Context(), id); existing != nil {
 		storagePath = existing.StoragePath
 	}
-	deleted, err := h.Repo.DeleteDataset(r.Context(), id)
+	deleted := false
+	if hardDelete {
+		deleted, err = h.Repo.HardDeleteDataset(r.Context(), id)
+	} else {
+		deleted, err = h.Repo.DeleteDataset(r.Context(), id)
+	}
 	if err != nil {
 		writeJSONErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -325,10 +414,55 @@ func (h *Handlers) DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusNotFound, "dataset not found")
 		return
 	}
-	emitDatasetAudit(caller.Sub.String(), "dataset.delete", storagePath, map[string]any{
-		"dataset_id": id,
+	action := "dataset.soft_delete"
+	if hardDelete {
+		action = "dataset.hard_delete"
+	}
+	emitDatasetAudit(caller.Sub.String(), action, storagePath, map[string]any{
+		"dataset_id":  id,
+		"hard_delete": hardDelete,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handlers) RestoreDataset(w http.ResponseWriter, r *http.Request) {
+	caller, ok := authmw.FromContext(r.Context())
+	if !ok {
+		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	id, err := h.Repo.ResolveDatasetIDIncludingDeleted(r.Context(), datasetIDParam(r))
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			writeJSONErr(w, http.StatusNotFound, "dataset not found")
+		} else {
+			writeJSONErr(w, http.StatusInternalServerError, "failed to resolve dataset")
+		}
+		return
+	}
+	if !canWriteDataset(caller) {
+		writePermissionDenied(w, datasetWriteScope, id.String())
+		return
+	}
+	v, err := h.Repo.RestoreDataset(r.Context(), id)
+	if repo.IsConflict(err) {
+		writeJSONErr(w, http.StatusConflict, "dataset name or path is already active")
+		return
+	}
+	if err != nil {
+		writeJSONErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if v == nil {
+		writeJSONErr(w, http.StatusNotFound, "dataset not found")
+		return
+	}
+	emitDatasetAudit(caller.Sub.String(), "dataset.restore", v.StoragePath, map[string]any{
+		"dataset_id":  v.ID,
+		"dataset_rid": v.RID,
+		"path":        v.Path,
+	})
+	writeJSON(w, http.StatusOK, v)
 }
 
 func canWriteDataset(claims *authmw.Claims) bool {
@@ -338,16 +472,19 @@ func canWriteDataset(claims *authmw.Claims) bool {
 	if claims.HasRole("admin") {
 		return true
 	}
-	return claims.HasPermissionKey("dataset.write") || claims.HasPermission("dataset", "write")
+	return hasDatasetScope(claims, "write") || hasDatasetScope(claims, "admin")
 }
 
 // updateChangedFields lists the columns the PATCH body explicitly targeted,
 // matching Rust's audit `fields_changed` array. The list keeps Rust's
 // declaration order so audit consumers can compare records byte-for-byte.
 func updateChangedFields(body *models.UpdateDatasetRequest) []string {
-	out := make([]string, 0, 7)
+	out := make([]string, 0, 14)
 	if body.Name != nil {
 		out = append(out, "name")
+	}
+	if body.DisplayName != nil {
+		out = append(out, "display_name")
 	}
 	if body.Description != nil {
 		out = append(out, "description")
@@ -366,6 +503,24 @@ func updateChangedFields(body *models.UpdateDatasetRequest) []string {
 	}
 	if body.CurrentViewID != nil {
 		out = append(out, "current_view_id")
+	}
+	if body.ParentFolderRID != nil || body.ParentFolderRid != nil {
+		out = append(out, "parent_folder_rid")
+	}
+	if body.FolderPath != nil {
+		out = append(out, "folder_path")
+	}
+	if body.ProjectID != nil {
+		out = append(out, "project_id")
+	}
+	if body.ProjectRID != nil {
+		out = append(out, "project_rid")
+	}
+	if body.Path != nil {
+		out = append(out, "path")
+	}
+	if body.ResourceVisibility != nil || body.Visibility != nil {
+		out = append(out, "resource_visibility")
 	}
 	return out
 }
@@ -418,12 +573,21 @@ func (h *Handlers) ownedDataset(w http.ResponseWriter, r *http.Request) (*authmw
 		writeJSONErr(w, http.StatusUnauthorized, "authentication required")
 		return nil, nil, false
 	}
-	id, err := uuid.Parse(datasetIDParam(r))
+	id, err := h.Repo.ResolveDatasetID(r.Context(), datasetIDParam(r))
 	if err != nil {
-		writeJSONErr(w, http.StatusBadRequest, "invalid id")
+		if errors.Is(err, repo.ErrNotFound) {
+			writeJSONErr(w, http.StatusNotFound, "dataset not found")
+		} else {
+			writeJSONErr(w, http.StatusInternalServerError, "failed to resolve dataset")
+		}
 		return nil, nil, false
 	}
-	dataset, err := h.Repo.GetDatasetForOwner(r.Context(), id, caller.Sub)
+	var dataset *models.Dataset
+	if strings.HasPrefix(r.URL.Path, "/api/v2/") && canReadDataset(caller) {
+		dataset, err = h.Repo.GetDataset(r.Context(), id)
+	} else {
+		dataset, err = h.Repo.GetDatasetForOwner(r.Context(), id, caller.Sub)
+	}
 	if err != nil {
 		slog.Error("load dataset", slog.String("error", err.Error()))
 		writeJSONErr(w, http.StatusInternalServerError, "failed to load dataset")
@@ -644,11 +808,15 @@ func (h *Handlers) CreateBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		status := http.StatusInternalServerError
 		if strings.Contains(err.Error(), "source version does not exist") {
-			status = http.StatusBadRequest
+			writeJSONErr(w, http.StatusBadRequest, err.Error())
+			return
 		}
-		writeJSONErr(w, status, err.Error())
+		if errors.Is(err, repo.ErrValidation) {
+			writeBranchError(w, err)
+			return
+		}
+		writeJSONErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, v)
@@ -685,16 +853,60 @@ func (h *Handlers) ListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	branch := strings.TrimSpace(r.URL.Query().Get("branch"))
 	if branch == "" {
+		branch = strings.TrimSpace(r.URL.Query().Get("branchName"))
+	}
+	if branch == "" {
+		branch = strings.TrimSpace(dataset.ActiveBranch)
+	}
+	if branch == "" {
 		branch = "main"
 	}
 	prefix := strings.TrimLeft(strings.TrimSpace(r.URL.Query().Get("prefix")), "/")
+	if prefix == "" {
+		prefix = strings.TrimLeft(strings.TrimSpace(r.URL.Query().Get("pathPrefix")), "/")
+	}
 	files, err := h.Repo.ListFiles(r.Context(), dataset.ID, branch, prefix)
 	if err != nil {
 		slog.Error("list files", slog.String("error", err.Error()))
 		writeJSONErr(w, http.StatusInternalServerError, "failed to list files")
 		return
 	}
-	writeJSON(w, http.StatusOK, models.ListDatasetFilesResponse{Branch: branch, Total: len(files), Files: files})
+	writeJSON(w, http.StatusOK, models.ListDatasetFilesResponse{Branch: branch, Total: len(files), Files: files, Data: files})
+}
+
+func (h *Handlers) GetFileMetadata(w http.ResponseWriter, r *http.Request) {
+	_, dataset, ok := h.ownedDataset(w, r)
+	if !ok {
+		return
+	}
+	fileID, err := uuid.Parse(chi.URLParam(r, "file_id"))
+	if err != nil {
+		writeJSONErr(w, http.StatusBadRequest, "invalid file_id")
+		return
+	}
+	file, err := h.Repo.GetFile(r.Context(), dataset.ID, fileID)
+	if err != nil {
+		slog.Error("get file", slog.String("error", err.Error()))
+		writeJSONErr(w, http.StatusInternalServerError, "failed to load file")
+		return
+	}
+	if file == nil {
+		writeJSONErr(w, http.StatusNotFound, "file not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, file)
+}
+
+func (h *Handlers) GetFileMetadataByPath(w http.ResponseWriter, r *http.Request) {
+	_, dataset, ok := h.ownedDataset(w, r)
+	if !ok {
+		return
+	}
+	file, ok := h.fileFromPathQuery(w, r, dataset)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, file)
 }
 
 func (h *Handlers) DownloadFile(w http.ResponseWriter, r *http.Request) {
@@ -717,6 +929,22 @@ func (h *Handlers) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusNotFound, "file not found")
 		return
 	}
+	h.redirectToFileContent(w, r, dataset, file)
+}
+
+func (h *Handlers) DownloadFileContentByPath(w http.ResponseWriter, r *http.Request) {
+	_, dataset, ok := h.ownedDataset(w, r)
+	if !ok {
+		return
+	}
+	file, ok := h.fileFromPathQuery(w, r, dataset)
+	if !ok {
+		return
+	}
+	h.redirectToFileContent(w, r, dataset, file)
+}
+
+func (h *Handlers) redirectToFileContent(w http.ResponseWriter, r *http.Request, dataset *models.Dataset, file *models.DatasetFile) {
 	if file.DeletedAt != nil {
 		writeJSONErr(w, http.StatusGone, "file is soft-deleted")
 		return
@@ -746,6 +974,41 @@ func (h *Handlers) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", signed.URL)
 	w.Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
 	w.WriteHeader(http.StatusFound)
+}
+
+func (h *Handlers) fileFromPathQuery(w http.ResponseWriter, r *http.Request, dataset *models.Dataset) (*models.DatasetFile, bool) {
+	logical := strings.Trim(strings.TrimSpace(r.URL.Query().Get("path")), "/")
+	if logical == "" {
+		logical = strings.Trim(strings.TrimSpace(r.URL.Query().Get("filePath")), "/")
+	}
+	if logical == "" {
+		writeJSONErr(w, http.StatusBadRequest, "path required")
+		return nil, false
+	}
+	if !safeObjectKey(logical) {
+		writeJSONErr(w, http.StatusBadRequest, "invalid path")
+		return nil, false
+	}
+	branch := strings.TrimSpace(r.URL.Query().Get("branch"))
+	if branch == "" {
+		branch = strings.TrimSpace(r.URL.Query().Get("branchName"))
+	}
+	if branch == "" {
+		branch = "main"
+	}
+	files, err := h.Repo.ListFiles(r.Context(), dataset.ID, branch, logical)
+	if err != nil {
+		slog.Error("get file by path", slog.String("error", err.Error()))
+		writeJSONErr(w, http.StatusInternalServerError, "failed to load file")
+		return nil, false
+	}
+	for i := range files {
+		if files[i].LogicalPath == logical {
+			return &files[i], true
+		}
+	}
+	writeJSONErr(w, http.StatusNotFound, "file not found")
+	return nil, false
 }
 
 func (h *Handlers) CreateFileUploadURL(w http.ResponseWriter, r *http.Request) {
@@ -783,7 +1046,7 @@ func (h *Handlers) CreateFileUploadURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !strings.EqualFold(status, "OPEN") {
-		writeJSONErr(w, http.StatusConflict, "transaction is not OPEN")
+		writeTransactionNotOpen(w)
 		return
 	}
 	if h.BackingFS == nil {
@@ -809,13 +1072,15 @@ func (h *Handlers) CreateFileUploadURL(w http.ResponseWriter, r *http.Request) {
 	if method == "" || method == "GET" {
 		method = "PUT"
 	}
+	mediaType := firstNonEmpty(body.MediaType, body.ContentType)
+	storageLocation := storageLocationJSON(physical, logical)
 	claims, _ := authmw.FromContext(r.Context())
 	actor := "anonymous"
 	if claims != nil {
 		actor = claims.Sub.String()
 	}
 	h.emitAudit(r.Context(), AuditEvent{Actor: actor, Action: "files.upload_url", DatasetRID: dataset.ID.String(), Details: map[string]any{
-		"transaction_id": txnID.String(), "logical_path": physical.RelativePath, "content_type": body.ContentType, "sha256": body.SHA256, "physical_uri": physical.URI(), "presign_ttl_seconds": uint64(ttl / time.Second), "expires_at": signed.ExpiresAt,
+		"transaction_id": txnID.String(), "transaction_rid": transactionRID(txnID), "logical_path": logical, "object_key": physical.RelativePath, "content_type": body.ContentType, "media_type": mediaType, "sha256": body.SHA256, "physical_uri": physical.URI(), "presign_ttl_seconds": uint64(ttl / time.Second), "expires_at": signed.ExpiresAt,
 	}})
-	writeJSON(w, http.StatusOK, models.CreateDatasetFileUploadURLResponse{URL: signed.URL, PhysicalURI: physical.URI(), ExpiresAt: signed.ExpiresAt, Method: method})
+	writeJSON(w, http.StatusOK, models.CreateDatasetFileUploadURLResponse{URL: signed.URL, PhysicalURI: physical.URI(), LogicalPath: logical, TransactionID: txnID, TransactionRID: transactionRID(txnID), MediaType: emptyStringPtr(mediaType), SHA256: body.SHA256, SizeBytes: body.SizeBytes, RowCountHint: body.RowCountHint, StorageLocation: storageLocation, ExpiresAt: signed.ExpiresAt, Method: method})
 }

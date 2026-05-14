@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -110,6 +111,7 @@ type Node struct {
 	DependsOn          []string
 	Outputs            []OutputTransaction
 	MaxAttempts        int
+	StaleSkipped       bool
 	Metadata           map[string]any
 	ResolvedInputViews []models.ResolvedInputView
 }
@@ -180,6 +182,7 @@ type AuditEvent struct {
 type Outcome struct {
 	FinalState models.BuildState
 	Completed  int
+	Ignored    int
 	Failed     int
 	Aborted    int
 	Attempts   map[string]int
@@ -335,13 +338,26 @@ func Execute(ctx context.Context, plan Plan, runner NodeRunner, txManager Transa
 		out.Results[result.nodeID] = result.result
 	}
 	for _, s := range state {
+		// Count stale-skipped jobs separately from invoked successful jobs while
+		// preserving COMPLETED as the terminal state for dependency handling.
+		if s == NodeCompleted {
+			continue
+		}
 		switch s {
-		case NodeCompleted:
-			out.Completed++
 		case NodeFailed:
 			out.Failed++
 		case NodeAborted, NodeAbortPending:
 			out.Aborted++
+		}
+	}
+	for nodeID, s := range state {
+		if s != NodeCompleted {
+			continue
+		}
+		if graph.byID[nodeID].StaleSkipped {
+			out.Ignored++
+		} else {
+			out.Completed++
 		}
 	}
 	switch {
@@ -404,6 +420,16 @@ type nodeRunResult struct {
 }
 
 func driveNode(ctx context.Context, plan Plan, node Node, defaultMaxAttempts int, runner NodeRunner, txManager TransactionManager, committer OutputCommitter, audit AuditSink) nodeRunResult {
+	if node.StaleSkipped {
+		reason := "ignored because fresh"
+		abortOutputs(context.Background(), txManager, audit, plan.BuildID, node.JobID, node.ID, node.Outputs, reason)
+		_ = transition(context.Background(), audit, plan.BuildID, node.JobID, node.ID, NodeWaiting, NodeCompleted, 0, reason)
+		result := NodeResult{Metadata: map[string]any{"ignored_reason": reason}}
+		if signature := metadataString(node.Metadata, "staleness_signature"); signature != "" {
+			result.Metadata["staleness_signature"] = signature
+		}
+		return nodeRunResult{nodeID: node.ID, state: NodeCompleted, attempts: 0, reason: reason, result: result}
+	}
 	_ = transition(ctx, audit, plan.BuildID, node.JobID, node.ID, NodeWaiting, NodeRunPending, 0, "dispatching")
 	_ = transition(ctx, audit, plan.BuildID, node.JobID, node.ID, NodeRunPending, NodeRunning, 0, "running")
 	maxAttempts := node.MaxAttempts
@@ -450,6 +476,24 @@ func driveNode(ctx context.Context, plan Plan, node Node, defaultMaxAttempts int
 	abortOutputs(context.Background(), txManager, audit, plan.BuildID, node.JobID, node.ID, node.Outputs, reason)
 	_ = transition(context.Background(), audit, plan.BuildID, node.JobID, node.ID, NodeRunning, NodeFailed, maxAttempts, reason)
 	return nodeRunResult{nodeID: node.ID, state: NodeFailed, attempts: maxAttempts, reason: reason}
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch value := value.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case fmt.Stringer:
+		return strings.TrimSpace(value.String())
+	default:
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
 }
 
 func commitAllOutputs(ctx context.Context, committer OutputCommitter, txManager TransactionManager, audit AuditSink, buildID uuid.UUID, jobID uuid.UUID, nodeID string, outputs []OutputTransaction, result NodeResult) error {

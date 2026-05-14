@@ -198,6 +198,13 @@ func (m *MemoryService) Emit(jobRID string, level LogLevel, message string, para
 	return entry
 }
 
+func (m *MemoryService) AppendLogByRID(ctx context.Context, jobRID string, level LogLevel, message string, params json.RawMessage) (LogEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return LogEntry{}, err
+	}
+	return m.Emit(jobRID, level, message, params), nil
+}
+
 // ErrUnavailable is a convenient sentinel for adapters/fakes.
 type ErrUnavailable struct{ Cause error }
 

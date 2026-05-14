@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import {
   getSchedule,
+  deleteSchedule,
   listScheduleRuns,
   listScheduleVersions,
   pauseSchedule,
@@ -19,7 +20,7 @@ import {
 import { notifications } from '@/lib/stores/notifications';
 
 type TabKey = 'overview' | 'runs' | 'versions' | 'raw';
-type BusyAction = 'run-now' | 'pause' | 'resume' | 'auto-pause' | 'refresh' | null;
+type BusyAction = 'run-now' | 'pause' | 'resume' | 'auto-pause' | 'refresh' | 'delete' | null;
 type NoticeTone = 'success' | 'error' | 'info';
 
 interface Notice {
@@ -259,6 +260,7 @@ function TriggerTree({ trigger, depth = 0 }: { trigger: Trigger; depth?: number 
 }
 
 export function ScheduleDetailPage() {
+  const navigate = useNavigate();
   const { rid: routeRid = '' } = useParams<{ rid: string }>();
   const rid = useMemo(() => safeDecode(routeRid), [routeRid]);
 
@@ -314,6 +316,7 @@ export function ScheduleDetailPage() {
       const text = success(result);
       setNotice({ tone: 'success', text });
       notifications.success(text);
+      if (action === 'delete' && result === true) return;
       await refresh();
     } catch (cause) {
       const text = cause instanceof Error ? cause.message : 'Schedule action failed';
@@ -423,6 +426,26 @@ export function ScheduleDetailPage() {
               {busyAction === 'pause' ? 'Pausing...' : 'Pause'}
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => void performAction(
+              'delete',
+              async () => {
+                if (!window.confirm(`Delete schedule "${schedule.name}"?`)) return false;
+                await deleteSchedule(rid);
+                return true;
+              },
+              (deleted) => {
+                if (deleted) navigate('/build-schedules');
+                return deleted ? 'Schedule deleted' : 'Delete cancelled';
+              },
+            )}
+            disabled={isBusy}
+            className="of-button"
+            title="Requires schedules.manage"
+          >
+            {busyAction === 'delete' ? 'Deleting...' : 'Delete'}
+          </button>
         </div>
       </header>
 
@@ -638,7 +661,7 @@ export function ScheduleDetailPage() {
             <table className="of-table" style={{ marginTop: 12 }}>
               <thead>
                 <tr>
-                  {['Triggered', 'Outcome', 'Duration', 'Build', 'Version', 'Reason', 'Snapshot'].map((heading) => (
+                  {['Triggered', 'Outcome', 'Duration', 'Build', 'Version', 'Reason', 'Snapshot', 'Diagnostics'].map((heading) => (
                     <th key={heading}>{heading}</th>
                   ))}
                 </tr>
@@ -662,6 +685,16 @@ export function ScheduleDetailPage() {
                           <summary>{Object.keys(run.trigger_snapshot).length} field(s)</summary>
                           <pre style={{ margin: '8px 0 0', fontFamily: 'var(--font-mono)', fontSize: 11, whiteSpace: 'pre-wrap' }}>
                             {JSON.stringify(run.trigger_snapshot, null, 2)}
+                          </pre>
+                        </details>
+                      ) : '-'}
+                    </td>
+                    <td>
+                      {Object.keys(run.diagnostics ?? {}).length ? (
+                        <details>
+                          <summary>{Object.keys(run.diagnostics ?? {}).length} field(s)</summary>
+                          <pre style={{ margin: '8px 0 0', fontFamily: 'var(--font-mono)', fontSize: 11, whiteSpace: 'pre-wrap' }}>
+                            {JSON.stringify(run.diagnostics, null, 2)}
                           </pre>
                         </details>
                       ) : '-'}

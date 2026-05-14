@@ -149,6 +149,8 @@ export default defineConfig({
           text: "Security & governance",
           items: [
             { text: "Overview", link: "/security-governance/" },
+            { text: "Security overview (landing)", link: "/security-governance/security-overview" },
+            { text: "Shared responsibility model", link: "/security-governance/shared-responsibility-model" },
             { text: "Identity and access", link: "/security-governance/identity-and-access" },
             { text: "Policies and authorization", link: "/security-governance/policies-and-authorization" },
             { text: "Policy bundles in-process", link: "/security-governance/policy-bundles" },

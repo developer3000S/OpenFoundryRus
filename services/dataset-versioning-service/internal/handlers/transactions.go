@@ -29,7 +29,8 @@ func (h *Handlers) StartTransaction(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if !validTransactionType(body.Type) {
+	txType := body.RequestedType()
+	if !validTransactionType(txType) {
 		writeJSONErr(w, http.StatusBadRequest, "invalid transaction type")
 		return
 	}
@@ -43,7 +44,7 @@ func (h *Handlers) StartTransaction(w http.ResponseWriter, r *http.Request) {
 	if body.Summary != nil {
 		summary = *body.Summary
 	}
-	out, err := h.Repo.StartTransaction(r.Context(), datasetID, branch.ID, branch.Name, body.Type, summary, body.Providence, claims.Sub)
+	out, err := h.Repo.StartTransaction(r.Context(), datasetID, branch.ID, branch.Name, txType, summary, body.Providence, claims.Sub)
 	if err != nil {
 		if errors.Is(err, repo.ErrConflict) || repo.IsConflict(err) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "BRANCH_HAS_OPEN_TRANSACTION", "message": "branch already has an OPEN transaction", "branch": branch.Name})
@@ -52,7 +53,7 @@ func (h *Handlers) StartTransaction(w http.ResponseWriter, r *http.Request) {
 		writeTransactionError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, out)
+	writeJSON(w, http.StatusCreated, models.NewRuntimeTransactionResponse(*out))
 }
 
 func (h *Handlers) GetTransaction(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +75,7 @@ func (h *Handlers) GetTransaction(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, http.StatusNotFound, "transaction not found")
 		return
 	}
-	writeJSONWithETag(w, r, http.StatusOK, out)
+	writeJSONWithETag(w, r, http.StatusOK, models.NewRuntimeTransactionResponse(*out))
 }
 
 func (h *Handlers) TransactionAction(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +130,7 @@ func (h *Handlers) finishTransaction(w http.ResponseWriter, r *http.Request, act
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "transaction not found after action", "txn": txnID})
 		return
 	}
-	writeJSON(w, http.StatusOK, after)
+	writeJSON(w, http.StatusOK, models.NewRuntimeTransactionResponse(*after))
 }
 
 func (h *Handlers) ListTransactions(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +171,7 @@ func (h *Handlers) ListTransactions(w http.ResponseWriter, r *http.Request) {
 		v := encodeCursor(offset + limit)
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, models.Page[models.RuntimeTransaction]{Data: rows[offset:end], NextCursor: next, HasMore: hasMore})
+	writeJSON(w, http.StatusOK, models.Page[models.RuntimeTransactionResponse]{Data: models.NewRuntimeTransactionResponses(rows[offset:end]), NextCursor: next, HasMore: hasMore})
 }
 
 func (h *Handlers) BatchGetTransactions(w http.ResponseWriter, r *http.Request) {
@@ -183,12 +184,12 @@ func (h *Handlers) BatchGetTransactions(w http.ResponseWriter, r *http.Request) 
 		writeJSONErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	items := make([]models.BatchItemResult[models.RuntimeTransaction], 0, len(body.IDs))
+	items := make([]models.BatchItemResult[models.RuntimeTransactionResponse], 0, len(body.IDs))
 	for _, raw := range body.IDs {
 		txnID, err := uuid.Parse(raw)
 		if err != nil {
 			msg := "transaction id is not a valid UUID"
-			items = append(items, models.BatchItemResult[models.RuntimeTransaction]{ID: raw, Status: http.StatusBadRequest, Error: &msg})
+			items = append(items, models.BatchItemResult[models.RuntimeTransactionResponse]{ID: raw, Status: http.StatusBadRequest, Error: &msg})
 			continue
 		}
 		row, err := h.Repo.GetRuntimeTransaction(r.Context(), datasetID, txnID)
@@ -198,10 +199,11 @@ func (h *Handlers) BatchGetTransactions(w http.ResponseWriter, r *http.Request) 
 		}
 		if row == nil {
 			msg := "transaction not found"
-			items = append(items, models.BatchItemResult[models.RuntimeTransaction]{ID: raw, Status: http.StatusNotFound, Error: &msg})
+			items = append(items, models.BatchItemResult[models.RuntimeTransactionResponse]{ID: raw, Status: http.StatusNotFound, Error: &msg})
 			continue
 		}
-		items = append(items, models.BatchItemResult[models.RuntimeTransaction]{ID: raw, Status: http.StatusOK, Data: row})
+		data := models.NewRuntimeTransactionResponse(*row)
+		items = append(items, models.BatchItemResult[models.RuntimeTransactionResponse]{ID: raw, Status: http.StatusOK, Data: &data})
 	}
 	writeJSON(w, http.StatusMultiStatus, items)
 }
@@ -221,7 +223,7 @@ func writeTransactionError(w http.ResponseWriter, err error) {
 		return
 	}
 	if errors.Is(err, repo.ErrInvalidTransition) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "transaction is not OPEN"})
+		writeTransactionNotOpen(w)
 		return
 	}
 	if errors.Is(err, repo.ErrValidation) {
