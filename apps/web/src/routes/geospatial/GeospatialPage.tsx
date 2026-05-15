@@ -90,8 +90,9 @@ function geometryCoordinates(geometry: LayerDefinition['features'][number]['geom
 }
 
 function parseFeatureTimestamp(feature: MapFeature, index: number, layer: LayerDefinition): number {
+  const props = feature.properties ?? {};
   for (const key of TIMESTAMP_KEYS) {
-    const value = feature.properties[key];
+    const value = props[key];
     if (typeof value === 'string' || typeof value === 'number') {
       const parsed = new Date(value).getTime();
       if (!Number.isNaN(parsed)) return parsed;
@@ -102,7 +103,7 @@ function parseFeatureTimestamp(feature: MapFeature, index: number, layer: LayerD
 }
 
 function featureLabel(feature: MapFeature, index: number) {
-  return feature.label || String(feature.properties.name ?? `Feature ${index + 1}`);
+  return feature.label || String(feature.properties?.name ?? `Feature ${index + 1}`);
 }
 
 function temporalEntries(layer: LayerDefinition | null): TemporalFeatureEntry[] {
@@ -119,7 +120,7 @@ function temporalEntries(layer: LayerDefinition | null): TemporalFeatureEntry[] 
 function firstNumericField(features: MapFeature[]) {
   const counts = new Map<string, number>();
   for (const feature of features) {
-    for (const [key, value] of Object.entries(feature.properties)) {
+    for (const [key, value] of Object.entries(feature.properties ?? {})) {
       if (typeof value === 'number' && Number.isFinite(value)) {
         counts.set(key, (counts.get(key) ?? 0) + 1);
       }

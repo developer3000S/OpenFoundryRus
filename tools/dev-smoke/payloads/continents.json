@@ -1,0 +1,38 @@
+{
+  "name": "Continent Bounding Boxes",
+  "description": "Sample polygon layer — rough bounding rings for 6 continents",
+  "source_kind": "reference",
+  "source_dataset": "",
+  "geometry_type": "polygon",
+  "tags": ["seed", "boundaries", "continents"],
+  "indexed": true,
+  "style": {
+    "color": "#16a34a",
+    "opacity": 0.18,
+    "radius": 1,
+    "line_width": 2,
+    "heatmap_intensity": 0.4,
+    "cluster_color": "#15803d",
+    "show_labels": true
+  },
+  "features": [
+    {"id":"africa","label":"Africa","geometry":{"type":"polygon","coordinates":[
+      {"lat":-35,"lon":-20},{"lat":-35,"lon":52},{"lat":37,"lon":52},{"lat":37,"lon":-20},{"lat":-35,"lon":-20}
+    ]}},
+    {"id":"europe","label":"Europe","geometry":{"type":"polygon","coordinates":[
+      {"lat":35,"lon":-25},{"lat":35,"lon":60},{"lat":72,"lon":60},{"lat":72,"lon":-25},{"lat":35,"lon":-25}
+    ]}},
+    {"id":"asia","label":"Asia","geometry":{"type":"polygon","coordinates":[
+      {"lat":0,"lon":60},{"lat":0,"lon":150},{"lat":78,"lon":150},{"lat":78,"lon":60},{"lat":0,"lon":60}
+    ]}},
+    {"id":"north_america","label":"North America","geometry":{"type":"polygon","coordinates":[
+      {"lat":7,"lon":-170},{"lat":7,"lon":-50},{"lat":83,"lon":-50},{"lat":83,"lon":-170},{"lat":7,"lon":-170}
+    ]}},
+    {"id":"south_america","label":"South America","geometry":{"type":"polygon","coordinates":[
+      {"lat":-56,"lon":-82},{"lat":-56,"lon":-35},{"lat":13,"lon":-35},{"lat":13,"lon":-82},{"lat":-56,"lon":-82}
+    ]}},
+    {"id":"oceania","label":"Oceania","geometry":{"type":"polygon","coordinates":[
+      {"lat":-47,"lon":110},{"lat":-47,"lon":180},{"lat":0,"lon":180},{"lat":0,"lon":110},{"lat":-47,"lon":110}
+    ]}}
+  ]
+}
