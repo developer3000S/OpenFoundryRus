@@ -597,7 +597,7 @@ services:
     <<: *app-common
     profiles: *profiles-foundation
     build:
-      context: ..
+      context: ../..
       dockerfile: services/identity-federation-service/Dockerfile
     environment:
       OPENFOUNDRY_ENV: development
@@ -630,7 +630,7 @@ services:
     <<: *app-common
     profiles: *profiles-foundation
     build:
-      context: ..
+      context: ../..
       dockerfile: services/authorization-policy-service/Dockerfile
     environment:
       OPENFOUNDRY_ENV: development
@@ -652,7 +652,7 @@ services:
     <<: *app-common
     profiles: *profiles-foundation
     build:
-      context: ..
+      context: ../..
       dockerfile: services/tenancy-organizations-service/Dockerfile
     environment:
       OPENFOUNDRY_ENV: development
@@ -683,7 +683,7 @@ services:
     <<: *app-common
     profiles: *profiles-data
     build:
-      context: ..
+      context: ../..
       dockerfile: services/connector-management-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -718,7 +718,7 @@ services:
     <<: *app-common
     profiles: *profiles-data
     build:
-      context: ..
+      context: ../..
       dockerfile: services/ingestion-replication-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -748,7 +748,7 @@ services:
     <<: *app-common
     profiles: *profiles-data
     build:
-      context: ..
+      context: ../..
       dockerfile: services/dataset-versioning-service/Dockerfile
     environment:
       OPENFOUNDRY_ENV: development
@@ -766,7 +766,7 @@ services:
     <<: *app-common
     profiles: *profiles-data
     build:
-      context: ..
+      context: ../..
       dockerfile: services/media-sets-service/Dockerfile
     environment:
       OPENFOUNDRY_ENV: development
@@ -826,7 +826,7 @@ services:
     <<: *app-common
     profiles: *profiles-intelligence
     build:
-      context: ..
+      context: ../..
       dockerfile: services/agent-runtime-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -862,7 +862,7 @@ services:
     <<: *app-common
     profiles: *profiles-intelligence
     build:
-      context: ..
+      context: ../..
       dockerfile: services/ontology-exploratory-analysis-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -884,7 +884,7 @@ services:
     <<: *app-common
     profiles: *profiles-data
     build:
-      context: ..
+      context: ../..
       dockerfile: services/sql-bi-gateway-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -905,7 +905,7 @@ services:
     <<: *app-common
     profiles: *profiles-intelligence
     build:
-      context: ..
+      context: ../..
       dockerfile: services/notebook-runtime-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -938,7 +938,7 @@ services:
     <<: *app-common
     profiles: *profiles-data
     build:
-      context: ..
+      context: ../..
       dockerfile: services/workflow-automation-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -974,7 +974,7 @@ services:
     <<: *app-common
     profiles: *profiles-experience
     build:
-      context: ..
+      context: ../..
       dockerfile: services/application-composition-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -994,7 +994,7 @@ services:
     <<: *app-common
     profiles: *profiles-experience
     build:
-      context: ..
+      context: ../..
       dockerfile: services/solution-design-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1014,7 +1014,7 @@ services:
     <<: *app-common
     profiles: *profiles-experience
     build:
-      context: ..
+      context: ../..
       dockerfile: services/sdk-generation-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1049,7 +1049,7 @@ services:
     <<: *app-common
     profiles: *profiles-experience
     build:
-      context: ..
+      context: ../..
       dockerfile: services/telemetry-governance-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1066,7 +1066,7 @@ services:
     <<: *app-common
     profiles: *profiles-experience
     build:
-      context: ..
+      context: ../..
       dockerfile: services/code-repository-review-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1088,7 +1088,7 @@ services:
     <<: *app-common
     profiles: *profiles-data
     build:
-      context: ..
+      context: ../..
       dockerfile: services/pipeline-build-service/Dockerfile
     environment:
       OPENFOUNDRY_ENV: development
@@ -1129,7 +1129,7 @@ services:
     <<: *app-common
     profiles: *profiles-data
     build:
-      context: ..
+      context: ../..
       dockerfile: services/lineage-service/Dockerfile
     environment:
       OPENFOUNDRY_ENV: development
@@ -1164,7 +1164,7 @@ services:
     <<: *app-common
     profiles: *profiles-data
     build:
-      context: ..
+      context: ../..
       dockerfile: services/ontology-definition-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1190,7 +1190,7 @@ services:
     <<: *app-common
     profiles: *profiles-knowledge
     build:
-      context: ..
+      context: ../..
       dockerfile: services/object-database-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1218,7 +1218,7 @@ services:
     <<: *app-common
     profiles: *profiles-knowledge
     build:
-      context: ..
+      context: ../..
       dockerfile: services/ontology-query-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1244,7 +1244,7 @@ services:
     <<: *app-common
     profiles: *profiles-data
     build:
-      context: ..
+      context: ../..
       dockerfile: services/ontology-actions-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1278,7 +1278,7 @@ services:
     <<: *app-common
     profiles: *profiles-knowledge
     build:
-      context: ..
+      context: ../..
       dockerfile: services/entity-resolution-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1298,7 +1298,7 @@ services:
     <<: *app-common
     profiles: *profiles-intelligence
     build:
-      context: ..
+      context: ../..
       dockerfile: services/model-catalog-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1316,7 +1316,7 @@ services:
     <<: *app-common
     profiles: *profiles-intelligence
     build:
-      context: ..
+      context: ../..
       dockerfile: services/model-deployment-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1340,7 +1340,7 @@ services:
     <<: *app-common
     profiles: *profiles-intelligence
     build:
-      context: ..
+      context: ../..
       dockerfile: services/ai-evaluation-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1357,7 +1357,7 @@ services:
     <<: *app-common
     profiles: *profiles-intelligence
     build:
-      context: ..
+      context: ../..
       dockerfile: services/llm-catalog-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1382,7 +1382,7 @@ services:
     <<: *app-common
     profiles: *profiles-intelligence
     build:
-      context: ..
+      context: ../..
       dockerfile: services/retrieval-context-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1425,7 +1425,7 @@ services:
     <<: *app-common
     profiles: *profiles-experience
     build:
-      context: ..
+      context: ../..
       dockerfile: services/federation-product-exchange-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1454,7 +1454,7 @@ services:
     <<: *app-common
     profiles: *profiles-foundation
     build:
-      context: ..
+      context: ../..
       dockerfile: services/notification-alerting-service/Dockerfile
     environment:
       OPENFOUNDRY_ENV: development
@@ -1475,7 +1475,7 @@ services:
     <<: *app-common
     profiles: *profiles-foundation
     build:
-      context: ..
+      context: ../..
       dockerfile: services/audit-compliance-service/Dockerfile
     environment:
       HOST: 0.0.0.0
@@ -1505,7 +1505,7 @@ services:
     <<: *app-common
     profiles: *profiles-edge
     build:
-      context: ..
+      context: ../..
       dockerfile: services/edge-gateway-service/Dockerfile
     environment:
       OPENFOUNDRY_ENV: development
@@ -1769,7 +1769,7 @@ services:
     <<: *app-common
     profiles: *profiles-edge
     build:
-      context: ..
+      context: ../..
       dockerfile: apps/web/Dockerfile
     environment:
       NODE_ENV: production

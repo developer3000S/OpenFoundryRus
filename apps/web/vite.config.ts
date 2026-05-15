@@ -29,11 +29,11 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/api/v1/auth': {
-        target: 'http://127.0.0.1:50088',
+        target: 'http://127.0.0.1:50112',
         changeOrigin: true,
       },
       '/api/v1/users/me': {
-        target: 'http://127.0.0.1:50088',
+        target: 'http://127.0.0.1:50112',
         changeOrigin: true,
       },
       '/api': {

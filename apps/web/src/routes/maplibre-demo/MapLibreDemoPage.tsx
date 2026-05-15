@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react';
-import type { Map as MapLibreMap } from 'maplibre-gl';
+import type { Map as MapLibreMap, StyleSpecification } from 'maplibre-gl';
 
 import { MapLibreCanvas } from '@components/MapLibreCanvas';
 
@@ -16,11 +16,28 @@ const CITIES: City[] = [
   { name: 'Lisbon', coords: [-9.1393, 38.7223] },
 ];
 
+const OSM_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    osm: {
+      type: 'raster',
+      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors',
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    { id: 'osm', type: 'raster', source: 'osm' },
+  ],
+};
+
 export function MapLibreDemoPage() {
   const mapRef = useRef<MapLibreMap | null>(null);
 
   const handleMapLoad = useCallback((map: MapLibreMap) => {
     mapRef.current = map;
+    map.setProjection({ type: 'globe' });
     map.addSource('cities', {
       type: 'geojson',
       data: {
@@ -91,7 +108,13 @@ export function MapLibreDemoPage() {
           ))}
         </div>
 
-        <MapLibreCanvas height={420} onMapLoad={handleMapLoad} />
+        <MapLibreCanvas
+          height={520}
+          style={OSM_STYLE}
+          center={[0, 20]}
+          zoom={1.4}
+          onMapLoad={handleMapLoad}
+        />
       </div>
     </section>
   );
