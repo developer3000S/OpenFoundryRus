@@ -435,6 +435,10 @@ export const router = createBrowserRouter([
         lazy: async () => ({ Component: (await import('./routes/maplibre-demo/MapLibreDemoPage')).MapLibreDemoPage }),
       },
       {
+        path: 'globe-flights',
+        lazy: async () => ({ Component: (await import('./routes/globe-flights/GlobeFlightsPage')).GlobeFlightsPage }),
+      },
+      {
         path: 'cytoscape-demo',
         lazy: async () => ({ Component: (await import('./routes/cytoscape-demo/CytoscapeDemoPage')).CytoscapeDemoPage }),
       },

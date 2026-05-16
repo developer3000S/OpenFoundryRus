@@ -90,3 +90,4 @@ infra/argocd/notifications/slack-secret.yaml
 
 # Local-built tool binaries at repo root (built by `go build ./tools/<name>`)
 /route-audit
+Opensky-credentials.json
