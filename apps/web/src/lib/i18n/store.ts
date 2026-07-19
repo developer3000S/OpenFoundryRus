@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 
 import { messages, type MessageKey } from './messages';
 
-export const SUPPORTED_LOCALES = ['en', 'es'] as const;
+export const SUPPORTED_LOCALES = ['en', 'es', 'ru'] as const;
 export type AppLocale = (typeof SUPPORTED_LOCALES)[number];
 
 export interface PlatformLocaleSettings {
@@ -10,7 +10,7 @@ export interface PlatformLocaleSettings {
   default_locale: AppLocale;
 }
 
-export const DEFAULT_LOCALE: AppLocale = 'en';
+export const DEFAULT_LOCALE: AppLocale = 'ru';
 export const LOCALE_STORAGE_KEY = 'of_locale';
 export const LOCALE_COOKIE_KEY = 'of_locale';
 export const PLATFORM_LOCALE_SETTINGS_KEY = 'of_platform_locale_settings';
@@ -172,14 +172,16 @@ export function createTranslator(locale: AppLocale) {
   return (key: MessageKey, params?: Record<string, string | number>) => translate(key, params, locale);
 }
 
+const LOCALE_LABEL_MAP: Record<AppLocale, MessageKey> = {
+	en: 'locale.english',
+	es: 'locale.spanish',
+	ru: 'locale.russian',
+};
+
 export function getLocaleLabel(locale: AppLocale, displayLocale: AppLocale = snapshot.currentLocale) {
-  return (displayLocale === 'es'
-    ? locale === 'en'
-      ? messages.es['locale.english']
-      : messages.es['locale.spanish']
-    : locale === 'en'
-      ? messages.en['locale.english']
-      : messages.en['locale.spanish']) as string;
+	const labelKey = LOCALE_LABEL_MAP[locale];
+	if (!labelKey) return locale;
+	return (messages[displayLocale][labelKey] ?? messages[DEFAULT_LOCALE][labelKey] ?? locale) as string;
 }
 
 export function useCurrentLocale(): AppLocale {
